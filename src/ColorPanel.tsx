@@ -1,11 +1,39 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import type React from "react"
+import { useState, useEffect } from "react"
 import { X, Palette, Plus } from "lucide-react"
 import { useTheme } from "./ThemeContext"
 
-// stub de tradução (só retorna a chave)
-const t = (key: string) => key
+const translations: { [key: string]: string } = {
+    "colorPanel.title": "Painel de Cores",
+    "colorPanel.colorsAndThemes": "Cores e Temas",
+    "colorPanel.unsavedChanges": "Você tem alterações não salvas!",
+    "colorPanel.createCustomTheme": "Criar Tema Customizado",
+    "colorPanel.primaryColor": "Cor Primária",
+    "colorPanel.secondaryColor": "Cor Secundária",
+    "colorPanel.accentColor": "Cor de Destaque",
+    "colorPanel.applyCustom": "Aplicar Tema",
+    "colorPanel.predefinedThemes": "Temas Predefinidos",
+    "colorPanel.clickToApply": "Clique para aplicar",
+    "colorPanel.glowSettings": "Configurações de Brilho",
+    "colorPanel.glowIntensity": "Intensidade",
+    "colorPanel.glowThickness": "Espessura",
+    "colorPanel.glowAnimation": "Animação de Brilho",
+    "colorPanel.fadeEffects": "Efeitos de Fade",
+    "colorPanel.fadeMode": "Modo de Fade",
+    "colorPanel.singular": "Singular",
+    "colorPanel.movement": "Movimento",
+    "colorPanel.primaryColorFade": "Cor Primária (Fade)",
+    "colorPanel.secondaryColorFade": "Cor Secundária (Fade)",
+    "colorPanel.movementSpeed": "Velocidade",
+    "colorPanel.saveSettings": "Salvar",
+    "colorPanel.resetSettings": "Resetar",
+    "colorPanel.chooseColorTheme": "Escolha um tema para o seu fluxo.",
+    "common.active": "Ativo",
+}
+
+const t = (key: string) => translations[key] || key
 
 // Custom Switch component
 const CustomSwitch = ({
