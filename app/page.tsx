@@ -75,7 +75,7 @@ export default function Home() {
                 className="inline-block px-3 py-1 text-xs font-medium bg-purple-900/30 text-purple-400 rounded-full hover:bg-purple-900/50 transition-colors"
                 onClick={() => router.push("/flow")}
               >
-                ASP.NET Developer
+                Frontend Developer
               </Button>
             </div>
 
@@ -83,99 +83,98 @@ export default function Home() {
             <div className="absolute -top-16 -left-12 transform -rotate-12 bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(168,85,247,0.3)]">
               <div className="text-purple-400 font-mono text-xs flex items-center">
                 <Layers className="h-3 w-3 mr-1" />
-                ASP.NET
+                React
               </div>
             </div>
 
             <div className="absolute -top-8 left-1/3 transform -translate-x-1/4 rotate-6 bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(6,182,212,0.3)]">
               <div className="text-cyan-400 font-mono text-xs flex items-center">
                 <Cpu className="h-3 w-3 mr-1" />
-                C#
+                TypeScript
               </div>
             </div>
 
             <div className="absolute -top-14 right-1/4 transform rotate-[-8deg] bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(168,85,247,0.3)]">
               <div className="text-purple-400 font-mono text-xs flex items-center">
                 <Database className="h-3 w-3 mr-1" />
-                EF Core
+                Next.js
               </div>
             </div>
 
             <div className="absolute -top-6 right-10 transform translate-x-1/4 rotate-[15deg] bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(6,182,212,0.3)]">
               <div className="text-cyan-400 font-mono text-xs flex items-center">
                 <Cloud className="h-3 w-3 mr-1" />
-                k8s
+                Tailwind
               </div>
             </div>
 
             <div className="absolute top-1/5 -right-16 transform rotate-[-5deg] bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(168,85,247,0.3)]">
               <div className="text-purple-400 font-mono text-xs flex items-center">
                 <Docker className="h-3 w-3 mr-1" />
-                Docker
+                shadcn/ui
               </div>
             </div>
 
             <div className="absolute top-2/5 right-[-20px] transform translate-x-1/4 rotate-[75deg] bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(6,182,212,0.3)]">
               <div className="text-cyan-400 font-mono text-xs flex items-center">
                 <MessageSquare className="h-3 w-3 mr-1" />
-                RabbitMQ
+                Lucide
               </div>
             </div>
 
             <div className="absolute top-3/4 -right-10 transform translate-x-1/8 rotate-[-65deg] bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(168,85,247,0.3)]">
               <div className="text-purple-400 font-mono text-xs flex items-center">
                 <Box className="h-3 w-3 mr-1" />
-                MinIO
+                HTML5
               </div>
             </div>
 
             <div className="absolute -bottom-12 right-10 transform translate-x-1/8 rotate-[10deg] bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(6,182,212,0.3)]">
               <div className="text-cyan-400 font-mono text-xs flex items-center">
                 <GitBranch className="h-3 w-3 mr-1" />
-                GitLab
+                CSS3
               </div>
             </div>
 
             <div className="absolute -bottom-8 right-1/3 transform translate-x-1/4 rotate-[-7deg] bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(168,85,247,0.3)]">
               <div className="text-purple-400 font-mono text-xs flex items-center">
                 <HardDrive className="h-3 w-3 mr-1" />
-                Postgres
+                LocalStorage
               </div>
             </div>
 
             <div className="absolute -bottom-16 left-1/3 transform -translate-x-1/4 rotate-[8deg] bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(6,182,212,0.3)]">
               <div className="text-cyan-400 font-mono text-xs flex items-center">
                 <Workflow className="h-3 w-3 mr-1" />
-                MVC
+                Drag&Drop
               </div>
             </div>
 
             <div className="absolute -bottom-10 left-10 transform -translate-x-1/8 rotate-[-12deg] bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(168,85,247,0.3)]">
               <div className="text-purple-400 font-mono text-xs flex items-center">
                 <Hexagon className="h-3 w-3 mr-1" />
-                SQL
+                JSON
               </div>
             </div>
 
             <div className="absolute top-3/5 -left-14 transform -translate-x-1/8 rotate-[85deg] bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(6,182,212,0.3)]">
               <div className="text-cyan-400 font-mono text-xs flex items-center">
                 <Layers className="h-3 w-3 mr-1" />
-                .NET
+                SVG
               </div>
             </div>
 
             <div className="absolute top-1/4 -left-12 transform -translate-x-1/8 rotate-[-10deg] bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(168,85,247,0.3)]">
               <div className="text-purple-400 font-mono text-xs flex items-center">
                 <Monitor className="h-3 w-3 mr-1" />
-                REST
+                Hooks
               </div>
             </div>
 
-            {/* New adaptive element */}
             <div className="absolute top-2/5 left-[-18px] transform -translate-x-1/8 rotate-[20deg] bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 hidden md:block backdrop-blur-sm shadow-[0_0_15px_rgba(6,182,212,0.3)]">
               <div className="text-cyan-400 font-mono text-xs flex items-center">
                 <Smartphone className="h-3 w-3 mr-1" />
-                Adaptive
+                Responsive
               </div>
             </div>
           </div>
@@ -185,37 +184,37 @@ export default function Home() {
             <div className="bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 backdrop-blur-sm">
               <div className="text-purple-400 font-mono text-xs flex items-center justify-center">
                 <Layers className="h-3 w-3 mr-1" />
-                ASP.NET
+                React
               </div>
             </div>
             <div className="bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 backdrop-blur-sm">
               <div className="text-cyan-400 font-mono text-xs flex items-center justify-center">
                 <Cpu className="h-3 w-3 mr-1" />
-                C#
+                TypeScript
               </div>
             </div>
             <div className="bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 backdrop-blur-sm">
               <div className="text-purple-400 font-mono text-xs flex items-center justify-center">
                 <Database className="h-3 w-3 mr-1" />
-                EF Core
+                Next.js
               </div>
             </div>
             <div className="bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 backdrop-blur-sm">
               <div className="text-cyan-400 font-mono text-xs flex items-center justify-center">
                 <Cloud className="h-3 w-3 mr-1" />
-                k8s
+                Tailwind
               </div>
             </div>
             <div className="bg-gradient-to-r from-purple-900/50 to-purple-700/50 border border-purple-500/30 rounded-lg p-2 backdrop-blur-sm">
               <div className="text-purple-400 font-mono text-xs flex items-center justify-center">
                 <Docker className="h-3 w-3 mr-1" />
-                Docker
+                shadcn/ui
               </div>
             </div>
             <div className="bg-gradient-to-r from-cyan-900/50 to-cyan-700/50 border border-cyan-500/30 rounded-lg p-2 backdrop-blur-sm">
               <div className="text-cyan-400 font-mono text-xs flex items-center justify-center">
                 <Smartphone className="h-3 w-3 mr-1" />
-                Adaptive
+                Responsive
               </div>
             </div>
           </div>
@@ -242,10 +241,10 @@ export default function Home() {
               Terms
             </Link>
             <Link
-              href="https://dotnet.microsoft.com/en-us/apps/aspnet"
+              href="https://react.dev"
               className="text-sm text-gray-500 hover:text-white transition-colors flex items-center gap-1 interactive-glow"
             >
-              ASP.NET <ExternalLink className="h-3 w-3" />
+              React <ExternalLink className="h-3 w-3" />
             </Link>
           </div>
         </div>
