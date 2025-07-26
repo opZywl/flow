@@ -1,10 +1,9 @@
 "use client"
 
 import type React from "react"
-
 import { memo, useState } from "react"
 import { Handle, Position, type NodeProps } from "reactflow"
-import { Send, X } from "lucide-react"
+import { X, ArrowRight } from "lucide-react"
 import type { NodeData } from "@/lib/types"
 
 interface SendMessageNodeProps extends NodeProps<NodeData> {
@@ -37,7 +36,7 @@ export const SendMessageNode = memo(({ data, isConnectable, onRemove, onUpdateDa
   }
 
   return (
-    <div className="px-4 py-3 shadow-md rounded-lg bg-black border-2 border-blue-500 min-w-[200px] max-w-[250px] relative group">
+    <div className="px-4 py-2 shadow-md rounded-md bg-indigo-500 border-2 border-indigo-600 text-white min-w-[120px] max-w-[250px] relative group">
       {/* Ícone de excluir */}
       <button
         onClick={handleRemove}
@@ -47,12 +46,8 @@ export const SendMessageNode = memo(({ data, isConnectable, onRemove, onUpdateDa
       </button>
 
       <div className="flex items-center mb-2">
-        <div className="rounded-full w-6 h-6 flex items-center justify-center bg-blue-100 text-blue-600">
-          <Send className="h-3 w-3" />
-        </div>
-        <div className="ml-2">
-          <div className="text-sm font-bold text-white">Enviar Mensagem</div>
-        </div>
+        <ArrowRight className="h-4 w-4 mr-2" />
+        <div className="text-sm font-medium">{data.label}</div>
       </div>
 
       {data.customId && (
@@ -85,15 +80,13 @@ export const SendMessageNode = memo(({ data, isConnectable, onRemove, onUpdateDa
         type="target"
         position={Position.Top}
         isConnectable={isConnectable}
-        className="w-3 h-3 bg-yellow-500"
-        style={{ background: "#eab308" }}
+        className="w-3 h-3 bg-indigo-600 border-2 border-white"
       />
       <Handle
         type="source"
         position={Position.Bottom}
         isConnectable={isConnectable}
-        className="w-3 h-3 bg-green-500"
-        style={{ background: "#22c55e" }}
+        className="w-3 h-3 bg-indigo-600 border-2 border-white"
       />
     </div>
   )

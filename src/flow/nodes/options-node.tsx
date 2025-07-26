@@ -1,18 +1,15 @@
 "use client"
 
 import type React from "react"
-
 import { memo, useState, useEffect } from "react"
-import { Handle, Position, type NodeProps } from "reactflow"
+import { Handle, Position } from "reactflow"
 import { List, Plus, Minus, X } from "lucide-react"
-import type { NodeData } from "@/lib/types"
 
-interface OptionsNodeProps extends NodeProps<NodeData> {
-  onRemove?: () => void
-  onUpdateData?: (data: any) => void
+interface OptionsNodeProps extends React.ComponentPropsWithoutRef<"div"> {
+  data: any
 }
 
-export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }: OptionsNodeProps) => {
+export const OptionsNode = memo(({ data }: OptionsNodeProps) => {
   const [options, setOptions] = useState(data.options || [{ text: "Opção 1", digit: "1" }])
   const [message, setMessage] = useState(data.message || "digita a mensagem")
 
@@ -26,22 +23,15 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
     }
   }, [data.options, data.message])
 
-  const handleRemove = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (onRemove) onRemove()
-  }
-
   const addOption = () => {
     const newOptions = [...options, { text: `Opção ${options.length + 1}`, digit: `${options.length + 1}` }]
     setOptions(newOptions)
-    if (onUpdateData) onUpdateData({ options: newOptions })
   }
 
   const removeOption = (index: number) => {
     if (options.length > 1) {
       const newOptions = options.filter((_, i) => i !== index)
       setOptions(newOptions)
-      if (onUpdateData) onUpdateData({ options: newOptions })
     }
   }
 
@@ -49,12 +39,10 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
     const newOptions = [...options]
     newOptions[index] = { ...newOptions[index], [field]: value }
     setOptions(newOptions)
-    if (onUpdateData) onUpdateData({ options: newOptions })
   }
 
   const updateMessage = (newMessage: string) => {
     setMessage(newMessage)
-    if (onUpdateData) onUpdateData({ message: newMessage })
   }
 
   // Calcular altura dinâmica baseada no número de opções
@@ -63,12 +51,12 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
 
   return (
     <div
-      className="px-4 py-3 shadow-md rounded-lg bg-black border-2 border-purple-500 min-w-[280px] max-w-[320px] relative group"
+      className="px-4 py-3 shadow-md rounded-lg bg-cyan-500 border-2 border-cyan-600 min-w-[280px] max-w-[320px] relative group text-white"
       style={{ minHeight: `${nodeHeight}px` }}
     >
       {/* Ícone de excluir */}
       <button
-        onClick={handleRemove}
+        onClick={(e) => e.stopPropagation()}
         className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
       >
         <X className="h-3 w-3" />
@@ -76,11 +64,11 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
 
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center">
-          <div className="rounded-full w-6 h-6 flex items-center justify-center bg-purple-100 text-purple-600">
+          <div className="rounded-full w-6 h-6 flex items-center justify-center bg-cyan-100 text-cyan-600">
             <List className="h-3 w-3" />
           </div>
           <div className="ml-2">
-            <div className="text-sm font-bold text-white">🚀 Opções - ID: {data.customId || "#1"}</div>
+            <div className="text-sm font-bold">{data.label}</div>
           </div>
         </div>
       </div>
@@ -142,13 +130,7 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
       </div>
 
       {/* PONTO AMARELO DE ENTRADA */}
-      <Handle
-        type="target"
-        position={Position.Top}
-        isConnectable={isConnectable}
-        className="w-3 h-3 bg-yellow-500"
-        style={{ background: "#eab308" }}
-      />
+      <Handle type="target" position={Position.Top} className="w-3 h-3 bg-cyan-600 border-2 border-white" />
 
       {/* Múltiplas saídas VERDES - layout melhorado para muitas opções */}
       {options.map((_, index) => {
@@ -172,8 +154,7 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
             position={Position.Right}
             id={`output-${index}`}
             style={{ top: topPosition }}
-            isConnectable={isConnectable}
-            className="w-3 h-3 bg-green-500"
+            className="w-3 h-3 bg-cyan-600 border-2 border-white"
           />
         )
       })}
