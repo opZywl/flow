@@ -10,36 +10,116 @@ import { useMobile } from "@/hooks/use-mobile"
 
 export function PopupPortfolio() {
   const isMobile = useMobile()
-  const [isDesktopMinimized, setIsDesktopMinimized] = React.useState(false)
+  const [isMinimized, setIsMinimized] = React.useState(false)
+  const [position, setPosition] = React.useState({ x: 20, y: 120 })
   const timerRef = React.useRef<NodeJS.Timeout | null>(null)
+  const moveTimerRef = React.useRef<NodeJS.Timeout | null>(null)
 
-  const clearTimer = () => {
+  const clearTimers = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
-  }
-
-  const handleDesktopToggleMinimize = () => {
-    clearTimer()
-    setIsDesktopMinimized((prev) => !prev)
-  }
-
-  React.useEffect(() => {
-    if (isDesktopMinimized && !isMobile) {
-      timerRef.current = setTimeout(() => {
-        if (!isMobile) {
-          setIsDesktopMinimized(false)
-        }
-      }, 3000)
-    } else {
-      clearTimer()
+    if (moveTimerRef.current) {
+      clearTimeout(moveTimerRef.current)
+      moveTimerRef.current = null
     }
-    return clearTimer
-  }, [isDesktopMinimized, isMobile])
+  }
+
+  // Função para mover apenas pelas bordas da tela
+  const moveToEdgePosition = () => {
+    if (typeof window !== "undefined") {
+      const margin = 20
+      const avatarSize = 60
+      const popupWidth = 320
+      const popupHeight = 200
+      const screenWidth = window.innerWidth
+      const screenHeight = window.innerHeight
+
+      // Define as 4 bordas possíveis considerando o tamanho do popup expandido
+      const edges = [
+        // Borda superior
+        {
+          x: Math.random() * (screenWidth - popupWidth - margin * 2) + margin,
+          y: margin,
+        },
+        // Borda direita
+        {
+          x: screenWidth - popupWidth - margin,
+          y: Math.random() * (screenHeight - popupHeight - margin * 2) + margin,
+        },
+        // Borda inferior
+        {
+          x: Math.random() * (screenWidth - popupWidth - margin * 2) + margin,
+          y: screenHeight - popupHeight - margin,
+        },
+        // Borda esquerda
+        {
+          x: margin,
+          y: Math.random() * (screenHeight - popupHeight - margin * 2) + margin,
+        },
+      ]
+
+      // Escolhe uma borda aleatória
+      const randomEdge = edges[Math.floor(Math.random() * edges.length)]
+      setPosition(randomEdge)
+    }
+  }
+
+  // Ciclo de minimizar/expandir a cada 5 segundos
+  React.useEffect(() => {
+    if (!isMobile) {
+      const toggleMinimized = () => {
+        setIsMinimized((prev) => !prev)
+
+        // Programa o próximo toggle
+        timerRef.current = setTimeout(toggleMinimized, 5000) // 5 segundos
+      }
+
+      // Inicia o ciclo após 5 segundos
+      timerRef.current = setTimeout(toggleMinimized, 5000)
+    }
+
+    return clearTimers
+  }, [isMobile])
+
+  // Movimento contínuo quando minimizado
+  React.useEffect(() => {
+    if (!isMobile && isMinimized) {
+      const continuousMove = () => {
+        moveToEdgePosition()
+        moveTimerRef.current = setTimeout(continuousMove, 4000) // Move a cada 4 segundos quando minimizado
+      }
+
+      moveTimerRef.current = setTimeout(continuousMove, 2000) // Primeiro movimento após 2 segundos
+    }
+
+    return () => {
+      if (moveTimerRef.current) {
+        clearTimeout(moveTimerRef.current)
+        moveTimerRef.current = null
+      }
+    }
+  }, [isMobile, isMinimized])
+
+  const handleToggleMinimized = () => {
+    clearTimers()
+    setIsMinimized((prev) => !prev)
+
+    // Reinicia o ciclo automático após interação manual
+    if (!isMobile) {
+      timerRef.current = setTimeout(() => {
+        const toggleMinimized = () => {
+          setIsMinimized((prev) => !prev)
+          timerRef.current = setTimeout(toggleMinimized, 5000)
+        }
+
+        timerRef.current = setTimeout(toggleMinimized, 5000)
+      }, 5000)
+    }
+  }
 
   if (isMobile === undefined) {
-    // Placeholder para evitar layout shift inicial
     return <div className="fixed top-4 right-4 h-10 w-10 opacity-0 pointer-events-none" />
   }
 
@@ -47,19 +127,23 @@ export function PopupPortfolio() {
     return null
   }
 
-  if (isDesktopMinimized) {
+  if (isMinimized) {
     return (
       <div
-        className="fixed top-4 right-4 z-50 cursor-pointer group" // Posição ajustada para o topo
-        onClick={handleDesktopToggleMinimize}
+        className="fixed z-50 cursor-pointer group transition-all duration-[2000ms] ease-in-out"
+        style={{
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+        }}
+        onClick={handleToggleMinimized}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") handleDesktopToggleMinimize()
+          if (e.key === "Enter" || e.key === " ") handleToggleMinimized()
         }}
         aria-label="Expandir popup do portfólio"
       >
-        <div className="relative">
+        <div className="relative animate-bounce">
           <Avatar className="h-12 w-12 border-2 border-purple-500/50 shadow-lg group-hover:scale-110 transition-all duration-300 bg-gradient-to-r from-purple-900/80 to-cyan-900/80 backdrop-blur-sm">
             <AvatarFallback className="bg-gradient-to-r from-purple-600 to-cyan-600 text-white font-bold text-lg">
               ¥$
@@ -75,12 +159,15 @@ export function PopupPortfolio() {
   return (
     <Card
       className={cn(
-        "fixed top-4 right-4 w-full max-w-[300px] sm:w-80 shadow-2xl z-50 backdrop-blur-md", // Posição ajustada para o topo
+        "fixed w-full max-w-[300px] sm:w-80 shadow-2xl z-50 backdrop-blur-md transition-all duration-[2000ms] ease-in-out",
         "bg-black/90 border border-gray-800/50",
-        "transition-all duration-300 ease-out",
         "before:absolute before:inset-0 before:rounded-lg before:bg-gradient-to-r before:from-purple-600/10 before:to-cyan-600/10 before:blur-sm",
       )}
-      style={{ transformOrigin: "top right" }} // Origem da transformação ajustada
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        transformOrigin: "top left",
+      }}
     >
       <div className="absolute -inset-1 bg-gradient-to-r from-purple-600/20 to-cyan-600/20 rounded-lg blur opacity-75"></div>
       <div className="relative">
@@ -96,7 +183,9 @@ export function PopupPortfolio() {
             </div>
             <div>
               <p className="text-sm font-semibold text-white flex items-center gap-2">
-                Lucas Lima
+                <span className="bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent animate-pulse">
+                  Lucas Lima
+                </span>
                 <Code2 className="h-3 w-3 text-purple-400" />
               </p>
               <p className="text-xs text-gray-400 font-mono">Full Stack Developer</p>
@@ -108,7 +197,7 @@ export function PopupPortfolio() {
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-gray-400 hover:text-white hover:bg-purple-900/30 transition-all duration-200"
-              onClick={handleDesktopToggleMinimize}
+              onClick={handleToggleMinimized}
               aria-label="Minimizar popup do portfólio"
             >
               <ChevronDown size={18} />

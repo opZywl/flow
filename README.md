@@ -150,7 +150,7 @@ Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para ma
 ⭐ Se este projeto te ajudou, considere dar uma estrela no repositório!
 \`\`\`
 
-```tsx file="src/flow/Flow.tsx"
+\`\`\`tsx file="src/flow/Flow.tsx"
 [v0-no-op-code-block-prefix]import React from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
