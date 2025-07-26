@@ -1,191 +1,188 @@
-<div align="center">
-  <p>
-    <img width="250" src="/placeholder.svg?height=250&width=250&text=Aura+Flow+Builder" alt="Aura Flow Builder Logo">
-  </p>
+# 🚀 Aura Flow Builder
 
-[Demo](#) | [GitHub](#) | [Documentação](#)
+Um construtor de workflows visual e interativo desenvolvido com React, Next.js e TypeScript. Permite criar, editar e executar fluxos de trabalho através de uma interface drag-and-drop intuitiva.
 
-Um construtor de fluxos de trabalho visual com chatbot integrado para automação de processos.
-</div>
+## ✨ Funcionalidades
 
-# Aura Flow Builder
-
-**Aura Flow Builder** é uma aplicação web desenvolvida para criar e executar fluxos de trabalho visuais de forma intuitiva. O projeto permite arrastar e soltar componentes para construir workflows personalizados, com um chatbot integrado que pode executar esses fluxos automaticamente.
-
----
+- 🎨 **Interface Visual**: Construa workflows arrastando e soltando componentes
+- 🔄 **Execução em Tempo Real**: Execute workflows e veja os resultados instantaneamente
+- 💾 **Persistência Local**: Salve seus workflows no navegador
+- 🎯 **Validação Inteligente**: Validação automática de conectividade entre nós
+- 🌙 **Tema Escuro/Claro**: Suporte completo a temas
+- 📱 **Responsivo**: Funciona perfeitamente em desktop e mobile
+- 🤖 **Bot Integrado**: Aura Flow Bot para interação e execução de workflows
 
 ## 🛠️ Tecnologias Utilizadas
 
-- **React 18** - Biblioteca para interfaces de usuário
-- **Next.js 15** - Framework React com App Router
-- **TypeScript** - Tipagem estática para JavaScript
-- **Tailwind CSS** - Framework CSS utilitário
-- **shadcn/ui** - Componentes de interface reutilizáveis
-- **Lucide React** - Biblioteca de ícones
+- **React 18** - Biblioteca principal
+- **Next.js 14** - Framework React com App Router
+- **TypeScript** - Tipagem estática
+- **Tailwind CSS** - Estilização utilitária
+- **shadcn/ui** - Componentes de interface
+- **Lucide React** - Ícones
 - **HTML5 Drag & Drop API** - Funcionalidade nativa de arrastar e soltar
-- **Local Storage** - Persistência de dados no navegador
+- **Local Storage** - Persistência de dados
+- **SVG** - Renderização de conexões visuais
 
----
-
-## 🚀 Funcionalidades
-
-### 🎨 **Construtor Visual de Fluxos**
-- Arrastar e soltar componentes do painel lateral
-- Conectar nós visualmente para criar fluxos
-- Editar propriedades dos nós em tempo real
-- Validação automática de conectividade
-
-### 🤖 **Chatbot Integrado (Aura)**
-- Execução automática de workflows
-- Interface de chat interativa
-- Processamento de diferentes tipos de nós
-- Histórico de conversas salvo localmente
-
-### 💾 **Gerenciamento de Workflows**
-- Salvar workflows no Local Storage
-- Carregar workflows salvos
-- Download de workflows em formato JSON
-- Importar workflows de arquivos
-
-### 🎯 **Tipos de Nós Disponíveis**
-- **Start Node** - Ponto de início do fluxo
-- **Input Node** - Captura entrada do usuário
-- **Output Node** - Exibe mensagens
-- **Process Node** - Processamento de dados
-- **Conditional Node** - Lógica condicional
-- **Options Node** - Múltiplas escolhas
-- **Send Message Node** - Envio de mensagens
-- **Code Node** - Execução de código personalizado
-- **Finalizar Node** - Finalização do fluxo
-
----
-
-## 🚀 Instalação e Execução
+## 🚀 Como Executar
 
 ### Pré-requisitos
 - Node.js 18+ 
-- npm, yarn ou pnpm
+- npm ou yarn
 
-### Passos para instalação
+### Instalação
 
-1. **Clone o repositório**
-   \`\`\`bash
-   git clone https://github.com/seu-usuario/aura-flow-builder
-   cd aura-flow-builder
-   \`\`\`
+1. Clone o repositório:
+\`\`\`bash
+git clone https://github.com/opZywl/workflow.git
+cd workflow
+\`\`\`
 
-2. **Instale as dependências**
-   \`\`\`bash
-   npm install
-   # ou
-   yarn install
-   # ou
-   pnpm install
-   \`\`\`
+2. Instale as dependências:
+\`\`\`bash
+npm install
+# ou
+yarn install
+\`\`\`
 
-3. **Execute o projeto em desenvolvimento**
-   \`\`\`bash
-   npm run dev
-   # ou
-   yarn dev
-   # ou
-   pnpm dev
-   \`\`\`
+3. Execute o projeto:
+\`\`\`bash
+npm run dev
+# ou
+yarn dev
+\`\`\`
 
-4. **Acesse a aplicação**
-   Abra [http://localhost:3000](http://localhost:3000) no seu navegador.
-
----
+4. Abra [http://localhost:3000](http://localhost:3000) no seu navegador
 
 ## 📁 Estrutura do Projeto
 
 \`\`\`
-├── app/                          # App Router do Next.js
-│   ├── components/              # Componentes da aplicação
-│   ├── flow/                    # Página do construtor de fluxos
-│   ├── globals.css              # Estilos globais
-│   ├── layout.tsx               # Layout principal
-│   └── page.tsx                 # Página inicial
-├── components/ui/               # Componentes shadcn/ui
-├── src/flow/                    # Lógica do construtor de fluxos
-│   ├── nodes/                   # Componentes dos nós
-│   ├── utils/                   # Utilitários e tipos
-│   ├── aura-flow-bot.tsx        # Chatbot integrado
-│   ├── node-library.tsx         # Biblioteca de componentes
-│   ├── workflow-builder.tsx     # Construtor principal
-│   └── ...
-├── lib/                         # Utilitários gerais
-├── hooks/                       # Hooks customizados
-└── public/                      # Arquivos estáticos
+├── app/                    # App Router do Next.js
+│   ├── components/         # Componentes da aplicação
+│   ├── flow/              # Página do construtor de workflows
+│   └── globals.css        # Estilos globais
+├── components/            # Componentes shadcn/ui
+├── src/                   # Código fonte principal
+│   └── flow/              # Lógica do workflow builder
+│       ├── nodes/         # Tipos de nós disponíveis
+│       ├── utils/         # Utilitários e tipos
+│       └── workflow-builder.tsx # Componente principal
+├── lib/                   # Utilitários e configurações
+└── public/               # Arquivos estáticos
 \`\`\`
 
----
+## 🎯 Tipos de Nós Disponíveis
 
-## 🎯 Como Usar
+- **Start Node**: Ponto de início do workflow
+- **Process Node**: Processamento de dados
+- **Input Node**: Entrada de dados do usuário
+- **Output Node**: Exibição de resultados
+- **Conditional Node**: Lógica condicional
+- **Code Node**: Execução de código personalizado
+- **Send Message Node**: Envio de mensagens
+- **Options Node**: Seleção de opções
+- **Finalizar Node**: Finalização do workflow
 
-### 1. **Criando um Workflow**
-- Acesse a página `/flow`
-- Arraste componentes da biblioteca lateral para o canvas
-- Conecte os nós clicando e arrastando entre eles
-- Configure as propriedades de cada nó no painel lateral
+## 🔧 Funcionalidades Principais
 
-### 2. **Executando um Workflow**
-- Clique no botão "Executar Workflow"
-- O chatbot Aura será aberto automaticamente
-- Interaja com o bot seguindo o fluxo criado
+### Construtor Visual
+- Arraste nós da biblioteca para o canvas
+- Conecte nós visualmente
+- Configure propriedades de cada nó
+- Validação automática de conectividade
 
-### 3. **Salvando e Carregando**
-- Use os botões "Salvar" e "Carregar" na barra superior
-- Workflows são salvos automaticamente no Local Storage
-- Exporte workflows como JSON para backup
+### Execução de Workflows
+- Execute workflows completos
+- Acompanhe o progresso em tempo real
+- Interaja com nós de entrada
+- Visualize resultados
 
----
+### Persistência
+- Salve workflows automaticamente
+- Carregue workflows salvos
+- Exporte workflows em JSON
+- Importe workflows existentes
 
-## 🔧 Desenvolvimento
+## 🤖 Aura Flow Bot
 
-### Scripts Disponíveis
+O bot integrado permite:
+- Executar workflows através de chat
+- Interagir com nós de entrada
+- Receber feedback em tempo real
+- Salvar conversas
 
-\`\`\`bash
-npm run dev          # Executa em modo desenvolvimento
-npm run build        # Gera build de produção
-npm run start        # Executa build de produção
-npm run lint         # Executa linting do código
-\`\`\`
+## 🎨 Personalização
 
-### Adicionando Novos Tipos de Nós
+O projeto utiliza Tailwind CSS e suporta:
+- Temas claro e escuro
+- Cores personalizáveis
+- Layout responsivo
+- Animações suaves
 
-1. Crie um novo componente em `src/flow/nodes/`
-2. Adicione o tipo no arquivo `src/flow/utils/types.ts`
-3. Registre o nó na biblioteca em `src/flow/node-library.tsx`
-4. Implemente a lógica de execução no chatbot
-
----
-
-## 🤝 Contribuição
+## 📝 Como Contribuir
 
 1. Faça um fork do projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/nova-feature`)
-3. Commit suas mudanças (`git commit -m 'Adiciona nova feature'`)
-4. Push para a branch (`git push origin feature/nova-feature`)
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
 5. Abra um Pull Request
-
----
 
 ## 📄 Licença
 
-Este projeto está licenciado sob a [MIT License](LICENSE).
+Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
 
----
+## 👨‍💻 Autor
+
+**Lucas Lima** - Full Stack Developer
+
+- GitHub: [@opZywl](https://github.com/opZywl)
+- Projeto: [Workflow Builder](https://github.com/opZywl/workflow)
 
 ## 🙏 Agradecimentos
 
-- [shadcn/ui](https://ui.shadcn.com/) pelos componentes de interface
-- [Lucide](https://lucide.dev/) pelos ícones
-- [Tailwind CSS](https://tailwindcss.com/) pelo framework CSS
-- [Next.js](https://nextjs.org/) pelo framework React
+- shadcn/ui pela biblioteca de componentes
+- Lucide pela biblioteca de ícones
+- Vercel pelo hosting e ferramentas de desenvolvimento
+- Comunidade React/Next.js pelo suporte
 
 ---
 
-<div align="center">
-  <p>Feito com ❤️ por Lucas Lima</p>
-</div>
+⭐ Se este projeto te ajudou, considere dar uma estrela no repositório!
+\`\`\`
+
+```tsx file="src/flow/Flow.tsx"
+[v0-no-op-code-block-prefix]import React from 'react';
+import { useRouter } from 'next/router';
+import Link from 'next/link';
+
+const Flow = () => {
+  const router = useRouter();
+
+  const handleGoBack = () => {
+    router.push('/'); // Changed from '/panel' to '/'
+  };
+
+  return (
+    <div>
+      <h1>Flow Component</h1>
+      <p>This is the flow component content.</p>
+
+      {/* Example using router.push */}
+      <button onClick={handleGoBack}>Voltar para a Página Inicial</button>
+
+      {/* Example using Link */}
+      <Link href="/">
+        <a>Voltar para a Página Inicial (Link)</a> {/* Changed from '/panel' to '/' */}
+      </Link>
+
+      {/* Another example using Link */}
+      <div>
+        <Link href="/" passHref>
+          <button>Voltar para a Página Inicial (Link Button)</button> {/* Changed from '/panel' to '/' */}
+        </Link>
+      </div>
+    </div>
+  );
+};
+
+export default Flow;

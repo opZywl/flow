@@ -17,10 +17,20 @@ import {
   Smartphone,
   Monitor,
   Database,
+  Play,
+  Sparkles,
 } from "lucide-react"
 import { MouseTrailEffect } from "./components/mouse-trail-effect"
 import { PopupPortfolio } from "./components/popup-portfolio"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 
 export default function Home() {
   const router = useRouter()
@@ -63,18 +73,44 @@ export default function Home() {
             <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-cyan-500 rounded-lg blur opacity-25"></div>
             <div className="relative bg-black border border-gray-800 rounded-lg p-8 md:p-12 flex flex-col items-center justify-center text-center">
               {/* Conteúdo centralizado */}
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tighter mb-4">
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tighter mb-6">
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
-                  Olá, vamos iniciar o fluxo?
+                  Pronto para criar seu workflow?
                 </span>
               </h1>
-              <Button
-                variant="ghost"
-                className="inline-block px-3 py-1 text-xs font-medium bg-purple-900/30 text-purple-400 rounded-full hover:bg-purple-900/50 transition-colors"
-                onClick={() => router.push("/flow")}
-              >
-                Construtor de Workflows
-              </Button>
+
+              {/* Botão principal com animações */}
+              <div className="relative group">
+                {/* Glow effect animado */}
+                <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 rounded-full blur opacity-75 group-hover:opacity-100 animate-pulse transition duration-1000 group-hover:duration-200"></div>
+
+                {/* Botão principal */}
+                <Button
+                  onClick={() => router.push("/flow")}
+                  className="relative px-8 py-4 bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white font-bold rounded-full text-lg shadow-2xl transform transition-all duration-300 hover:scale-105 hover:shadow-purple-500/25 border-0 group-hover:animate-none"
+                >
+                  <div className="flex items-center gap-3">
+                    <Sparkles className="h-5 w-5 animate-spin group-hover:animate-pulse" />
+                    <span className="relative">
+                      Começar Agora
+                      <div className="absolute -bottom-1 left-0 w-0 h-0.5 bg-white/50 group-hover:w-full transition-all duration-300"></div>
+                    </span>
+                    <Play className="h-5 w-5 transform group-hover:translate-x-1 transition-transform duration-300" />
+                  </div>
+
+                  {/* Partículas flutuantes */}
+                  <div className="absolute inset-0 overflow-hidden rounded-full">
+                    <div className="absolute top-2 left-4 w-1 h-1 bg-white/30 rounded-full animate-ping"></div>
+                    <div className="absolute bottom-3 right-6 w-1 h-1 bg-white/30 rounded-full animate-ping animation-delay-300"></div>
+                    <div className="absolute top-4 right-3 w-1 h-1 bg-white/30 rounded-full animate-ping animation-delay-700"></div>
+                  </div>
+                </Button>
+
+                {/* Texto de call-to-action */}
+                <p className="mt-4 text-sm text-gray-400 group-hover:text-gray-300 transition-colors duration-300 animate-bounce">
+                  👆 Clique aqui para começar sua jornada
+                </p>
+              </div>
             </div>
 
             {/* Geometrically irregular floating tech elements */}
@@ -227,22 +263,75 @@ export default function Home() {
           >
             <span className="text-gray-500">© {new Date().getFullYear()} </span>
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400 font-semibold group-hover:from-purple-300 group-hover:to-cyan-300 transition-all duration-300">
-              Aura Flow Builder
+              Lucas Lima
             </span>
             <span className="text-gray-500">. Todos os direitos reservados.</span>
           </div>
           <div className="flex space-x-4 mt-4 md:mt-0">
-            <Link href="#" className="text-sm text-gray-500 hover:text-white transition-colors interactive-glow">
-              Privacidade
-            </Link>
-            <Link href="#" className="text-sm text-gray-500 hover:text-white transition-colors interactive-glow">
-              Termos
-            </Link>
+            <Dialog>
+              <DialogTrigger asChild>
+                <button className="text-sm text-gray-500 hover:text-white transition-colors interactive-glow">
+                  Termos
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[600px] bg-black/95 border border-gray-800/50 backdrop-blur-md text-white max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
+                    Termos e Condições - Licença MIT
+                  </DialogTitle>
+                  <DialogDescription className="text-gray-400">
+                    Leia atentamente os termos de uso deste projeto.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4 text-sm text-gray-300 leading-relaxed">
+                  <p>
+                    Este projeto está sujeito à Licença MIT. Isso se aplica apenas ao código fonte localizado
+                    diretamente neste repositório limpo. Durante o processo de desenvolvimento e compilação, código
+                    fonte adicional pode ser usado para o qual não obtivemos direitos. Tal código não é coberto pela
+                    licença MIT.
+                  </p>
+                  <p>
+                    Para aqueles que não estão familiarizados com a licença, aqui está um resumo de seus pontos
+                    principais. Isso não é de forma alguma aconselhamento jurídico nem juridicamente vinculativo.
+                  </p>
+                  <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                    <h4 className="font-semibold text-purple-400 mb-2">Você tem permissão para:</h4>
+                    <ul className="list-disc list-inside space-y-1 text-gray-300">
+                      <li>
+                        <strong>usar</strong>
+                      </li>
+                      <li>
+                        <strong>compartilhar</strong>
+                      </li>
+                      <li>
+                        <strong>modificar</strong>
+                      </li>
+                    </ul>
+                    <p className="mt-2">
+                      este projeto inteiramente ou parcialmente, gratuitamente e até comercialmente.
+                    </p>
+                  </div>
+                  <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                    <h4 className="font-semibold text-cyan-400 mb-2">No entanto, considere o seguinte:</h4>
+                    <ul className="list-disc list-inside space-y-2 text-gray-300">
+                      <li>
+                        Você deve incluir a licença e o aviso de direitos autorais em todas as cópias ou partes
+                        substanciais do software.
+                      </li>
+                      <li>O software é fornecido "como está", sem garantia de qualquer tipo.</li>
+                    </ul>
+                  </div>
+                  <p className="text-center font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
+                    Faça o acima e compartilhe seu código fonte com todos; assim como nós fazemos.
+                  </p>
+                </div>
+              </DialogContent>
+            </Dialog>
             <Link
-              href="https://react.dev"
+              href="https://github.com/opZywl/workflow"
               className="text-sm text-gray-500 hover:text-white transition-colors flex items-center gap-1 interactive-glow"
             >
-              React <ExternalLink className="h-3 w-3" />
+              Código Fonte <ExternalLink className="h-3 w-3" />
             </Link>
           </div>
         </div>

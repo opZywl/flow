@@ -99,7 +99,7 @@ export function PopupPortfolio() {
                 Lucas Lima
                 <Code2 className="h-3 w-3 text-purple-400" />
               </p>
-              <p className="text-xs text-gray-400 font-mono">ASP.NET Developer</p>
+              <p className="text-xs text-gray-400 font-mono">Full Stack Developer</p>
             </div>
           </div>
           <div className="relative flex items-center">
