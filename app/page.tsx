@@ -73,14 +73,14 @@ export default function Home() {
             <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-cyan-500 rounded-lg blur opacity-25"></div>
             <div className="relative bg-black border border-gray-800 rounded-lg p-8 md:p-12 flex flex-col items-center justify-center text-center">
               {/* Conteúdo centralizado */}
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tighter mb-6">
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tighter mb-8">
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
                   Pronto para criar seu workflow?
                 </span>
               </h1>
 
-              {/* Botão principal com animações */}
-              <div className="relative group">
+              {/* Botão principal com animações - CENTRALIZADO */}
+              <div className="relative group flex flex-col items-center">
                 {/* Glow effect animado */}
                 <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 rounded-full blur opacity-75 group-hover:opacity-100 animate-pulse transition duration-1000 group-hover:duration-200"></div>
 
@@ -105,11 +105,6 @@ export default function Home() {
                     <div className="absolute top-4 right-3 w-1 h-1 bg-white/30 rounded-full animate-ping animation-delay-700"></div>
                   </div>
                 </Button>
-
-                {/* Texto de call-to-action */}
-                <p className="mt-4 text-sm text-gray-400 group-hover:text-gray-300 transition-colors duration-300 animate-bounce">
-                  👆 Clique aqui para começar sua jornada
-                </p>
               </div>
             </div>
 
@@ -257,20 +252,21 @@ export default function Home() {
 
       <footer className="container mx-auto p-6 border-t border-gray-800">
         <div className="flex flex-col md:flex-row justify-between items-center">
-          <div
-            className="text-sm cursor-pointer group transition-all duration-300"
-            onClick={() => window.open("#", "_blank")}
-          >
-            <span className="text-gray-500">© {new Date().getFullYear()} </span>
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400 font-semibold group-hover:from-purple-300 group-hover:to-cyan-300 transition-all duration-300">
+          <div className="text-sm cursor-pointer group transition-all duration-300">
+            <span className="text-gray-500 hover:text-gray-300 transition-colors duration-300">
+              © {new Date().getFullYear()}{" "}
+            </span>
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400 font-semibold animate-gradient-shift hover:from-purple-300 hover:to-cyan-300 transition-all duration-300">
               Lucas Lima
             </span>
-            <span className="text-gray-500">. Todos os direitos reservados.</span>
+            <span className="text-gray-500 hover:text-gray-300 transition-colors duration-300">
+              . Todos os direitos reservados.
+            </span>
           </div>
           <div className="flex space-x-4 mt-4 md:mt-0">
             <Dialog>
               <DialogTrigger asChild>
-                <button className="text-sm text-gray-500 hover:text-white transition-colors interactive-glow">
+                <button className="text-sm text-gray-500 hover:text-white transition-all duration-300 hover:shadow-[0_0_8px_rgba(168,85,247,0.6)] hover:text-shadow-glow">
                   Termos
                 </button>
               </DialogTrigger>
@@ -329,7 +325,7 @@ export default function Home() {
             </Dialog>
             <Link
               href="https://github.com/opZywl/workflow"
-              className="text-sm text-gray-500 hover:text-white transition-colors flex items-center gap-1 interactive-glow"
+              className="text-sm text-gray-500 hover:text-white transition-all duration-300 flex items-center gap-1 hover:shadow-[0_0_8px_rgba(6,182,212,0.6)] hover:text-shadow-glow"
             >
               Código Fonte <ExternalLink className="h-3 w-3" />
             </Link>
