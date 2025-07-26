@@ -1,7 +1,11 @@
 "use client"
-import { type EdgeProps, getBezierPath } from "reactflow"
 
-export function CustomEdge({
+import type React from "react"
+
+import { useCallback } from "react"
+import { BaseEdge, EdgeLabelRenderer, type EdgeProps, getBezierPath, useReactFlow } from "reactflow"
+
+export default function CustomEdge({
   id,
   sourceX,
   sourceY,
@@ -9,10 +13,11 @@ export function CustomEdge({
   targetY,
   sourcePosition,
   targetPosition,
+  data,
   style = {},
   markerEnd,
 }: EdgeProps) {
-  const [edgePath] = getBezierPath({
+  const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -21,15 +26,39 @@ export function CustomEdge({
     targetPosition,
   })
 
+  const { setEdges } = useReactFlow()
+
+  const onEdgeClick = useCallback(
+    (evt: React.MouseEvent<SVGGElement, MouseEvent>, id: string) => {
+      evt.stopPropagation()
+      setEdges((edges) => edges.filter((edge) => edge.id !== id))
+    },
+    [setEdges],
+  )
+
   return (
     <>
-      <path
-        id={id}
-        style={style}
-        className="react-flow__edge-path stroke-gray-400 stroke-2"
-        d={edgePath}
-        markerEnd={markerEnd}
-      />
+      <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
+      <EdgeLabelRenderer>
+        {data?.label && (
+          <div
+            style={{
+              position: "absolute",
+              transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+              background: "white",
+              padding: "4px 8px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 500,
+              pointerEvents: "all",
+              border: "1px solid #e2e8f0",
+            }}
+            className="nodrag nopan"
+          >
+            {data.label}
+          </div>
+        )}
+      </EdgeLabelRenderer>
     </>
   )
 }

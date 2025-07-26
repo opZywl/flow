@@ -35,7 +35,6 @@ import { useTheme } from "../ThemeContext"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { BotIcon } from "lucide-react"
-import { Play, Save, Download, Upload, Settings } from "lucide-react"
 
 const nodeTypes: NodeTypes = {
   sendMessage: (props) => (
@@ -341,7 +340,6 @@ function WorkflowBuilderInner({
   const [errorMessage, setErrorMessage] = useState("")
   const [disconnectedNodes, setDisconnectedNodes] = useState<string[]>([])
   const { zoomIn, zoomOut, fitView, setCenter } = useReactFlow()
-  const [isExecuting, setIsExecuting] = useState(false)
 
   // Garantir persistência do localStorage
   const WORKFLOW_KEY = "workflow"
@@ -822,12 +820,7 @@ function WorkflowBuilderInner({
     [setNodes, setEdges, fitView],
   )
 
-  const executeWorkflow = useCallback(async () => {
-    setIsExecuting(true)
-    // Simulate workflow execution
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    setIsExecuting(false)
-
+  const executeWorkflow = useCallback(() => {
     if (nodes.length <= 1) {
       toast({
         title: "Nada para executar",
@@ -1070,54 +1063,6 @@ function WorkflowBuilderInner({
       )}
 
       <div className="flex-1 flex flex-col">
-        <div className="flex gap-2 bg-gray-800 p-2 rounded-lg border border-gray-700">
-          <Button
-            onClick={executeWorkflow}
-            disabled={isExecuting}
-            size="sm"
-            className="bg-green-600 hover:bg-green-700"
-          >
-            <Play className="h-4 w-4 mr-1" />
-            {isExecuting ? "Running..." : "Run"}
-          </Button>
-
-          <Button
-            onClick={saveWorkflow}
-            size="sm"
-            variant="outline"
-            className="border-gray-600 text-gray-300 hover:bg-gray-700 bg-transparent"
-          >
-            <Save className="h-4 w-4 mr-1" />
-            Save
-          </Button>
-
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-gray-600 text-gray-300 hover:bg-gray-700 bg-transparent"
-          >
-            <Download className="h-4 w-4 mr-1" />
-            Export
-          </Button>
-
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-gray-600 text-gray-300 hover:bg-gray-700 bg-transparent"
-          >
-            <Upload className="h-4 w-4 mr-1" />
-            Import
-          </Button>
-
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-gray-600 text-gray-300 hover:bg-gray-700 bg-transparent"
-          >
-            <Settings className="h-4 w-4 mr-1" />
-            Settings
-          </Button>
-        </div>
         <div className="flex-1" ref={reactFlowWrapper}>
           <ReactFlow
             nodes={nodes}
