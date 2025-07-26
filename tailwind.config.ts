@@ -7,9 +7,9 @@ const config: Config = {
     "./src/**/*.{ts,tsx,js,jsx,html}",
     "./public/index.html",
     "*.{js,ts,jsx,tsx,mdx}",
-    "./pages/**/*.{ts,tsx}",
-    "./components/**/*.{ts,tsx}",
-    "./app/**/*.{ts,tsx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   safelist: [
     "text-balance",
