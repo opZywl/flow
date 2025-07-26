@@ -1,61 +1,85 @@
-# Futuristic Minimalist Landing Page
+<div align="center">
+  <p>
+    <img width="250" src="https://via.placeholder.com/250?text=Aura+Chat+Bot" alt="Aura Chat Bot Logo">
+  </p>
 
-This is a futuristic and minimalist landing page template, designed with a sleek dark theme and interactive elements.
+[Site](#) | [GitHub](#) | [Documentação](#)
 
-## Features
+Um chatbot com CRM integrado para otimizar o atendimento ao cliente.
+</div>
 
-*   **Mouse Trail Effect**: A luminous trail follows the user's mouse movement, adding a dynamic visual flair.
-*   **Interactive Tech Elements**: Geometrically irregular floating elements representing various technologies (ASP.NET, C#, EF Core, k8s, Docker, RabbitMQ, MinIO, GitLab, Postgres, MVC, SQL, .NET, REST, Adaptive) with subtle glow effects.
-*   **Futuristic Popup**: A discreet popup in the corner, designed to appear on desktop, minimize automatically, and link to a portfolio.
-*   **Responsive Design**: Adapts to different screen sizes, with mobile-specific layouts for tech elements.
-*   **Customizable Content**: Easily update text, links, and tech stack elements.
-*   **ASP.NET Developer Focus**: Tailored for an ASP.NET Developer, featuring relevant technologies and a personalized greeting.
+# Aura Chat Bot
 
-## Technologies Used
+**TCC - Aura Chat Bot** é um projeto desenvolvido para aprimorar a **Gestão do Atendimento ao Cliente** em pequenas empresas de serviços. Com o crescimento das consultas online e por telefone, o sistema oferece respostas automáticas e personalizadas, centraliza informações e identifica oportunidades de vendas.
 
-*   Next.js (App Router)
-*   React
-*   Tailwind CSS
-*   shadcn/ui
-*   Lucide React Icons
+---
 
-## Getting Started
+## 🛠️ Pré-requisitos
 
-To run this project locally, follow these steps:
+- Python 3.9+
+- Node.js 18+ com npm ou pnpm
+- Git
 
-1.  **Clone the repository:**
-    \`\`\`bash
-    git clone <repository-url>
-    cd futuristic-minimalist-landing
-    \`\`\`
-2.  **Install dependencies:**
-    \`\`\`bash
-    npm install
-    # or
-    yarn install
-    # or
-    pnpm install
-    \`\`\`
-3.  **Run the development server:**
-    \`\`\`bash
-    npm run dev
-    # or
-    yarn dev
-    # or
-    pnpm dev
-    \`\`\`
+---
 
-    Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🚀 Instalação
 
-## Customization
+1. **Clone o repositório**
+   \`\`\`bash
+   git clone https://github.com/unaspht/aura
+   cd aura
+   \`\`\`
 
-*   **Text Content**: Modify the `app/page.tsx` file to change the hero text, footer text, and other content.
-*   **Tech Elements**: Add, remove, or change the icons and text for the floating tech elements in `app/page.tsx`.
-*   **Colors and Styling**: Adjust `tailwind.config.ts` and `app/globals.css` for global style changes.
-*   **Popup Portfolio**: Customize the `app/components/popup-portfolio.tsx` component for the popup's content and behavior.
+2. **Configure o backend (Python)**
+   \`\`\`bash
+   # Crie e ative um ambiente virtual
+   python -m venv .venv
+   source .venv/bin/activate     # macOS/Linux
+   .venv\Scripts\activate      # Windows
 
-## Deployment
+   # Instale as dependências
+   pip install -r requirements.txt
+   \`\`\`
 
-This project can be easily deployed to Vercel.
+3. **Configure o frontend (Next.js)**
+   \`\`\`bash
+   npm install --legacy-peer-deps   # ou pnpm install
+   \`\`\`
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-tailwind)
+4. **Defina as variáveis de ambiente**
+   \`\`\`bash
+   cp .env.example .env.local
+   # edite .env.local conforme necessário
+   \`\`\`
+
+---
+
+## ▶️ Como executar
+
+1. **Inicie o backend**
+   \`\`\`bash
+   python -m src.aura.app
+   \`\`\`
+   O backend ficará acessível em `http://localhost:3001`.
+
+2. **Inicie o frontend**
+   \`\`\`bash
+   npm run dev
+   \`\`\`
+   A aplicação estará disponível em `http://localhost:3000`.
+
+3. **Build de produção (opcional)**
+   \`\`\`bash
+   npm run build && npm start
+   \`\`\`
+
+4. **Exposição externa (ngrok opcional)**
+   \`\`\`bash
+   ngrok http 3000
+   \`\`\`
+
+---
+
+## 📜 Licença
+
+Este projeto está licenciado sob a [MIT License](LICENSE).
