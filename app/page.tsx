@@ -40,23 +40,22 @@ export default function Home() {
 
           {/* Decorative code lines */}
           <div className="absolute left-0 top-1/4 text-gray-800 font-mono text-xs md:text-sm opacity-20 hidden md:block">
-            <div>{"namespace Lucas.Web.Controllers {"}</div>
-            <div className="ml-4">{"public class HomeController : Controller {"}</div>
-            <div className="ml-8">{"public IActionResult Index() {"}</div>
-            <div className="ml-12">{"return View();"}</div>
-            <div className="ml-8">{"}"}</div>
-            <div className="ml-4">{"}"}</div>
+            <div>{"const workflow = {"}</div>
+            <div className="ml-4">{"nodes: ["}</div>
+            <div className="ml-8">{"{ id: 'start', type: 'start' },"}</div>
+            <div className="ml-8">{"{ id: 'process', type: 'process' }"}</div>
+            <div className="ml-4">{"],"}</div>
+            <div className="ml-4">{"edges: [...]"}</div>
             <div>{"}"}</div>
           </div>
 
           <div className="absolute right-0 bottom-1/4 text-gray-800 font-mono text-xs md:text-sm opacity-20 hidden md:block">
-            <div>{"@model Lucas.Web.Models.ProfileModel"}</div>
-            <div>{"@{"}</div>
-            <div className="ml-4">{'ViewData["Title"] = "ASP.NET Developer";'}</div>
+            <div>{"interface FlowNode {"}</div>
+            <div className="ml-4">{"id: string"}</div>
+            <div className="ml-4">{"type: NodeType"}</div>
+            <div className="ml-4">{"position: { x: number, y: number }"}</div>
+            <div className="ml-4">{"data: any"}</div>
             <div>{"}"}</div>
-            <div>{'<div class="profile">'}</div>
-            <div className="ml-4">{"<h1>@Model.Name</h1>"}</div>
-            <div>{"</div>"}</div>
           </div>
 
           {/* Central container */}
@@ -65,9 +64,8 @@ export default function Home() {
             <div className="relative bg-black border border-gray-800 rounded-lg p-8 md:p-12 flex flex-col items-center justify-center text-center">
               {/* Conteúdo centralizado */}
               <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tighter mb-4">
-                Hi, I'm{" "}
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
-                  Lucas Lima!
+                  Olá, vamos iniciar o fluxo?
                 </span>
               </h1>
               <Button
@@ -75,7 +73,7 @@ export default function Home() {
                 className="inline-block px-3 py-1 text-xs font-medium bg-purple-900/30 text-purple-400 rounded-full hover:bg-purple-900/50 transition-colors"
                 onClick={() => router.push("/flow")}
               >
-                Frontend Developer
+                Construtor de Workflows
               </Button>
             </div>
 
@@ -229,16 +227,16 @@ export default function Home() {
           >
             <span className="text-gray-500">© {new Date().getFullYear()} </span>
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400 font-semibold group-hover:from-purple-300 group-hover:to-cyan-300 transition-all duration-300">
-              Lucas Lima
+              Aura Flow Builder
             </span>
-            <span className="text-gray-500">. All rights reserved.</span>
+            <span className="text-gray-500">. Todos os direitos reservados.</span>
           </div>
           <div className="flex space-x-4 mt-4 md:mt-0">
             <Link href="#" className="text-sm text-gray-500 hover:text-white transition-colors interactive-glow">
-              Privacy
+              Privacidade
             </Link>
             <Link href="#" className="text-sm text-gray-500 hover:text-white transition-colors interactive-glow">
-              Terms
+              Termos
             </Link>
             <Link
               href="https://react.dev"
