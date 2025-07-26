@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { ThemeProvider, useTheme } from "../ThemeContext"
 import ColorPanel from "../ColorPanel"
 import WorkflowBuilder from "./workflow-builder"
@@ -28,6 +28,10 @@ import {
     FiSend,
     FiCheckCircle,
     FiXCircle,
+    FiImage,
+    FiSettings,
+    FiCamera,
+    FiFolder,
 } from "react-icons/fi"
 import { BotIcon } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -35,6 +39,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Avatar } from "@/components/ui/avatar"
 import { motion, AnimatePresence } from "framer-motion"
+import html2canvas from "html2canvas"
 
 // Componente da barra lateral elegante para o flow
 const FlowElegantSidebar = ({ currentGradient, theme }: { currentGradient: any; theme: string }) => {
@@ -657,6 +662,114 @@ const AuraFlowBot = ({
     )
 }
 
+// Componente do Menu de Imagem SUPER BONITO! ✨
+const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, theme }: any) => {
+    const isDark = theme === "dark"
+
+    if (!isOpen) return null
+
+    return (
+        <AnimatePresence>
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50"
+                onClick={onClose}
+            >
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className={`absolute right-4 top-16 w-56 rounded-xl border shadow-2xl backdrop-blur-sm ${
+                        isDark ? "bg-gray-900/95 border-gray-700/50" : "bg-white/95 border-gray-200/50"
+                    }`}
+                    style={{
+                        boxShadow: isDark
+                            ? "0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.05)"
+                            : "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.05)",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {/* Header do menu */}
+                    <div className={`px-4 py-3 border-b ${isDark ? "border-gray-700/50" : "border-gray-200/50"}`}>
+                        <h3 className={`text-sm font-semibold ${isDark ? "text-gray-200" : "text-gray-800"}`}>
+                            🎨 Opções de Imagem
+                        </h3>
+                    </div>
+
+                    {/* Opções do menu */}
+                    <div className="p-2">
+                        <motion.button
+                            whileHover={{ scale: 1.02, x: 4 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={onChangeBackground}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm rounded-lg transition-all duration-200 group ${
+                                isDark
+                                    ? "hover:bg-gradient-to-r hover:from-blue-900/30 hover:to-purple-900/30 text-gray-200 hover:text-white"
+                                    : "hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50 text-gray-700 hover:text-gray-900"
+                            }`}
+                            style={{
+                                boxShadow: isDark ? "0 0 0 1px rgba(255, 255, 255, 0.05)" : "0 0 0 1px rgba(0, 0, 0, 0.05)",
+                            }}
+                        >
+                            <div
+                                className={`p-2 rounded-lg transition-all duration-200 ${
+                                    isDark ? "bg-blue-500/20 group-hover:bg-blue-500/30" : "bg-blue-100 group-hover:bg-blue-200"
+                                }`}
+                            >
+                                <FiFolder className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />
+                            </div>
+                            <div className="flex-1 text-left">
+                                <div className="font-medium">Alterar Background</div>
+                                <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                                    Escolher nova imagem de fundo
+                                </div>
+                            </div>
+                        </motion.button>
+
+                        <motion.button
+                            whileHover={{ scale: 1.02, x: 4 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={onSaveImage}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-sm rounded-lg transition-all duration-200 group mt-1 ${
+                                isDark
+                                    ? "hover:bg-gradient-to-r hover:from-green-900/30 hover:to-emerald-900/30 text-gray-200 hover:text-white"
+                                    : "hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 text-gray-700 hover:text-gray-900"
+                            }`}
+                            style={{
+                                boxShadow: isDark ? "0 0 0 1px rgba(255, 255, 255, 0.05)" : "0 0 0 1px rgba(0, 0, 0, 0.05)",
+                            }}
+                        >
+                            <div
+                                className={`p-2 rounded-lg transition-all duration-200 ${
+                                    isDark ? "bg-green-500/20 group-hover:bg-green-500/30" : "bg-green-100 group-hover:bg-green-200"
+                                }`}
+                            >
+                                <FiCamera className={`h-4 w-4 ${isDark ? "text-green-400" : "text-green-600"}`} />
+                            </div>
+                            <div className="flex-1 text-left">
+                                <div className="font-medium">Salvar Imagem</div>
+                                <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                                    Capturar screenshot do fluxo
+                                </div>
+                            </div>
+                        </motion.button>
+                    </div>
+
+                    {/* Footer do menu */}
+                    <div className={`px-4 py-2 border-t ${isDark ? "border-gray-700/50" : "border-gray-200/50"}`}>
+                        <p className={`text-xs text-center ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                            ✨ Clique fora para fechar
+                        </p>
+                    </div>
+                </motion.div>
+            </motion.div>
+        </AnimatePresence>
+    )
+}
+
 // Flow Header
 const FlowHeader = ({
                         onZoomIn,
@@ -670,15 +783,18 @@ const FlowHeader = ({
                         onDownload,
                         onToggleSidebar,
                         onOpenBot,
+                        onOpenColorPanel,
                         startPosition,
                         mousePosition,
                         componentCount,
+                        workflowContainerRef, // Recebe a ref para o container do workflow
                     }: any) => {
     const router = useRouter()
     const { theme, toggleTheme } = useTheme()
     const [searchValue, setSearchValue] = useState("")
     const [showResetDialog, setShowResetDialog] = useState(false)
     const [showExecuteDialog, setShowExecuteDialog] = useState(false)
+    const [showImageMenu, setShowImageMenu] = useState(false)
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault()
@@ -702,6 +818,71 @@ const FlowHeader = ({
         if (onExecute) {
             onExecute()
             setShowExecuteDialog(true)
+        }
+    }
+
+    const handleChangeBackground = () => {
+        const input = document.createElement("input")
+        input.type = "file"
+        input.accept = "image/*"
+        input.onchange = (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0]
+            if (file) {
+                const reader = new FileReader()
+                reader.onload = (e) => {
+                    const imageUrl = e.target?.result as string
+                    // Aplica a imagem de fundo via CSS variable
+                    document.documentElement.style.setProperty("--flow-background-image", `url(${imageUrl})`)
+                    // Salva no localStorage para persistência
+                    localStorage.setItem("flow-background-image", imageUrl)
+                }
+                reader.readAsDataURL(file)
+            }
+        }
+        input.click()
+        setShowImageMenu(false)
+    }
+
+    const handleSaveImage = async () => {
+        setShowImageMenu(false)
+        const flowElement = workflowContainerRef.current
+        const headerElement = document.querySelector("header")
+        const sidebarElement = document.querySelector(".node-library-sidebar") // Adicione uma classe à sua sidebar
+
+        if (!flowElement) {
+            console.error("Elemento do fluxo não encontrado para captura.")
+            return
+        }
+
+        // Adiciona classes para esconder a UI
+        headerElement?.classList.add("hiding-for-screenshot")
+        sidebarElement?.classList.add("hiding-for-screenshot")
+
+        try {
+            // Pequeno delay para garantir que a UI foi escondida
+            await new Promise((resolve) => setTimeout(resolve, 100))
+
+            const canvas = await html2canvas(flowElement, {
+                backgroundColor: null, // Fundo transparente para usar o do CSS
+                scale: 2,
+                useCORS: true,
+                allowTaint: true,
+                logging: false,
+                width: flowElement.scrollWidth,
+                height: flowElement.scrollHeight,
+            })
+
+            const link = document.createElement("a")
+            link.download = `fluxo-aura-${new Date().toISOString().slice(0, 10)}.png`
+            link.href = canvas.toDataURL("image/png", 1.0)
+            link.click()
+        } catch (error) {
+            console.error("Erro ao salvar imagem:", error)
+            alert("Ocorreu um erro ao salvar a imagem. Tente novamente.")
+        } finally {
+            // Remove as classes para mostrar a UI novamente
+            headerElement?.classList.remove("hiding-for-screenshot")
+            sidebarElement?.classList.remove("hiding-for-screenshot")
         }
     }
 
@@ -888,6 +1069,38 @@ const FlowHeader = ({
                         {isDark ? <FiSun /> : <FiMoon />}
                     </button>
 
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowImageMenu(!showImageMenu)}
+                            className={`p-2 rounded-md transition-colors ${
+                                isDark ? "hover:bg-gray-800 text-gray-300" : "hover:bg-gray-100 text-gray-600"
+                            }`}
+                            title="Opções de Imagem"
+                            style={getButtonStyle()}
+                        >
+                            <FiImage />
+                        </button>
+
+                        <ImageMenu
+                            isOpen={showImageMenu}
+                            onClose={() => setShowImageMenu(false)}
+                            onChangeBackground={handleChangeBackground}
+                            onSaveImage={handleSaveImage}
+                            theme={theme}
+                        />
+                    </div>
+
+                    <button
+                        onClick={onOpenColorPanel}
+                        className={`p-2 rounded-md transition-colors ${
+                            isDark ? "hover:bg-gray-800 text-gray-300" : "hover:bg-gray-100 text-gray-600"
+                        }`}
+                        title="Abrir Painel de Cores"
+                        style={getButtonStyle()}
+                    >
+                        <FiSettings />
+                    </button>
+
                     <button
                         onClick={onOpenBot}
                         className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
@@ -952,7 +1165,7 @@ const FlowHeader = ({
 
 // Component principal
 const FlowLayout = () => {
-    const { theme, showColorPanel, showSearch, currentGradient} = useTheme()
+    const { theme, showColorPanel, showSearch, currentGradient, setShowColorPanel } = useTheme()
     const [mounted, setMounted] = useState(false)
     const [workflowActions, setWorkflowActions] = useState<any>(null)
     const [startPosition, setStartPosition] = useState({ x: 250, y: 100 })
@@ -962,9 +1175,15 @@ const FlowLayout = () => {
     const [showBot, setShowBot] = useState(false)
     const [flowNodes, setFlowNodes] = useState<any[]>([])
     const [flowEdges, setFlowEdges] = useState<any[]>([])
+    const workflowContainerRef = useRef<HTMLDivElement>(null) // Ref para o container do workflow
 
     useEffect(() => {
         setMounted(true)
+        // Carregar imagem de fundo do localStorage ao montar
+        const savedImage = localStorage.getItem("flow-background-image")
+        if (savedImage) {
+            document.documentElement.style.setProperty("--flow-background-image", `url(${savedImage})`)
+        }
     }, [])
 
     const toggleSidebar = useCallback(() => {
@@ -993,7 +1212,7 @@ const FlowLayout = () => {
     }
 
     return (
-        <div className={`flex flex-col h-screen ${theme === "dark" ? "bg-black" : "bg-gray-50"}`}>
+        <div className={`flex flex-col h-screen flow-background ${theme === "dark" ? "bg-black" : "bg-gray-50"}`}>
             <FlowElegantSidebar currentGradient={currentGradient} theme={theme} />
 
             <FlowHeader
@@ -1008,13 +1227,16 @@ const FlowLayout = () => {
                 onDownload={workflowActions?.download}
                 onToggleSidebar={toggleSidebar}
                 onOpenBot={openBot}
+                onOpenColorPanel={setShowColorPanel}
                 startPosition={startPosition}
                 mousePosition={mousePosition}
                 componentCount={componentCount}
+                workflowContainerRef={workflowContainerRef} // Passa a ref para o header
             />
 
             <main className="flex-1 overflow-hidden">
                 <WorkflowBuilder
+                    ref={workflowContainerRef} // Atribui a ref ao WorkflowBuilder
                     onActionsReady={handleActionsReady}
                     onStartPositionChange={setStartPosition}
                     onMousePositionChange={setMousePosition}
