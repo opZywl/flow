@@ -120,7 +120,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
 
     return (
         <div
-            className={`flex items-center gap-4 px-3 py-1.5 rounded-lg border text-xs transition-all duration-200`}
+            className={`flex items-center gap-2 px-2 py-1 rounded-lg border text-xs transition-all duration-200`}
             style={{
                 background: isDark
                     ? `linear-gradient(135deg, rgba(0,0,0,0.8) 0%, ${currentGradient.primary}15 50%, rgba(0,0,0,0.8) 100%)`
@@ -178,7 +178,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
                     }}
                 />
                 <span
-                    className="font-mono"
+                    className="font-mono text-xs"
                     style={{
                         textShadow: isDark ? `0 0 4px ${currentGradient.glow}40` : `0 0 2px ${currentGradient.primary}30`,
                     }}
@@ -206,7 +206,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
           🖱️
         </span>
                 <span
-                    className="font-mono"
+                    className="font-mono text-xs"
                     style={{
                         textShadow: isDark ? `0 0 4px ${currentGradient.glow}40` : `0 0 2px ${currentGradient.primary}30`,
                     }}
@@ -234,6 +234,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
                     }}
                 />
                 <span
+                    className="text-xs"
                     style={{
                         textShadow: isDark ? `0 0 4px ${currentGradient.glow}40` : `0 0 2px ${currentGradient.primary}30`,
                     }}
@@ -1343,15 +1344,13 @@ const FlowHeader = ({
                         ? `0 8px 32px rgba(0, 0, 0, 0.8), 
                0 0 60px ${currentGradient.glow}60, 
                0 0 120px ${currentGradient.glow}30,
-               inset 0
-               0 0 120px ${currentGradient.glow}30,
                inset 0 2px 0 rgba(255, 255, 255, 0.1),
                inset 0 -2px 0 ${currentGradient.glow}40`
                         : `0 8px 32px rgba(0, 0, 0, 0.15), 
-               0 0 60px ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}40, 
-               0 0 120px ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}20,
+               0 0 60px ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}40, 
+               0 0 120px ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}20,
                inset 0 2px 0 rgba(255, 255, 255, 0.8),
-               inset 0 -2px 0 ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}30`,
+               inset 0 -2px 0 ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}30`,
                 }}
             >
                 {/* Animated background overlay */}
@@ -1360,24 +1359,24 @@ const FlowHeader = ({
                     style={{
                         background: isDark
                             ? `radial-gradient(circle at 20% 20%, ${currentGradient.glow}40 0%, transparent 50%), 
-                 radial-gradient(circle at 80% 80%, ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}40 0%, transparent 50%),
-                 radial-gradient(circle at 50% 50%, ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}30 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 20%, ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}30 0%, transparent 50%), 
-                 radial-gradient(circle at 80% 80%, ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}30 0%, transparent 50%),
+                 radial-gradient(circle at 80% 80%, ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}40 0%, transparent 50%),
+                 radial-gradient(circle at 50% 50%, ${currentGradient.secondary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}30 0%, transparent 60%)`
+                            : `radial-gradient(circle at 20% 20%, ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}30 0%, transparent 50%), 
+                 radial-gradient(circle at 80% 80%, ${currentGradient.secondary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}30 0%, transparent 50%),
                  radial-gradient(circle at 50% 50%, ${currentGradient.glow}20 0%, transparent 60%)`,
                         animation: "pulse 3s ease-in-out infinite alternate",
                     }}
                 />
 
-                <div className="relative z-10 flex items-center justify-between p-6">
+                <div className="relative z-10 flex items-center justify-between p-4">
                     {/* Left Section */}
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-4">
                         {/* Back Button */}
                         <motion.button
                             whileHover={{ scale: 1.05, x: -2 }}
                             whileTap={{ scale: 0.95 }}
                             onClick={() => router.push("/")}
-                            className="flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-300"
+                            className="flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-300"
                             style={{
                                 background: isDark
                                     ? `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`
@@ -1388,7 +1387,7 @@ const FlowHeader = ({
                                 filter: `drop-shadow(0 0 10px ${currentGradient.glow})`,
                             }}
                         >
-                            <FiArrowLeft className="w-5 h-5" />
+                            <FiArrowLeft className="w-4 h-4" />
                         </motion.button>
 
                         {/* Sidebar Toggle */}
@@ -1396,7 +1395,7 @@ const FlowHeader = ({
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                             onClick={onToggleSidebar}
-                            className="flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-300"
+                            className="flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-300"
                             title="Mostrar/Ocultar Componentes"
                             style={{
                                 background: isDark
@@ -1408,16 +1407,16 @@ const FlowHeader = ({
                                 filter: `drop-shadow(0 0 10px ${currentGradient.glow})`,
                             }}
                         >
-                            <FiSidebar className="w-5 h-5" />
+                            <FiSidebar className="w-4 h-4" />
                         </motion.button>
 
                         {/* Search and Controls */}
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-3">
                             {/* Enhanced Search */}
                             <form onSubmit={handleSearch} className="relative">
                                 <div className="relative group">
                                     <FiSearch
-                                        className="absolute left-4 top-1/2 transform -translate-y-1/2 w-4 h-4 transition-colors"
+                                        className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 transition-colors"
                                         style={{
                                             color: currentGradient.glow,
                                             filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
@@ -1428,7 +1427,7 @@ const FlowHeader = ({
                                         placeholder="Buscar por ID..."
                                         value={searchValue}
                                         onChange={(e) => setSearchValue(e.target.value)}
-                                        className="w-64 h-11 text-sm pl-12 pr-4 rounded-xl border-2 transition-all duration-300"
+                                        className="w-48 h-9 text-sm pl-10 pr-3 rounded-xl border-2 transition-all duration-300"
                                         style={{
                                             background: isDark
                                                 ? `linear-gradient(135deg, rgba(0,0,0,0.8), ${currentGradient.primary}30)`
@@ -1444,7 +1443,7 @@ const FlowHeader = ({
 
                             {/* Zoom Controls */}
                             <div
-                                className="flex items-center gap-2 p-1 rounded-xl backdrop-blur-sm"
+                                className="flex items-center gap-1 p-1 rounded-xl backdrop-blur-sm"
                                 style={{
                                     background: isDark
                                         ? `linear-gradient(135deg, ${currentGradient.primary}40, ${currentGradient.secondary}30)`
@@ -1457,40 +1456,40 @@ const FlowHeader = ({
                                     whileHover={{ scale: 1.1 }}
                                     whileTap={{ scale: 0.9 }}
                                     onClick={onZoomOut}
-                                    className="p-2 rounded-lg transition-all duration-200"
+                                    className="p-1.5 rounded-lg transition-all duration-200"
                                     title="Diminuir Zoom"
                                     style={{
                                         color: "#ffffff",
                                         filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
                                     }}
                                 >
-                                    <FiZoomOut className="w-4 h-4" />
+                                    <FiZoomOut className="w-3.5 h-3.5" />
                                 </motion.button>
                                 <motion.button
                                     whileHover={{ scale: 1.1 }}
                                     whileTap={{ scale: 0.9 }}
                                     onClick={onZoomIn}
-                                    className="p-2 rounded-lg transition-all duration-200"
+                                    className="p-1.5 rounded-lg transition-all duration-200"
                                     title="Aumentar Zoom"
                                     style={{
                                         color: "#ffffff",
                                         filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
                                     }}
                                 >
-                                    <FiZoomIn className="w-4 h-4" />
+                                    <FiZoomIn className="w-3.5 h-3.5" />
                                 </motion.button>
                                 <motion.button
                                     whileHover={{ scale: 1.1 }}
                                     whileTap={{ scale: 0.9 }}
                                     onClick={onFitView}
-                                    className="p-2 rounded-lg transition-all duration-200"
+                                    className="p-1.5 rounded-lg transition-all duration-200"
                                     title="Ajustar à Tela"
                                     style={{
                                         color: "#ffffff",
                                         filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
                                     }}
                                 >
-                                    <FiMaximize className="w-4 h-4" />
+                                    <FiMaximize className="w-3.5 h-3.5" />
                                 </motion.button>
                             </div>
                         </div>
@@ -1508,14 +1507,14 @@ const FlowHeader = ({
                     </div>
 
                     {/* Right Section */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                         {/* Action Buttons */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                             <motion.button
                                 whileHover={{ scale: 1.02, y: -1 }}
                                 whileTap={{ scale: 0.98 }}
                                 onClick={onSave}
-                                className="px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-2 text-white"
+                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
                                 title="Salvar Fluxo"
                                 style={{
                                     background: "linear-gradient(135deg, #22c55e, #16a34a)",
@@ -1524,7 +1523,7 @@ const FlowHeader = ({
                                         "0 4px 15px rgba(34, 197, 94, 0.4), 0 0 25px rgba(34, 197, 94, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                <FiSave className="w-4 h-4" />
+                                <FiSave className="w-3.5 h-3.5" />
                                 Salvar
                             </motion.button>
 
@@ -1532,7 +1531,7 @@ const FlowHeader = ({
                                 whileHover={{ scale: 1.02, y: -1 }}
                                 whileTap={{ scale: 0.98 }}
                                 onClick={handleReset}
-                                className="px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-2 text-white"
+                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
                                 title="Resetar Fluxo"
                                 style={{
                                     background: "linear-gradient(135deg, #ef4444, #dc2626)",
@@ -1541,7 +1540,7 @@ const FlowHeader = ({
                                         "0 4px 15px rgba(239, 68, 68, 0.4), 0 0 25px rgba(239, 68, 68, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                <FiRefreshCw className="w-4 h-4" />
+                                <FiRefreshCw className="w-3.5 h-3.5" />
                                 Resetar
                             </motion.button>
 
@@ -1549,7 +1548,7 @@ const FlowHeader = ({
                                 whileHover={{ scale: 1.02, y: -1 }}
                                 whileTap={{ scale: 0.98 }}
                                 onClick={onDownload}
-                                className="px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-2 text-white"
+                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
                                 title="Download do Fluxo"
                                 style={{
                                     background: "linear-gradient(135deg, #a855f7, #9333ea)",
@@ -1558,7 +1557,7 @@ const FlowHeader = ({
                                         "0 4px 15px rgba(168, 85, 247, 0.4), 0 0 25px rgba(168, 85, 247, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                <FiDownload className="w-4 h-4" />
+                                <FiDownload className="w-3.5 h-3.5" />
                                 Download
                             </motion.button>
 
@@ -1566,7 +1565,7 @@ const FlowHeader = ({
                                 whileHover={{ scale: 1.02, y: -1 }}
                                 whileTap={{ scale: 0.98 }}
                                 onClick={onLoad}
-                                className="px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-2 text-white"
+                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
                                 title="Carregar Fluxo"
                                 style={{
                                     background: "linear-gradient(135deg, #6b7280, #4b5563)",
@@ -1575,7 +1574,7 @@ const FlowHeader = ({
                                         "0 4px 15px rgba(107, 114, 128, 0.4), 0 0 25px rgba(107, 114, 128, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                <FiDownload className="w-4 h-4" />
+                                <FiDownload className="w-3.5 h-3.5" />
                                 Carregar
                             </motion.button>
 
@@ -1583,7 +1582,7 @@ const FlowHeader = ({
                                 whileHover={{ scale: 1.02, y: -1 }}
                                 whileTap={{ scale: 0.98 }}
                                 onClick={handleExecute}
-                                className="px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-2 text-white"
+                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
                                 title="Executar Fluxo"
                                 style={{
                                     background: "linear-gradient(135deg, #3b82f6, #2563eb)",
@@ -1592,14 +1591,14 @@ const FlowHeader = ({
                                         "0 4px 15px rgba(59, 130, 246, 0.4), 0 0 25px rgba(59, 130, 246, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                <FiPlayCircle className="w-4 h-4" />
+                                <FiPlayCircle className="w-3.5 h-3.5" />
                                 Executar
                             </motion.button>
                         </div>
 
                         {/* Divider */}
                         <div
-                            className="w-px h-8 opacity-60"
+                            className="w-px h-6 opacity-60"
                             style={{
                                 background: currentGradient.glow,
                                 boxShadow: `0 0 10px ${currentGradient.glow}`,
@@ -1607,12 +1606,12 @@ const FlowHeader = ({
                         />
 
                         {/* Utility Buttons */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                             <motion.button
                                 whileHover={{ scale: 1.1, rotate: 180 }}
                                 whileTap={{ scale: 0.9 }}
                                 onClick={toggleTheme}
-                                className="p-3 rounded-xl transition-all duration-300 text-white"
+                                className="p-2.5 rounded-xl transition-all duration-300 text-white"
                                 title={isDark ? "Modo Claro" : "Modo Escuro"}
                                 style={{
                                     background: isDark
@@ -1624,14 +1623,14 @@ const FlowHeader = ({
                                         : "0 4px 15px rgba(99, 102, 241, 0.4), 0 0 25px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                {isDark ? <FiSun className="w-5 h-5" /> : <FiMoon className="w-5 h-5" />}
+                                {isDark ? <FiSun className="w-4 h-4" /> : <FiMoon className="w-4 h-4" />}
                             </motion.button>
 
                             <motion.button
                                 whileHover={{ scale: 1.1 }}
                                 whileTap={{ scale: 0.9 }}
                                 onClick={() => setShowImageMenu(!showImageMenu)}
-                                className="p-3 rounded-xl transition-all duration-300 text-white"
+                                className="p-2.5 rounded-xl transition-all duration-300 text-white"
                                 title="Opções de Imagem"
                                 style={{
                                     background: "linear-gradient(135deg, #ec4899, #db2777)",
@@ -1640,14 +1639,14 @@ const FlowHeader = ({
                                         "0 4px 15px rgba(236, 72, 153, 0.4), 0 0 25px rgba(236, 72, 153, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                <FiImage className="w-5 h-5" />
+                                <FiImage className="w-4 h-4" />
                             </motion.button>
 
                             <motion.button
                                 whileHover={{ scale: 1.1, rotate: 90 }}
                                 whileTap={{ scale: 0.9 }}
                                 onClick={onOpenColorPanel}
-                                className="p-3 rounded-xl transition-all duration-300 text-white"
+                                className="p-2.5 rounded-xl transition-all duration-300 text-white"
                                 title="Abrir Painel de Cores"
                                 style={{
                                     background: "linear-gradient(135deg, #10b981, #059669)",
@@ -1656,14 +1655,14 @@ const FlowHeader = ({
                                         "0 4px 15px rgba(16, 185, 129, 0.4), 0 0 25px rgba(16, 185, 129, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                <FiSettings className="w-5 h-5" />
+                                <FiSettings className="w-4 h-4" />
                             </motion.button>
 
                             <motion.button
                                 whileHover={{ scale: 1.02, y: -1 }}
                                 whileTap={{ scale: 0.98 }}
                                 onClick={onOpenBot}
-                                className="px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-2 text-white"
+                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
                                 title="Abrir ChatBot"
                                 style={{
                                     background: "linear-gradient(135deg, #06b6d4, #0891b2)",
@@ -1672,7 +1671,7 @@ const FlowHeader = ({
                                         "0 4px 15px rgba(6, 182, 212, 0.4), 0 0 25px rgba(6, 182, 212, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                                 }}
                             >
-                                <BotIcon className="w-4 h-4" />
+                                <BotIcon className="w-3.5 h-3.5" />
                                 Ativar Bot
                             </motion.button>
                         </div>
@@ -1925,16 +1924,6 @@ const FlowLayout = () => {
         const savedImage = localStorage.getItem("flow-background-image")
         if (savedImage) {
             document.documentElement.style.setProperty("--flow-background-image", `url(${savedImage})`)
-        }
-
-        // Set default zoom to 80%
-        document.body.style.zoom = "0.8"
-    }, [])
-
-    useEffect(() => {
-        return () => {
-            // Reset zoom when component unmounts
-            document.body.style.zoom = "1"
         }
     }, [])
 
