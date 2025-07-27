@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { ThemeProvider, useTheme } from "../ThemeContext"
 import ColorPanel from "../ColorPanel"
 import WorkflowBuilder from "./workflow-builder"
@@ -35,11 +35,11 @@ import {
     FiTrash2,
 } from "react-icons/fi"
 import { BotIcon } from "lucide-react"
+import { Button } from "@/components/ui/button" // Importa o Button do shadcn/ui
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Avatar } from "@/components/ui/avatar"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion" // Importa motion do framer-motion
 import html2canvas from "html2canvas"
 
 // Componente da barra lateral elegante para o flow
@@ -265,6 +265,8 @@ const AuraFlowBot = ({
     const [waitingForUserInput, setWaitingForUserInput] = useState(false)
     const [currentOptions, setCurrentOptions] = useState<any[]>([])
     const [currentOptionsMessage, setCurrentOptionsMessage] = useState("")
+
+    const { theme, currentGradient } = useTheme() // Obter tema e gradiente
 
     // Carregar fluxo salvo quando o bot abrir
     useEffect(() => {
@@ -586,6 +588,8 @@ const AuraFlowBot = ({
         cursor: isDragging ? "grabbing" : "grab",
     }
 
+    const isDark = theme === "dark"
+
     return (
         <AnimatePresence>
             <motion.div
@@ -597,46 +601,125 @@ const AuraFlowBot = ({
                 }}
                 exit={{ opacity: 0, y: 20 }}
                 transition={{ duration: 0.3 }}
-                className="fixed w-full max-w-sm bg-gray-900 rounded-xl shadow-2xl overflow-hidden z-50 border border-gray-800"
-                style={chatStyle}
-                onMouseDown={handleMouseDown}
+                className="fixed w-full max-w-sm rounded-xl shadow-2xl overflow-hidden z-50"
+                style={{
+                    ...chatStyle,
+                    background: isDark
+                        ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${currentGradient.primary}20 25%, ${currentGradient.secondary}15 50%, rgba(0,0,0,0.95) 100%)`
+                        : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}15 25%, ${currentGradient.secondary}10 50%, ${currentGradient.primary}15 75%, rgba(255,255,255,0.95) 100%)`,
+                    backdropFilter: "blur(25px)",
+                    border: isDark ? `2px solid ${currentGradient.glow}50` : `2px solid ${currentGradient.primary}40`,
+                    boxShadow: isDark
+                        ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
+               0 0 0 1px ${currentGradient.glow}30, 
+               0 0 40px ${currentGradient.glow}40,
+               inset 0 1px 0 rgba(255, 255, 255, 0.1)`
+                        : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
+               0 0 0 1px ${currentGradient.primary}30, 0 0 40px ${currentGradient.primary}25,
+               inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
+                }}
             >
+                {/* Animated background pattern */}
+                <div
+                    className="absolute inset-0 opacity-20 rounded-lg"
+                    style={{
+                        backgroundImage: isDark
+                            ? `radial-gradient(circle at 20% 30%, ${currentGradient.primary}60 0%, transparent 40%), 
+                 radial-gradient(circle at 80% 70%, ${currentGradient.secondary}60 0%, transparent 40%),
+                 radial-gradient(circle at 50% 50%, ${currentGradient.accent}40 0%, transparent 60%)`
+                            : `radial-gradient(circle at 20% 30%, ${currentGradient.primary}40 0%, transparent 40%), 
+                 radial-gradient(circle at 80% 70%, ${currentGradient.secondary}40 0%, transparent 40%),
+                 radial-gradient(circle at 50% 50%, ${currentGradient.accent}30 0%, transparent 60%)`,
+                    }}
+                />
+
                 {/* Header do chat - igual ao TarsChat */}
-                <div className="bg-gradient-to-r from-gray-800 to-gray-900 p-3 flex items-center justify-between border-b border-gray-800 drag-handle">
+                <div
+                    className="relative z-10 p-3 flex items-center justify-between border-b drag-handle"
+                    style={{
+                        background: isDark
+                            ? `linear-gradient(135deg, ${currentGradient.primary}40, ${currentGradient.secondary}40)`
+                            : `linear-gradient(135deg, ${currentGradient.primary}30, ${currentGradient.secondary}30)`,
+                        borderColor: isDark ? `${currentGradient.glow}40` : `${currentGradient.primary}30`,
+                        boxShadow: `0 4px 15px ${currentGradient.glow}30`,
+                    }}
+                >
                     <div className="flex items-center space-x-3">
-                        <Avatar className="h-8 w-8 bg-gray-700">
+                        <Avatar
+                            className="h-10 w-10"
+                            style={{
+                                background: isDark
+                                    ? `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`
+                                    : `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`,
+                                boxShadow: `0 0 15px ${currentGradient.glow}50`,
+                            }}
+                        >
                             <div className="flex items-center justify-center h-full w-full">
-                                <BotIcon className="h-5 w-5 text-gray-200" />
+                                {/* Cor do ícone do bot adaptada ao tema */}
+                                <BotIcon className="h-6 w-6" style={{ color: isDark ? "#ffffff" : "#111827" }} />
                             </div>
                         </Avatar>
                         <div>
-                            <h3 className="text-sm font-medium text-gray-200">AURA</h3>
-                            <p className="text-xs text-gray-400">Assistente de IA</p>
+                            <h3
+                                className="text-base font-bold"
+                                style={{
+                                    color: isDark ? "#f9fafb" : "#111827",
+                                    textShadow: isDark ? `0 0 10px ${currentGradient.glow}60` : `0 0 5px ${currentGradient.primary}40`,
+                                }}
+                            >
+                                AURA
+                            </h3>
+                            <p
+                                className="text-xs"
+                                style={{
+                                    color: isDark ? "#d1d5db" : "#6b7280",
+                                    textShadow: isDark ? `0 0 5px ${currentGradient.glow}30` : "none",
+                                }}
+                            >
+                                Assistente de IA
+                            </p>
                         </div>
                     </div>
                     <div className="flex items-center space-x-1">
                         {isMinimized ? (
-                            <Button
-                                variant="ghost"
-                                size="icon"
+                            <motion.button // Usando motion.button para animações
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
                                 onClick={() => setIsMinimized(false)}
-                                className="h-7 w-7 text-gray-400 hover:text-gray-200"
+                                className="h-8 w-8 text-gray-400 hover:text-gray-200 rounded-full flex items-center justify-center"
+                                style={{
+                                    color: isDark ? currentGradient.glow : currentGradient.primary,
+                                    filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
+                                }}
                             >
-                                <FiMaximize2 className="h-4 w-4" />
-                            </Button>
+                                <FiMaximize2 className="h-5 w-5" />
+                            </motion.button>
                         ) : (
-                            <Button
-                                variant="ghost"
-                                size="icon"
+                            <motion.button // Usando motion.button para animações
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
                                 onClick={() => setIsMinimized(true)}
-                                className="h-7 w-7 text-gray-400 hover:text-gray-200"
+                                className="h-8 w-8 text-gray-400 hover:text-gray-200 rounded-full flex items-center justify-center"
+                                style={{
+                                    color: isDark ? currentGradient.glow : currentGradient.primary,
+                                    filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
+                                }}
                             >
-                                <FiMinimize2 className="h-4 w-4" />
-                            </Button>
+                                <FiMinimize2 className="h-5 w-5" />
+                            </motion.button>
                         )}
-                        <Button variant="ghost" size="icon" onClick={onClose} className="h-7 w-7 text-gray-400 hover:text-gray-200">
-                            <FiX className="h-4 w-4" />
-                        </Button>
+                        <motion.button // Usando motion.button para animações
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={onClose}
+                            className="h-8 w-8 text-gray-400 hover:text-gray-200 rounded-full flex items-center justify-center"
+                            style={{
+                                color: isDark ? currentGradient.glow : currentGradient.primary,
+                                filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
+                            }}
+                        >
+                            <FiX className="h-5 w-5" />
+                        </motion.button>
                     </div>
                 </div>
 
@@ -644,21 +727,57 @@ const AuraFlowBot = ({
                 {!isMinimized && (
                     <>
                         {/* Mensagens */}
-                        <div className="p-4 h-[360px] overflow-y-auto bg-gray-950">
+                        <div
+                            className="p-4 h-[360px] overflow-y-auto relative z-10"
+                            style={{
+                                background: isDark
+                                    ? `radial-gradient(circle at 50% 50%, rgba(0,0,0,0.8) 0%, ${currentGradient.primary}10 50%, rgba(0,0,0,0.8) 100%)`
+                                    : `radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.9) 100%)`,
+                            }}
+                        >
                             {messages.map((message) => (
                                 <div
                                     key={message.id}
                                     className={`mb-4 ${message.role === "user" ? "flex justify-end" : "flex justify-start"}`}
                                 >
-                                    <div
-                                        className={`max-w-[80%] p-3 rounded-lg whitespace-pre-line ${
-                                            message.role === "user"
-                                                ? "bg-blue-600 text-white"
-                                                : "bg-gray-700 text-gray-100 border border-gray-600/30"
-                                        }`}
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.2 }}
+                                        className={`max-w-[80%] p-4 rounded-xl whitespace-pre-line relative overflow-hidden`}
+                                        style={{
+                                            background:
+                                                message.role === "user"
+                                                    ? `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`
+                                                    : isDark
+                                                        ? `linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))`
+                                                        : `linear-gradient(135deg, rgba(0,0,0,0.05), rgba(0,0,0,0.02))`,
+                                            color: message.role === "user" ? "#ffffff" : isDark ? "#f9fafb" : "#111827",
+                                            border:
+                                                message.role === "user"
+                                                    ? `1px solid ${currentGradient.glow}60`
+                                                    : isDark
+                                                        ? `1px solid ${currentGradient.glow}20`
+                                                        : `1px solid ${currentGradient.primary}20`,
+                                            boxShadow:
+                                                message.role === "user"
+                                                    ? `0 4px 15px ${currentGradient.glow}40, 0 0 20px ${currentGradient.glow}20`
+                                                    : isDark
+                                                        ? `0 2px 10px rgba(0,0,0,0.3), 0 0 10px ${currentGradient.glow}10`
+                                                        : `0 2px 10px rgba(0,0,0,0.1), 0 0 5px ${currentGradient.primary}10`,
+                                        }}
+                                        whileHover={{
+                                            scale: 1.02,
+                                            boxShadow:
+                                                message.role === "user"
+                                                    ? `0 6px 20px ${currentGradient.glow}50, 0 0 30px ${currentGradient.glow}30`
+                                                    : isDark
+                                                        ? `0 4px 15px rgba(0,0,0,0.4), 0 0 15px ${currentGradient.glow}20`
+                                                        : `0 4px 15px rgba(0,0,0,0.2), 0 0 10px ${currentGradient.primary}15`,
+                                        }}
                                     >
                                         <p className="text-sm">{message.content}</p>
-                                    </div>
+                                    </motion.div>
                                 </div>
                             ))}
                         </div>
@@ -669,7 +788,13 @@ const AuraFlowBot = ({
                                 e.preventDefault()
                                 handleSendMessage()
                             }}
-                            className="p-3 border-t border-gray-800 bg-gray-900"
+                            className="p-3 border-t relative z-10"
+                            style={{
+                                background: isDark
+                                    ? `linear-gradient(135deg, rgba(0,0,0,0.9), ${currentGradient.primary}10)`
+                                    : `linear-gradient(135deg, rgba(255,255,255,0.9), ${currentGradient.primary}05)`,
+                                borderColor: isDark ? `${currentGradient.glow}30` : `${currentGradient.primary}20`,
+                            }}
                         >
                             <div className="flex items-center space-x-2">
                                 <input
@@ -677,15 +802,35 @@ const AuraFlowBot = ({
                                     value={input}
                                     onChange={(e) => setInput(e.target.value)}
                                     placeholder="Digite sua mensagem..."
-                                    className="flex-1 bg-gray-800 border border-gray-700 rounded-full px-4 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-gray-600"
+                                    className="flex-1 rounded-full px-4 py-3 text-sm transition-all duration-300"
+                                    style={{
+                                        background: isDark
+                                            ? `linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))`
+                                            : `linear-gradient(135deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01))`,
+                                        border: isDark ? `1px solid ${currentGradient.glow}30` : `1px solid ${currentGradient.primary}20`,
+                                        color: isDark ? "#f9fafb" : "#111827",
+                                        boxShadow: isDark
+                                            ? `0 0 0 1px ${currentGradient.glow}10, 0 0 10px ${currentGradient.glow}15`
+                                            : `0 0 0 1px ${currentGradient.primary}10, 0 0 5px ${currentGradient.primary}05`,
+                                    }}
                                 />
-                                <Button
+                                <motion.button // Alterado de Button para motion.button
                                     type="submit"
                                     disabled={!input.trim()}
-                                    className="rounded-full w-10 h-10 bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-600 hover:to-gray-700 flex items-center justify-center"
+                                    className="rounded-full w-12 h-12 flex items-center justify-center transition-all duration-300"
+                                    style={{
+                                        background: `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`,
+                                        border: `1px solid ${currentGradient.glow}60`,
+                                        boxShadow: `0 4px 15px ${currentGradient.glow}40, 0 0 20px ${currentGradient.glow}20`,
+                                    }}
+                                    whileHover={{
+                                        scale: 1.05,
+                                        boxShadow: `0 6px 20px ${currentGradient.glow}50, 0 0 30px ${currentGradient.glow}30`,
+                                    }}
+                                    whileTap={{ scale: 0.95 }}
                                 >
-                                    <FiSend className="h-4 w-4 text-white" />
-                                </Button>
+                                    <FiSend className="h-5 w-5" style={{ color: isDark ? "#ffffff" : "#111827" }} />
+                                </motion.button>
                             </div>
                         </form>
                     </>
@@ -1167,29 +1312,29 @@ const FlowHeader = ({
                 style={{
                     background: isDark
                         ? `linear-gradient(135deg, 
-                #1a1a2e 0%, 
-                #16213e 10%, 
-                ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 20%,
-                #0f172a 30%,
-                ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 40%,
-                #1e293b 50%,
-                ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 60%,
-                #0f172a 70%,
-                ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 80%,
-                #1a1a2e 90%,
-                #16213e 100%)`
+               #1a1a2e 0%, 
+               #16213e 10%, 
+               ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 20%,
+               #0f172a 30%,
+               ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 40%,
+               #1e293b 50%,
+               ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 60%,
+               #0f172a 70%,
+               ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 80%,
+               #1a1a2e 90%,
+               #16213e 100%)`
                         : `linear-gradient(135deg, 
-                #f8fafc 0%, 
-                #e2e8f0 10%, 
-                ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 20%,
-                #f1f5f9 30%,
-                ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 40%,
-                #e2e8f0 50%,
-                ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 60%,
-                #f1f5f9 70%,
-                ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 80%,
-                #f8fafc 90%,
-                #e2e8f0 100%)`,
+               #f8fafc 0%, 
+               #e2e8f0 10%, 
+               ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 20%,
+               #f1f5f9 30%,
+               ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 40%,
+               #e2e8f0 50%,
+               ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 60%,
+               #f1f5f9 70%,
+               ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 80%,
+               #f8fafc 90%,
+               #e2e8f0 100%)`,
                     backdropFilter: "blur(20px)",
                     borderBottom: isDark
                         ? `2px solid ${currentGradient.glow}`
@@ -1550,17 +1695,17 @@ const FlowHeader = ({
                     style={{
                         background: isDark
                             ? `linear-gradient(135deg, 
-                  rgba(0,0,0,0.95) 0%, 
-                  ${currentGradient.primary}20 25%, 
-                  ${currentGradient.secondary}15 50%, 
-                  ${currentGradient.primary}20 75%, 
-                  rgba(0,0,0,0.95) 100%)`
+                 rgba(0,0,0,0.95) 0%, 
+                 ${currentGradient.primary}20 25%, 
+                 ${currentGradient.secondary}15 50%, 
+                 ${currentGradient.primary}20 75%, 
+                 rgba(0,0,0,0.95) 100%)`
                             : `linear-gradient(135deg, 
-                  rgba(255,255,255,0.95) 0%, 
-                  ${currentGradient.primary}15 25%, 
-                  ${currentGradient.secondary}10 50%, 
-                  ${currentGradient.primary}15 75%, 
-                  rgba(255,255,255,0.95) 100%)`,
+                 rgba(255,255,255,0.95) 0%, 
+                 ${currentGradient.primary}15 25%, 
+                 ${currentGradient.secondary}10 50%, 
+                 ${currentGradient.primary}15 75%, 
+                 rgba(255,255,255,0.95) 100%)`,
                         backdropFilter: "blur(25px)",
                         border: isDark ? `2px solid ${currentGradient.glow}50` : `2px solid ${currentGradient.primary}40`,
                         boxShadow: isDark
@@ -1664,17 +1809,17 @@ const FlowHeader = ({
                     style={{
                         background: isDark
                             ? `linear-gradient(135deg, 
-                  rgba(0,0,0,0.95) 0%, 
-                  ${currentGradient.primary}20 25%, 
-                  ${currentGradient.secondary}15 50%, 
-                  ${currentGradient.primary}20 75%, 
-                  rgba(0,0,0,0.95) 100%)`
+                 rgba(0,0,0,0.95) 0%, 
+                 ${currentGradient.primary}20 25%, 
+                 ${currentGradient.secondary}15 50%, 
+                 ${currentGradient.primary}20 75%, 
+                 rgba(0,0,0,0.95) 100%)`
                             : `linear-gradient(135deg, 
-                  rgba(255,255,255,0.95) 0%, 
-                  ${currentGradient.primary}15 25%, 
-                  ${currentGradient.secondary}10 50%, 
-                  ${currentGradient.primary}15 75%, 
-                  rgba(255,255,255,0.95) 100%)`,
+                 rgba(255,255,255,0.95) 0%, 
+                 ${currentGradient.primary}15 25%, 
+                 ${currentGradient.secondary}10 50%, 
+                 ${currentGradient.primary}15 75%, 
+                 rgba(255,255,255,0.95) 100%)`,
                         backdropFilter: "blur(25px)",
                         border: isDark ? `2px solid ${currentGradient.glow}50` : `2px solid ${currentGradient.primary}40`,
                         boxShadow: isDark
@@ -1770,7 +1915,7 @@ const FlowLayout = () => {
     const [showBot, setShowBot] = useState(false)
     const [flowNodes, setFlowNodes] = useState<any[]>([])
     const [flowEdges, setFlowEdges] = useState<any[]>([])
-    const workflowContainerRef = useRef<HTMLDivElement>(null)
+    const [workflowContainerRef] = useState<HTMLDivElement | null>(null)
 
     useEffect(() => {
         setMounted(true)
