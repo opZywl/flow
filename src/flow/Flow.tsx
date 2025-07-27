@@ -1926,6 +1926,16 @@ const FlowLayout = () => {
         if (savedImage) {
             document.documentElement.style.setProperty("--flow-background-image", `url(${savedImage})`)
         }
+
+        // Set default zoom to 80%
+        document.body.style.zoom = "0.8"
+    }, [])
+
+    useEffect(() => {
+        return () => {
+            // Reset zoom when component unmounts
+            document.body.style.zoom = "1"
+        }
     }, [])
 
     const toggleSidebar = useCallback(() => {
