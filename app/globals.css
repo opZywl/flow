@@ -6,6 +6,8 @@
   --foreground-rgb: 0, 0, 0;
   --background-start-rgb: 214, 219, 220;
   --background-end-rgb: 255, 255, 255;
+  /* Flow background variables */
+  --flow-background-image: none;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,7 +26,7 @@ body {
 
 .bg-grid-pattern {
   background-image: linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+  linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
@@ -205,4 +207,51 @@ body > div[style*="position: fixed"][style*="bottom: 10px"][style*="right: 20px"
 
 ::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(45deg, #7c3aed, #0891b2);
+}
+
+/* ===== FLOW BACKGROUND STYLES ===== */
+/* Flow background styles */
+.flow-background {
+  background-image: var(--flow-background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Panel glow effect */
+.panel-glow {
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.2));
+}
+
+.dark .panel-glow {
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.3));
+}
+
+/* ===== APENAS ESTILOS PARA SCREENSHOT ===== */
+/* Hide elements during screenshot */
+.hiding-for-screenshot {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* Sidebar specific hiding */
+.node-library-sidebar.hiding-for-screenshot {
+  transform: translateX(-100%) !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* Header specific hiding */
+header.hiding-for-screenshot {
+  transform: translateY(-100%) !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* Elegant sidebar hiding */
+.fixed.left-0.top-0.hiding-for-screenshot {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }

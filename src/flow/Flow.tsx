@@ -787,7 +787,7 @@ const FlowHeader = ({
                         startPosition,
                         mousePosition,
                         componentCount,
-                        workflowContainerRef, // Recebe a ref para o container do workflow
+                        workflowContainerRef,
                     }: any) => {
     const router = useRouter()
     const { theme, toggleTheme } = useTheme()
@@ -831,9 +831,7 @@ const FlowHeader = ({
                 const reader = new FileReader()
                 reader.onload = (e) => {
                     const imageUrl = e.target?.result as string
-                    // Aplica a imagem de fundo via CSS variable
                     document.documentElement.style.setProperty("--flow-background-image", `url(${imageUrl})`)
-                    // Salva no localStorage para persistência
                     localStorage.setItem("flow-background-image", imageUrl)
                 }
                 reader.readAsDataURL(file)
@@ -845,44 +843,61 @@ const FlowHeader = ({
 
     const handleSaveImage = async () => {
         setShowImageMenu(false)
-        const flowElement = workflowContainerRef.current
+
+        // Usar a referência passada como prop
+        const flowElement = workflowContainerRef?.current
         const headerElement = document.querySelector("header")
-        const sidebarElement = document.querySelector(".node-library-sidebar") // Adicione uma classe à sua sidebar
+        const sidebarElement = document.querySelector(".node-library-sidebar")
+        const elegantSidebarElement = document.querySelector(".fixed.left-0.top-0")
 
         if (!flowElement) {
             console.error("Elemento do fluxo não encontrado para captura.")
+            alert("Erro: Não foi possível encontrar o elemento do fluxo para captura. Tente novamente.")
             return
         }
 
-        // Adiciona classes para esconder a UI
+        // Esconder elementos da UI
         headerElement?.classList.add("hiding-for-screenshot")
         sidebarElement?.classList.add("hiding-for-screenshot")
+        elegantSidebarElement?.classList.add("hiding-for-screenshot")
 
         try {
-            // Pequeno delay para garantir que a UI foi escondida
-            await new Promise((resolve) => setTimeout(resolve, 100))
+            // Aguardar um pouco para garantir que os elementos foram escondidos
+            await new Promise((resolve) => setTimeout(resolve, 200))
 
             const canvas = await html2canvas(flowElement, {
-                backgroundColor: null, // Fundo transparente para usar o do CSS
+                backgroundColor: null,
                 scale: 2,
                 useCORS: true,
                 allowTaint: true,
                 logging: false,
                 width: flowElement.scrollWidth,
                 height: flowElement.scrollHeight,
+                ignoreElements: (element) => {
+                    // Ignorar elementos com classes específicas
+                    return (
+                        element.classList.contains("hiding-for-screenshot") ||
+                        element.classList.contains("node-library-sidebar") ||
+                        element.closest(".hiding-for-screenshot") !== null ||
+                        element.closest(".node-library-sidebar") !== null
+                    )
+                },
             })
 
             const link = document.createElement("a")
             link.download = `fluxo-aura-${new Date().toISOString().slice(0, 10)}.png`
             link.href = canvas.toDataURL("image/png", 1.0)
             link.click()
+
+            console.log("Imagem salva com sucesso!")
         } catch (error) {
             console.error("Erro ao salvar imagem:", error)
             alert("Ocorreu um erro ao salvar a imagem. Tente novamente.")
         } finally {
-            // Remove as classes para mostrar a UI novamente
+            // Mostrar elementos da UI novamente
             headerElement?.classList.remove("hiding-for-screenshot")
             sidebarElement?.classList.remove("hiding-for-screenshot")
+            elegantSidebarElement?.classList.remove("hiding-for-screenshot")
         }
     }
 
@@ -1175,7 +1190,7 @@ const FlowLayout = () => {
     const [showBot, setShowBot] = useState(false)
     const [flowNodes, setFlowNodes] = useState<any[]>([])
     const [flowEdges, setFlowEdges] = useState<any[]>([])
-    const workflowContainerRef = useRef<HTMLDivElement>(null) // Ref para o container do workflow
+    const workflowContainerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         setMounted(true)
@@ -1231,12 +1246,11 @@ const FlowLayout = () => {
                 startPosition={startPosition}
                 mousePosition={mousePosition}
                 componentCount={componentCount}
-                workflowContainerRef={workflowContainerRef} // Passa a ref para o header
+                workflowContainerRef={workflowContainerRef}
             />
 
-            <main className="flex-1 overflow-hidden">
+            <main className="flex-1 overflow-hidden" ref={workflowContainerRef}>
                 <WorkflowBuilder
-                    ref={workflowContainerRef} // Atribui a ref ao WorkflowBuilder
                     onActionsReady={handleActionsReady}
                     onStartPositionChange={setStartPosition}
                     onMousePositionChange={setMousePosition}
