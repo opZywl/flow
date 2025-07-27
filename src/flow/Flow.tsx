@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { ThemeProvider, useTheme } from "../ThemeContext"
 import ColorPanel from "../ColorPanel"
 import WorkflowBuilder from "./workflow-builder"
@@ -35,11 +35,11 @@ import {
     FiTrash2,
 } from "react-icons/fi"
 import { BotIcon } from "lucide-react"
-import { Button } from "@/components/ui/button" // Importa o Button do shadcn/ui
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Avatar } from "@/components/ui/avatar"
-import { motion, AnimatePresence } from "framer-motion" // Importa motion do framer-motion
+import { motion, AnimatePresence } from "framer-motion"
 import html2canvas from "html2canvas"
 
 // Componente da barra lateral elegante para o flow
@@ -245,11 +245,10 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
     )
 }
 
-// Componente do Bot Aura usando o mesmo layout do TarsChat
-const AuraFlowBot = ({
-                         isOpen,
-                         onClose,
-                     }: {
+const YenFlowBot = ({
+                        isOpen,
+                        onClose,
+                    }: {
     isOpen: boolean
     onClose: () => void
 }) => {
@@ -667,7 +666,7 @@ const AuraFlowBot = ({
                                     textShadow: isDark ? `0 0 10px ${currentGradient.glow}60` : `0 0 5px ${currentGradient.primary}40`,
                                 }}
                             >
-                                AURA
+                                ¥$
                             </h3>
                             <p
                                 className="text-xs"
@@ -676,7 +675,7 @@ const AuraFlowBot = ({
                                     textShadow: isDark ? `0 0 5px ${currentGradient.glow}30` : "none",
                                 }}
                             >
-                                Assistente de IA
+                                Assistente by Lucas Lima
                             </p>
                         </div>
                     </div>
@@ -829,6 +828,7 @@ const AuraFlowBot = ({
                                     }}
                                     whileTap={{ scale: 0.95 }}
                                 >
+                                    {/* Cor do ícone de envio adaptada ao tema */}
                                     <FiSend className="h-5 w-5" style={{ color: isDark ? "#ffffff" : "#111827" }} />
                                 </motion.button>
                             </div>
@@ -1282,7 +1282,7 @@ const FlowHeader = ({
             })
 
             const link = document.createElement("a")
-            link.download = `fluxo-aura-${new Date().toISOString().slice(0, 10)}.png`
+            link.download = `fluxo-by-lucas-lima-${new Date().toISOString().slice(0, 10)}.png`
             link.href = canvas.toDataURL("image/png", 1.0)
             link.click()
 
@@ -1342,6 +1342,8 @@ const FlowHeader = ({
                     boxShadow: isDark
                         ? `0 8px 32px rgba(0, 0, 0, 0.8), 
                0 0 60px ${currentGradient.glow}60, 
+               0 0 120px ${currentGradient.glow}30,
+               inset 0
                0 0 120px ${currentGradient.glow}30,
                inset 0 2px 0 rgba(255, 255, 255, 0.1),
                inset 0 -2px 0 ${currentGradient.glow}40`
@@ -1671,7 +1673,7 @@ const FlowHeader = ({
                                 }}
                             >
                                 <BotIcon className="w-4 h-4" />
-                                Aura Bot
+                                Ativar Bot
                             </motion.button>
                         </div>
                     </div>
@@ -1877,7 +1879,7 @@ const FlowHeader = ({
                             }}
                         >
                             <FiCheckCircle className="w-4 h-4" />
-                            Abra o Aura Bot para interagir com o fluxo executado.
+                            Abra o ¥$ Bot para interagir com o fluxo executado.
                         </p>
                     </div>
                     <div className="relative z-10 flex justify-end">
@@ -1915,7 +1917,7 @@ const FlowLayout = () => {
     const [showBot, setShowBot] = useState(false)
     const [flowNodes, setFlowNodes] = useState<any[]>([])
     const [flowEdges, setFlowEdges] = useState<any[]>([])
-    const [workflowContainerRef] = useState<HTMLDivElement | null>(null)
+    const workflowContainerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         setMounted(true)
@@ -1988,8 +1990,8 @@ const FlowLayout = () => {
                 />
             </main>
 
-            {/* Bot Aura que executa o fluxo salvo */}
-            <AuraFlowBot isOpen={showBot} onClose={closeBot} />
+            {/* Bot ¥$ que executa o fluxo salvo */}
+            <YenFlowBot isOpen={showBot} onClose={closeBot} />
 
             {showColorPanel && <ColorPanel />}
         </div>

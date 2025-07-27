@@ -1047,16 +1047,6 @@ function WorkflowBuilderInner({
         >
           <div className="flex items-center justify-between mb-4">
             <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>Componentes</h2>
-            {/* Botão do Bot Aura na sidebar */}
-            <button
-              onClick={onOpenBot}
-              className={`p-2 rounded-md transition-colors ${
-                isDark ? "hover:bg-gray-800 text-gray-300" : "hover:bg-gray-100 text-gray-600"
-              }`}
-              title="Aura Assistente de IA"
-            >
-              <BotIcon className="h-5 w-5" />
-            </button>
           </div>
           <NodeLibrary />
         </div>
