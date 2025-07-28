@@ -10,8 +10,8 @@ import Script from "next/script"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Aura",
-  description: "Aura",
+  title: "WorkFlow",
+  description: "WorkFlow",
   icons: {
     icon: "/favicon.png",
     shortcut: "/favicon.png",
