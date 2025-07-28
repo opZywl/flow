@@ -33,6 +33,8 @@ import {
     FiCamera,
     FiFolder,
     FiTrash2,
+    FiNavigation,
+    FiAlertTriangle,
 } from "react-icons/fi"
 import { BotIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -198,13 +200,13 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
 
             {/* Posição do Mouse */}
             <div className="flex items-center gap-1">
-        <span
-            style={{
-                filter: `drop-shadow(0 0 4px ${currentGradient.glow}60)`,
-            }}
-        >
-          🖱️
-        </span>
+                <FiNavigation
+                    className="h-3 w-3"
+                    style={{
+                        color: currentGradient.glow,
+                        filter: `drop-shadow(0 0 4px ${currentGradient.glow}60)`,
+                    }}
+                />
                 <span
                     className="font-mono text-xs"
                     style={{
@@ -605,17 +607,18 @@ const YenFlowBot = ({
                 style={{
                     ...chatStyle,
                     background: isDark
-                        ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${currentGradient.primary}20 25%, ${currentGradient.secondary}15 50%, rgba(0,0,0,0.95) 100%)`
-                        : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}15 25%, ${currentGradient.secondary}10 50%, ${currentGradient.primary}15 75%, rgba(255,255,255,0.95) 100%)`,
+                        ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, rgba(20,20,20,0.96) 25%, rgba(40,40,40,0.94) 50%, rgba(20,20,20,0.96) 75%, rgba(0,0,0,0.95) 100%)`
+                        : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.96) 25%, rgba(241,245,249,0.94) 50%, rgba(248,250,252,0.96) 75%, rgba(255,255,255,0.95) 100%)`,
                     backdropFilter: "blur(25px)",
-                    border: isDark ? `2px solid ${currentGradient.glow}50` : `2px solid ${currentGradient.primary}40`,
+                    border: isDark ? `2px solid rgba(60,60,60,0.5)` : `2px solid rgba(203,213,225,0.4)`,
                     boxShadow: isDark
                         ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
-               0 0 0 1px ${currentGradient.glow}30, 
-               0 0 40px ${currentGradient.glow}40,
+               0 0 0 1px rgba(60,60,60,0.3), 
+               0 0 40px rgba(0,0,0,0.4),
                inset 0 1px 0 rgba(255, 255, 255, 0.1)`
                         : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
-               0 0 0 1px ${currentGradient.primary}30, 0 0 40px ${currentGradient.primary}25,
+               0 0 0 1px rgba(203,213,225,0.3), 
+               0 0 40px rgba(0,0,0,0.25),
                inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
                 }}
             >
@@ -624,12 +627,12 @@ const YenFlowBot = ({
                     className="absolute inset-0 opacity-20 rounded-lg"
                     style={{
                         backgroundImage: isDark
-                            ? `radial-gradient(circle at 20% 30%, ${currentGradient.primary}60 0%, transparent 40%), 
-                 radial-gradient(circle at 80% 70%, ${currentGradient.secondary}60 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, ${currentGradient.accent}40 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 30%, ${currentGradient.primary}40 0%, transparent 40%), 
-                 radial-gradient(circle at 80% 70%, ${currentGradient.secondary}40 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, ${currentGradient.accent}30 0%, transparent 60%)`,
+                            ? `radial-gradient(circle at 20% 30%, rgba(60,60,60,0.6) 0%, transparent 40%), 
+                 radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
+                 radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
+                            : `radial-gradient(circle at 20% 30%, rgba(203,213,225,0.4) 0%, transparent 40%), 
+                 radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
+                 radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
                     }}
                 />
 
@@ -638,10 +641,10 @@ const YenFlowBot = ({
                     className="relative z-10 p-3 flex items-center justify-between border-b drag-handle"
                     style={{
                         background: isDark
-                            ? `linear-gradient(135deg, ${currentGradient.primary}40, ${currentGradient.secondary}40)`
-                            : `linear-gradient(135deg, ${currentGradient.primary}30, ${currentGradient.secondary}30)`,
-                        borderColor: isDark ? `${currentGradient.glow}40` : `${currentGradient.primary}30`,
-                        boxShadow: `0 4px 15px ${currentGradient.glow}30`,
+                            ? `linear-gradient(135deg, rgba(40,40,40,0.4), rgba(60,60,60,0.4))`
+                            : `linear-gradient(135deg, rgba(241,245,249,0.3), rgba(226,232,240,0.3))`,
+                        borderColor: isDark ? `rgba(60,60,60,0.4)` : `rgba(203,213,225,0.3)`,
+                        boxShadow: isDark ? `0 4px 15px rgba(0,0,0,0.3)` : `0 4px 15px rgba(0,0,0,0.1)`,
                     }}
                 >
                     <div className="flex items-center space-x-3">
@@ -731,8 +734,8 @@ const YenFlowBot = ({
                             className="p-4 h-[360px] overflow-y-auto relative z-10"
                             style={{
                                 background: isDark
-                                    ? `radial-gradient(circle at 50% 50%, rgba(0,0,0,0.8) 0%, ${currentGradient.primary}10 50%, rgba(0,0,0,0.8) 100%)`
-                                    : `radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.9) 100%)`,
+                                    ? `radial-gradient(circle at 50% 50%, rgba(0,0,0,0.8) 0%, rgba(20,20,20,0.1) 50%, rgba(0,0,0,0.8) 100%)`
+                                    : `radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9) 0%, rgba(241,245,249,0.05) 50%, rgba(255,255,255,0.9) 100%)`,
                             }}
                         >
                             {messages.map((message) => (
@@ -757,14 +760,14 @@ const YenFlowBot = ({
                                                 message.role === "user"
                                                     ? `1px solid ${currentGradient.glow}60`
                                                     : isDark
-                                                        ? `1px solid ${currentGradient.glow}20`
-                                                        : `1px solid ${currentGradient.primary}20`,
+                                                        ? `1px solid rgba(60,60,60,0.2)`
+                                                        : `1px solid rgba(203,213,225,0.2)`,
                                             boxShadow:
                                                 message.role === "user"
                                                     ? `0 4px 15px ${currentGradient.glow}40, 0 0 20px ${currentGradient.glow}20`
                                                     : isDark
-                                                        ? `0 2px 10px rgba(0,0,0,0.3), 0 0 10px ${currentGradient.glow}10`
-                                                        : `0 2px 10px rgba(0,0,0,0.1), 0 0 5px ${currentGradient.primary}10`,
+                                                        ? `0 2px 10px rgba(0,0,0,0.3), 0 0 10px rgba(0,0,0,0.1)`
+                                                        : `0 2px 10px rgba(0,0,0,0.1), 0 0 5px rgba(0,0,0,0.05)`,
                                         }}
                                         whileHover={{
                                             scale: 1.02,
@@ -772,8 +775,8 @@ const YenFlowBot = ({
                                                 message.role === "user"
                                                     ? `0 6px 20px ${currentGradient.glow}50, 0 0 30px ${currentGradient.glow}30`
                                                     : isDark
-                                                        ? `0 4px 15px rgba(0,0,0,0.4), 0 0 15px ${currentGradient.glow}20`
-                                                        : `0 4px 15px rgba(0,0,0,0.2), 0 0 10px ${currentGradient.primary}15`,
+                                                        ? `0 4px 15px rgba(0,0,0,0.4), 0 0 15px rgba(0,0,0,0.2)`
+                                                        : `0 4px 15px rgba(0,0,0,0.2), 0 0 10px rgba(0,0,0,0.1)`,
                                         }}
                                     >
                                         <p className="text-sm">{message.content}</p>
@@ -791,9 +794,9 @@ const YenFlowBot = ({
                             className="p-3 border-t relative z-10"
                             style={{
                                 background: isDark
-                                    ? `linear-gradient(135deg, rgba(0,0,0,0.9), ${currentGradient.primary}10)`
-                                    : `linear-gradient(135deg, rgba(255,255,255,0.9), ${currentGradient.primary}05)`,
-                                borderColor: isDark ? `${currentGradient.glow}30` : `${currentGradient.primary}20`,
+                                    ? `linear-gradient(135deg, rgba(0,0,0,0.9), rgba(20,20,20,0.1))`
+                                    : `linear-gradient(135deg, rgba(255,255,255,0.9), rgba(241,245,249,0.05))`,
+                                borderColor: isDark ? `rgba(60,60,60,0.3)` : `rgba(203,213,225,0.2)`,
                             }}
                         >
                             <div className="flex items-center space-x-2">
@@ -807,11 +810,11 @@ const YenFlowBot = ({
                                         background: isDark
                                             ? `linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))`
                                             : `linear-gradient(135deg, rgba(0,0,0,0.02), rgba(0,0,0,0.01))`,
-                                        border: isDark ? `1px solid ${currentGradient.glow}30` : `1px solid ${currentGradient.primary}20`,
+                                        border: isDark ? `1px solid rgba(60,60,60,0.3)` : `1px solid rgba(203,213,225,0.2)`,
                                         color: isDark ? "#f9fafb" : "#111827",
                                         boxShadow: isDark
-                                            ? `0 0 0 1px ${currentGradient.glow}10, 0 0 10px ${currentGradient.glow}15`
-                                            : `0 0 0 1px ${currentGradient.primary}10, 0 0 5px ${currentGradient.primary}05`,
+                                            ? `0 0 0 1px rgba(60,60,60,0.1), 0 0 10px rgba(0,0,0,0.15)`
+                                            : `0 0 0 1px rgba(203,213,225,0.1), 0 0 5px rgba(0,0,0,0.05)`,
                                     }}
                                 />
                                 <motion.button // Alterado de Button para motion.button
@@ -854,26 +857,26 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                     background: isDark
                         ? `linear-gradient(135deg, 
           rgba(0,0,0,0.95) 0%, 
-          ${currentGradient.primary}20 25%, 
-          ${currentGradient.secondary}15 50%, 
-          ${currentGradient.primary}20 75%, 
+          rgba(20,20,20,0.96) 25%, 
+          rgba(40,40,40,0.94) 50%, 
+          rgba(20,20,20,0.96) 75%, 
           rgba(0,0,0,0.95) 100%)`
                         : `linear-gradient(135deg, 
           rgba(255,255,255,0.95) 0%, 
-          ${currentGradient.primary}15 25%, 
-          ${currentGradient.secondary}10 50%, 
-          ${currentGradient.primary}15 75%, 
+          rgba(248,250,252,0.96) 25%, 
+          rgba(241,245,249,0.94) 50%, 
+          rgba(248,250,252,0.96) 75%, 
           rgba(255,255,255,0.95) 100%)`,
                     backdropFilter: "blur(25px)",
-                    border: isDark ? `2px solid ${currentGradient.glow}50` : `2px solid ${currentGradient.primary}40`,
+                    border: isDark ? `2px solid rgba(60,60,60,0.5)` : `2px solid rgba(203,213,225,0.4)`,
                     boxShadow: isDark
                         ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
-               0 0 0 1px ${currentGradient.glow}30, 
-               0 0 40px ${currentGradient.glow}40,
+               0 0 0 1px rgba(60,60,60,0.3), 
+               0 0 40px rgba(0,0,0,0.4),
                inset 0 1px 0 rgba(255, 255, 255, 0.1)`
                         : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
-               0 0 0 1px ${currentGradient.primary}30, 
-               0 0 40px ${currentGradient.primary}25,
+               0 0 0 1px rgba(203,213,225,0.3), 
+               0 0 40px rgba(0,0,0,0.25),
                inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
                 }}
             >
@@ -882,50 +885,50 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                     className="absolute inset-0 opacity-20 rounded-lg"
                     style={{
                         backgroundImage: isDark
-                            ? `radial-gradient(circle at 20% 30%, ${currentGradient.primary}60 0%, transparent 40%), 
-                 radial-gradient(circle at 80% 70%, ${currentGradient.secondary}60 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, ${currentGradient.accent}40 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 30%, ${currentGradient.primary}40 0%, transparent 40%), 
-                 radial-gradient(circle at 80% 70%, ${currentGradient.secondary}40 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, ${currentGradient.accent}30 0%, transparent 60%)`,
+                            ? `radial-gradient(circle at 20% 30%, rgba(60,60,60,0.6) 0%, transparent 40%), 
+                 radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
+                 radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
+                            : `radial-gradient(circle at 20% 30%, rgba(203,213,225,0.4) 0%, transparent 40%), 
+                 radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
+                 radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
                     }}
                 />
 
                 <DialogHeader className="relative z-10">
-                    <div className="flex items-center gap-4 mb-4">
+                    <div className="flex items-start gap-5">
                         <div
                             className="p-4 rounded-2xl"
                             style={{
                                 background: isDark
-                                    ? `linear-gradient(135deg, ${currentGradient.primary}40, ${currentGradient.secondary}40)`
-                                    : `linear-gradient(135deg, ${currentGradient.primary}30, ${currentGradient.secondary}30)`,
-                                boxShadow: `0 8px 20px ${currentGradient.glow}50`,
+                                    ? `linear-gradient(135deg, rgba(40, 40, 40, 0.15), rgba(20, 20, 20, 0.1))`
+                                    : `linear-gradient(135deg, rgba(241,245,249,0.3), rgba(226,232,240,0.3))`,
+                                border: isDark ? `1px solid rgba(60, 60, 60, 0.3)` : `1px solid rgba(203,213,225,0.3)`,
+                                boxShadow: isDark ? `0 8px 20px rgba(0, 0, 0, 0.4)` : `0 8px 20px rgba(0,0,0,0.1)`,
                             }}
                         >
                             <FiImage
                                 className="w-8 h-8"
                                 style={{
-                                    color: isDark ? "#ffffff" : currentGradient.primary,
+                                    color: isDark ? currentGradient.glow : currentGradient.primary,
                                     filter: `drop-shadow(0 0 8px ${currentGradient.glow}80)`,
                                 }}
                             />
                         </div>
-                        <div>
+                        <div className="flex-1">
                             <DialogTitle
-                                className="text-xl font-bold mb-1 flex items-center gap-2"
+                                className="text-2xl font-bold mb-3 flex items-center gap-3"
                                 style={{
-                                    color: isDark ? "#f9fafb" : "#111827",
-                                    textShadow: isDark ? `0 0 15px ${currentGradient.glow}60` : `0 0 8px ${currentGradient.primary}40`,
+                                    color: isDark ? "#f8fafc" : "#0f172a",
+                                    textShadow: isDark ? "0 0 15px rgba(248, 250, 252, 0.4)" : "none",
                                 }}
                             >
                                 <FiImage className="w-6 h-6" style={{ color: currentGradient.glow }} />
                                 Opções de Imagem
                             </DialogTitle>
                             <DialogDescription
-                                className="text-sm"
+                                className="text-base leading-relaxed"
                                 style={{
-                                    color: isDark ? "#d1d5db" : "#6b7280",
-                                    textShadow: isDark ? `0 0 5px ${currentGradient.glow}30` : "none",
+                                    color: isDark ? "#cbd5e1" : "#64748b",
                                 }}
                             >
                                 Personalize a aparência do seu fluxo de trabalho
@@ -934,7 +937,7 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                     </div>
                 </DialogHeader>
 
-                <div className="relative z-10 grid gap-4 py-6">
+                <div className="relative z-10 space-y-4 py-6">
                     {/* Alterar Background */}
                     <motion.button
                         whileHover={{ scale: 1.02, x: 6 }}
@@ -943,36 +946,42 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                         className="w-full flex items-center gap-5 px-6 py-5 text-sm rounded-2xl transition-all duration-300 group"
                         style={{
                             background: isDark
-                                ? `linear-gradient(135deg, ${currentGradient.primary}25, ${currentGradient.secondary}20)`
-                                : `linear-gradient(135deg, ${currentGradient.primary}20, ${currentGradient.secondary}15)`,
-                            border: isDark ? `2px solid ${currentGradient.glow}40` : `2px solid ${currentGradient.primary}30`,
-                            boxShadow: `0 8px 20px ${currentGradient.glow}30`,
+                                ? `linear-gradient(135deg, rgba(40, 40, 40, 0.25), rgba(20, 20, 20, 0.20))`
+                                : `linear-gradient(135deg, rgba(241,245,249,0.2), rgba(226,232,240,0.15))`,
+                            border: isDark ? `2px solid rgba(60, 60, 60, 0.4)` : `2px solid rgba(203,213,225,0.3)`,
+                            boxShadow: isDark ? `0 8px 20px rgba(0, 0, 0, 0.3)` : `0 8px 20px rgba(0,0,0,0.1)`,
                         }}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.background = isDark
-                                ? `linear-gradient(135deg, ${currentGradient.primary}35, ${currentGradient.secondary}30)`
-                                : `linear-gradient(135deg, ${currentGradient.primary}30, ${currentGradient.secondary}25)`
-                            e.currentTarget.style.boxShadow = `0 12px 30px ${currentGradient.glow}40, 0 0 25px ${currentGradient.glow}35`
+                                ? `linear-gradient(135deg, rgba(40, 40, 40, 0.35), rgba(20, 20, 20, 0.30))`
+                                : `linear-gradient(135deg, rgba(241,245,249,0.3), rgba(226,232,240,0.25))`
+                            e.currentTarget.style.boxShadow = isDark
+                                ? `0 12px 30px rgba(0, 0, 0, 0.4), 0 0 25px ${currentGradient.glow}35`
+                                : `0 12px 30px rgba(0,0,0,0.15), 0 0 25px ${currentGradient.glow}35`
                         }}
                         onMouseLeave={(e) => {
                             e.currentTarget.style.background = isDark
-                                ? `linear-gradient(135deg, ${currentGradient.primary}25, ${currentGradient.secondary}20)`
-                                : `linear-gradient(135deg, ${currentGradient.primary}20, ${currentGradient.secondary}15)`
-                            e.currentTarget.style.boxShadow = `0 8px 20px ${currentGradient.glow}30`
+                                ? `linear-gradient(135deg, rgba(40, 40, 40, 0.25), rgba(20, 20, 20, 0.20))`
+                                : `linear-gradient(135deg, rgba(241,245,249,0.2), rgba(226,232,240,0.15))`
+                            e.currentTarget.style.boxShadow = isDark ? `0 8px 20px rgba(0, 0, 0, 0.3)` : `0 8px 20px rgba(0,0,0,0.1)`
                         }}
                     >
                         <div
                             className="p-4 rounded-2xl transition-all duration-300"
                             style={{
-                                background: `linear-gradient(135deg, ${currentGradient.primary}50, ${currentGradient.secondary}40)`,
-                                boxShadow: `0 6px 15px ${currentGradient.glow}50`,
+                                background: isDark
+                                    ? `linear-gradient(135deg, rgba(60, 60, 60, 0.6), rgba(40, 40, 40, 0.5))`
+                                    : `linear-gradient(135deg, ${currentGradient.primary}50, ${currentGradient.secondary}40)`,
+                                boxShadow: isDark ? `0 6px 15px rgba(0, 0, 0, 0.4)` : `0 6px 15px ${currentGradient.glow}50`,
                             }}
                         >
                             <FiFolder
                                 className="w-6 h-6"
                                 style={{
                                     color: "#ffffff",
-                                    filter: `drop-shadow(0 0 8px ${currentGradient.glow}80)`,
+                                    filter: isDark
+                                        ? `drop-shadow(0 0 8px rgba(255, 255, 255, 0.8))`
+                                        : `drop-shadow(0 0 8px ${currentGradient.glow}80)`,
                                 }}
                             />
                         </div>
@@ -980,8 +989,8 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                             <div
                                 className="font-bold text-base mb-1"
                                 style={{
-                                    color: isDark ? "#f9fafb" : "#111827",
-                                    textShadow: isDark ? `0 0 8px ${currentGradient.glow}50` : `0 0 4px ${currentGradient.primary}30`,
+                                    color: isDark ? "#f8fafc" : "#0f172a",
+                                    textShadow: isDark ? "0 0 8px rgba(248, 250, 252, 0.5)" : "none",
                                 }}
                             >
                                 Alterar Background
@@ -989,8 +998,7 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                             <div
                                 className="text-sm opacity-80"
                                 style={{
-                                    color: isDark ? "#d1d5db" : "#6b7280",
-                                    textShadow: isDark ? `0 0 4px ${currentGradient.glow}30` : "none",
+                                    color: isDark ? "#cbd5e1" : "#64748b",
                                 }}
                             >
                                 Escolher nova imagem de fundo para o fluxo
@@ -1006,21 +1014,21 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                         className="w-full flex items-center gap-5 px-6 py-5 text-sm rounded-2xl transition-all duration-300 group"
                         style={{
                             background: isDark
-                                ? `linear-gradient(135deg, rgba(239, 68, 68, 0.25), ${currentGradient.primary}20)`
-                                : `linear-gradient(135deg, rgba(239, 68, 68, 0.20), ${currentGradient.primary}15)`,
+                                ? `linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(20, 20, 20, 0.20))`
+                                : `linear-gradient(135deg, rgba(239, 68, 68, 0.20), rgba(248,250,252,0.15))`,
                             border: isDark ? `2px solid rgba(239, 68, 68, 0.5)` : `2px solid rgba(239, 68, 68, 0.4)`,
                             boxShadow: `0 8px 20px rgba(239, 68, 68, 0.25)`,
                         }}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.background = isDark
-                                ? `linear-gradient(135deg, rgba(239, 68, 68, 0.35), ${currentGradient.primary}30)`
-                                : `linear-gradient(135deg, rgba(239, 68, 68, 0.30), ${currentGradient.primary}25)`
+                                ? `linear-gradient(135deg, rgba(239, 68, 68, 0.35), rgba(20, 20, 20, 0.30))`
+                                : `linear-gradient(135deg, rgba(239, 68, 68, 0.30), rgba(248,250,252,0.25))`
                             e.currentTarget.style.boxShadow = `0 12px 30px rgba(239, 68, 68, 0.35), 0 0 25px ${currentGradient.glow}30`
                         }}
                         onMouseLeave={(e) => {
                             e.currentTarget.style.background = isDark
-                                ? `linear-gradient(135deg, rgba(239, 68, 68, 0.25), ${currentGradient.primary}20)`
-                                : `linear-gradient(135deg, rgba(239, 68, 68, 0.20), ${currentGradient.primary}15)`
+                                ? `linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(20, 20, 20, 0.20))`
+                                : `linear-gradient(135deg, rgba(239, 68, 68, 0.20), rgba(248,250,252,0.15))`
                             e.currentTarget.style.boxShadow = `0 8px 20px rgba(239, 68, 68, 0.25)`
                         }}
                     >
@@ -1043,8 +1051,8 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                             <div
                                 className="font-bold text-base mb-1"
                                 style={{
-                                    color: isDark ? "#f9fafb" : "#111827",
-                                    textShadow: isDark ? `0 0 8px ${currentGradient.glow}50` : `0 0 4px ${currentGradient.primary}30`,
+                                    color: isDark ? "#f8fafc" : "#0f172a",
+                                    textShadow: isDark ? "0 0 8px rgba(248, 250, 252, 0.5)" : "none",
                                 }}
                             >
                                 Resetar Background
@@ -1052,8 +1060,7 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                             <div
                                 className="text-sm opacity-80"
                                 style={{
-                                    color: isDark ? "#d1d5db" : "#6b7280",
-                                    textShadow: isDark ? `0 0 4px ${currentGradient.glow}30` : "none",
+                                    color: isDark ? "#cbd5e1" : "#64748b",
                                 }}
                             >
                                 Remover imagem de fundo e voltar ao padrão
@@ -1069,21 +1076,21 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                         className="w-full flex items-center gap-5 px-6 py-5 text-sm rounded-2xl transition-all duration-300 group"
                         style={{
                             background: isDark
-                                ? `linear-gradient(135deg, rgba(34, 197, 94, 0.25), ${currentGradient.secondary}20)`
-                                : `linear-gradient(135deg, rgba(34, 197, 94, 0.20), ${currentGradient.secondary}15)`,
+                                ? `linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(20, 20, 20, 0.20))`
+                                : `linear-gradient(135deg, rgba(34, 197, 94, 0.20), rgba(248,250,252,0.15))`,
                             border: isDark ? `2px solid rgba(34, 197, 94, 0.5)` : `2px solid rgba(34, 197, 94, 0.4)`,
                             boxShadow: `0 8px 20px rgba(34, 197, 94, 0.25)`,
                         }}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.background = isDark
-                                ? `linear-gradient(135deg, rgba(34, 197, 94, 0.35), ${currentGradient.secondary}30)`
-                                : `linear-gradient(135deg, rgba(34, 197, 94, 0.30), ${currentGradient.secondary}25)`
+                                ? `linear-gradient(135deg, rgba(34, 197, 94, 0.35), rgba(20, 20, 20, 0.30))`
+                                : `linear-gradient(135deg, rgba(34, 197, 94, 0.30), rgba(248,250,252,0.25))`
                             e.currentTarget.style.boxShadow = `0 12px 30px rgba(34, 197, 94, 0.35), 0 0 25px ${currentGradient.glow}30`
                         }}
                         onMouseLeave={(e) => {
                             e.currentTarget.style.background = isDark
-                                ? `linear-gradient(135deg, rgba(34, 197, 94, 0.25), ${currentGradient.secondary}20)`
-                                : `linear-gradient(135deg, rgba(34, 197, 94, 0.20), ${currentGradient.secondary}15)`
+                                ? `linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(20, 20, 20, 0.20))`
+                                : `linear-gradient(135deg, rgba(34, 197, 94, 0.20), rgba(248,250,252,0.15))`
                             e.currentTarget.style.boxShadow = `0 8px 20px rgba(34, 197, 94, 0.25)`
                         }}
                     >
@@ -1106,8 +1113,8 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                             <div
                                 className="font-bold text-base mb-1"
                                 style={{
-                                    color: isDark ? "#f9fafb" : "#111827",
-                                    textShadow: isDark ? `0 0 8px ${currentGradient.glow}50` : `0 0 4px ${currentGradient.primary}30`,
+                                    color: isDark ? "#f8fafc" : "#0f172a",
+                                    textShadow: isDark ? "0 0 8px rgba(248, 250, 252, 0.5)" : "none",
                                 }}
                             >
                                 Salvar Imagem
@@ -1115,8 +1122,7 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                             <div
                                 className="text-sm opacity-80"
                                 style={{
-                                    color: isDark ? "#d1d5db" : "#6b7280",
-                                    textShadow: isDark ? `0 0 4px ${currentGradient.glow}30` : "none",
+                                    color: isDark ? "#cbd5e1" : "#64748b",
                                 }}
                             >
                                 Capturar screenshot do fluxo atual
@@ -1128,7 +1134,7 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                 <div
                     className="relative z-10 flex justify-end gap-3 pt-4 border-t"
                     style={{
-                        borderColor: isDark ? `${currentGradient.glow}30` : `${currentGradient.primary}20`,
+                        borderColor: isDark ? "rgba(60, 60, 60, 0.3)" : "rgba(203,213,225,0.2)",
                     }}
                 >
                     <Button
@@ -1138,11 +1144,11 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                         className="px-6 py-2"
                         style={{
                             background: isDark
-                                ? `linear-gradient(135deg, rgba(75, 85, 99, 0.4), ${currentGradient.primary}20)`
-                                : `linear-gradient(135deg, rgba(229, 231, 235, 0.6), ${currentGradient.primary}15)`,
-                            color: isDark ? "#d1d5db" : "#6b7280",
-                            border: isDark ? `1px solid ${currentGradient.glow}40` : `1px solid ${currentGradient.primary}30`,
-                            boxShadow: `0 4px 12px ${currentGradient.glow}20`,
+                                ? `linear-gradient(135deg, rgba(60, 60, 60, 0.4), rgba(40, 40, 40, 0.3))`
+                                : `linear-gradient(135deg, rgba(241,245,249,0.6), rgba(226,232,240,0.15))`,
+                            color: isDark ? "#e2e8f0" : "#475569",
+                            border: isDark ? `1px solid rgba(60, 60, 60, 0.4)` : `1px solid rgba(203,213,225,0.3)`,
+                            boxShadow: isDark ? `0 4px 12px rgba(0, 0, 0, 0.2)` : `0 4px 12px rgba(0,0,0,0.1)`,
                         }}
                     >
                         Fechar
@@ -1197,10 +1203,33 @@ const FlowHeader = ({
         setShowResetDialog(false)
     }
 
+    const [isSaved, setIsSaved] = useState(false)
+
     const handleExecute = () => {
         if (onExecute) {
-            onExecute()
-            setShowExecuteDialog(true)
+            try {
+                const result = onExecute()
+                // Only show success dialog if execution was successful (returned true)
+                if (result === true) {
+                    setShowExecuteDialog(true)
+                }
+                // If result is false, the validation dialog will be shown by the executeWorkflow function
+            } catch (error) {
+                console.error("Execution failed:", error)
+                // Don't show the success dialog on error
+            }
+        }
+    }
+
+    const handleSave = () => {
+        if (onSave) {
+            try {
+                const result = onSave()
+                // Save function will handle its own success/error dialogs
+                // No need to show additional dialogs here
+            } catch (error) {
+                console.error("Save failed:", error)
+            }
         }
     }
 
@@ -1313,59 +1342,55 @@ const FlowHeader = ({
                 style={{
                     background: isDark
                         ? `linear-gradient(135deg, 
-               #1a1a2e 0%, 
-               #16213e 10%, 
-               ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 20%,
-               #0f172a 30%,
-               ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 40%,
-               #1e293b 50%,
-               ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 60%,
-               #0f172a 70%,
-               ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 80%,
-               #1a1a2e 90%,
-               #16213e 100%)`
-                        : `linear-gradient(135deg, 
-               #f8fafc 0%, 
-               #e2e8f0 10%, 
-               ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 20%,
-               #f1f5f9 30%,
-               ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 40%,
-               #e2e8f0 50%,
-               ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 60%,
-               #f1f5f9 70%,
-               ${currentGradient.secondary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")} 80%,
-               #f8fafc 90%,
-               #e2e8f0 100%)`,
-                    backdropFilter: "blur(20px)",
-                    borderBottom: isDark
-                        ? `2px solid ${currentGradient.glow}`
-                        : `2px solid ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}`,
-                    boxShadow: isDark
-                        ? `0 8px 32px rgba(0, 0, 0, 0.8), 
-               0 0 60px ${currentGradient.glow}60, 
-               0 0 120px ${currentGradient.glow}30,
-               inset 0 2px 0 rgba(255, 255, 255, 0.1),
-               inset 0 -2px 0 ${currentGradient.glow}40`
-                        : `0 8px 32px rgba(0, 0, 0, 0.15), 
-               0 0 60px ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}40, 
-               0 0 120px ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}20,
-               inset 0 2px 0 rgba(255, 255, 255, 0.8),
-               inset 0 -2px 0 ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}30`,
-                }}
+                       #000000 0%, 
+                       #1a1a1a 10%, 
+                       #2a2a2a 20%,
+                       #1a1a1a 30%,
+                       #333333 40%,
+                       #2a2a2a 50%,
+                       #1a1a1a 60%,
+                       #000000 70%,
+                       #1a1a1a 80%,
+                       #000000 90%,
+                       #1a1a1a 100%)`
+                                    : `linear-gradient(135deg, 
+                       #f8fafc 0%, 
+                       #e2e8f0 10%, 
+                       #f1f5f9 20%,
+                       #e2e8f0 30%,
+                       #cbd5e1 40%,
+                       #f1f5f9 50%,
+                       #e2e8f0 60%,
+                       #f8fafc 70%,
+                       #e2e8f0 80%,
+                       #f8fafc 90%,
+                       #e2e8f0 100%)`,
+                                backdropFilter: "blur(20px)",
+                                borderBottom: isDark
+                                    ? `2px solid ${currentGradient.glow}`
+                                    : `2px solid ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}`,
+                                boxShadow: isDark
+                                    ? `0 8px 32px rgba(0, 0, 0, 0.8), 
+                       0 0 60px ${currentGradient.glow}60, 
+                       0 0 120px ${currentGradient.glow}30,
+                       inset 0 2px 0 rgba(255, 255, 255, 0.1),
+                       inset 0 -2px 0 rgba(203,213,225,0.3)`
+                                    : undefined
+                            }}
             >
                 {/* Animated background overlay */}
                 <div
-                    className="absolute inset-0 opacity-30"
-                    style={{
-                        background: isDark
-                            ? `radial-gradient(circle at 20% 20%, ${currentGradient.glow}40 0%, transparent 50%), 
-                 radial-gradient(circle at 80% 80%, ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}40 0%, transparent 50%),
-                 radial-gradient(circle at 50% 50%, ${currentGradient.secondary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}30 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 20%, ${currentGradient.primary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}30 0%, transparent 50%), 
-                 radial-gradient(circle at 80% 80%, ${currentGradient.secondary.replace("linear-gradient(135deg,", "").replace(" 0%,", "").replace(" 100%)", "")}30 0%, transparent 50%),
-                 radial-gradient(circle at 50% 50%, ${currentGradient.glow}20 0%, transparent 60%)`,
-                        animation: "pulse 3s ease-in-out infinite alternate",
-                    }}
+                className="absolute inset-0 opacity-30"
+                style={{
+                background: isDark
+                    ? `radial-gradient(circle at 20% 20%, ${currentGradient.glow}40 0%, transparent 50%), 
+                 radial-gradient(circle at 80% 80%, rgba(60,60,60,0.4) 0%, transparent 50%),
+                 radial-gradient(circle at 50% 50%, rgba(40,40,40,0.3) 0%, transparent 60%)`
+                    : `radial-gradient(circle at 20% 20%, rgba(203,213,225,0.3) 0%, transparent 50%), 
+                 radial-gradient(circle at 80% 80%, rgba(226,232,240,0.3) 0%, transparent 50%),
+                 radial-gradient(circle at 50% 50%, rgba(241,245,249,0.2) 0%, transparent 60%)`,
+                animation: "pulse 3s ease-in-out infinite alternate",
+            }}
                 />
 
                 <div className="relative z-10 flex items-center justify-between p-4">
@@ -1430,8 +1455,8 @@ const FlowHeader = ({
                                         className="w-48 h-9 text-sm pl-10 pr-3 rounded-xl border-2 transition-all duration-300"
                                         style={{
                                             background: isDark
-                                                ? `linear-gradient(135deg, rgba(0,0,0,0.8), ${currentGradient.primary}30)`
-                                                : `linear-gradient(135deg, rgba(255,255,255,0.9), ${currentGradient.primary}20)`,
+                                                ? `linear-gradient(135deg, rgba(0,0,0,0.8), rgba(20,20,20,0.3))`
+                                                : `linear-gradient(135deg, rgba(255,255,255,0.9), rgba(241,245,249,0.2))`,
                                             color: isDark ? "#f9fafb" : "#111827",
                                             border: `2px solid ${currentGradient.glow}`,
                                             backdropFilter: "blur(15px)",
@@ -1446,8 +1471,8 @@ const FlowHeader = ({
                                 className="flex items-center gap-1 p-1 rounded-xl backdrop-blur-sm"
                                 style={{
                                     background: isDark
-                                        ? `linear-gradient(135deg, ${currentGradient.primary}40, ${currentGradient.secondary}30)`
-                                        : `linear-gradient(135deg, ${currentGradient.primary}30, ${currentGradient.secondary}20)`,
+                                        ? `linear-gradient(135deg, rgba(40,40,40,0.4), rgba(60,60,60,0.3))`
+                                        : `linear-gradient(135deg, rgba(241,245,249,0.3), rgba(226,232,240,0.2))`,
                                     border: `1px solid ${currentGradient.glow}`,
                                     boxShadow: `0 4px 15px ${currentGradient.glow}30`,
                                 }}
@@ -1513,7 +1538,7 @@ const FlowHeader = ({
                             <motion.button
                                 whileHover={{ scale: 1.02, y: -1 }}
                                 whileTap={{ scale: 0.98 }}
-                                onClick={onSave}
+                                onClick={handleSave}
                                 className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
                                 title="Salvar Fluxo"
                                 style={{
@@ -1689,121 +1714,220 @@ const FlowHeader = ({
                 theme={theme}
             />
 
-            {/* Reset Dialog with Theme Colors */}
+            {/* Reset Dialog with Enhanced Design */}
             <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
                 <DialogContent
-                    className="sm:max-w-[425px]"
+                    className="sm:max-w-[480px]"
                     style={{
                         background: isDark
                             ? `linear-gradient(135deg, 
-                 rgba(0,0,0,0.95) 0%, 
-                 ${currentGradient.primary}20 25%, 
-                 ${currentGradient.secondary}15 50%, 
-                 ${currentGradient.primary}20 75%, 
-                 rgba(0,0,0,0.95) 100%)`
+                 rgba(0, 0, 0, 0.98) 0%, 
+                 rgba(20, 20, 20, 0.96) 25%,
+                 rgba(40, 40, 40, 0.94) 50%,
+                 rgba(20, 20, 20, 0.96) 75%,
+                 rgba(0, 0, 0, 0.98) 100%)`
                             : `linear-gradient(135deg, 
-                 rgba(255,255,255,0.95) 0%, 
-                 ${currentGradient.primary}15 25%, 
-                 ${currentGradient.secondary}10 50%, 
-                 ${currentGradient.primary}15 75%, 
-                 rgba(255,255,255,0.95) 100%)`,
+                 rgba(248, 250, 252, 0.98) 0%, 
+                 rgba(241, 245, 249, 0.96) 25%,
+                 rgba(226, 232, 240, 0.94) 50%,
+                 rgba(241, 245, 249, 0.96) 75%,
+                 rgba(248, 250, 252, 0.98) 100%)`,
                         backdropFilter: "blur(25px)",
-                        border: isDark ? `2px solid ${currentGradient.glow}50` : `2px solid ${currentGradient.primary}40`,
+                        border: isDark ? `2px solid rgba(239, 68, 68, 0.4)` : `2px solid rgba(239, 68, 68, 0.3)`,
                         boxShadow: isDark
-                            ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
-                 0 0 0 1px ${currentGradient.glow}30, 
-                 0 0 40px ${currentGradient.glow}40,
-                 inset 0 1px 0 rgba(255, 255, 255, 0.1)`
-                            : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
-                 0 0 0 1px ${currentGradient.primary}30, 
-                 0 0 40px ${currentGradient.primary}25,
-                 inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
+                            ? `0 25px 50px -12px rgba(0, 0, 0, 0.9), 
+                 0 0 0 1px rgba(239, 68, 68, 0.2),
+                 0 0 40px rgba(239, 68, 68, 0.3),
+                 inset 0 1px 0 rgba(255, 255, 255, 0.08)`
+                            : `0 25px 50px -12px rgba(0, 0, 0, 0.15), 
+                 0 0 0 1px rgba(239, 68, 68, 0.15),
+                 0 0 40px rgba(239, 68, 68, 0.2),
+                 inset 0 1px 0 rgba(255, 255, 255, 0.9)`,
                     }}
                 >
-                    {/* Animated background pattern */}
+                    {/* Subtle animated background */}
                     <div
-                        className="absolute inset-0 opacity-20 rounded-lg"
+                        className="absolute inset-0 opacity-10 rounded-lg"
                         style={{
                             backgroundImage: isDark
-                                ? `radial-gradient(circle at 20% 30%, ${currentGradient.primary}60 0%, transparent 40%), 
-                   radial-gradient(circle at 80% 70%, ${currentGradient.secondary}60 0%, transparent 40%),
-                   radial-gradient(circle at 50% 50%, ${currentGradient.accent}40 0%, transparent 60%)`
-                                : `radial-gradient(circle at 20% 30%, ${currentGradient.primary}40 0%, transparent 40%), 
-                   radial-gradient(circle at 80% 70%, ${currentGradient.secondary}40 0%, transparent 40%),
-                   radial-gradient(circle at 50% 50%, ${currentGradient.accent}30 0%, transparent 60%)`,
+                                ? `radial-gradient(circle at 25% 25%, rgba(239, 68, 68, 0.4) 0%, transparent 50%), 
+                   radial-gradient(circle at 75% 75%, rgba(220, 38, 38, 0.3) 0%, transparent 50%)`
+                                : `radial-gradient(circle at 25% 25%, rgba(239, 68, 68, 0.2) 0%, transparent 50%), 
+                   radial-gradient(circle at 75% 75%, rgba(220, 38, 38, 0.15) 0%, transparent 50%)`,
                         }}
                     />
 
-                    <DialogHeader className="relative z-10">
-                        <DialogTitle
-                            className="text-lg font-bold flex items-center gap-2"
-                            style={{
-                                color: isDark ? "#f9fafb" : "#111827",
-                                textShadow: isDark ? `0 0 15px ${currentGradient.glow}60` : `0 0 8px ${currentGradient.primary}40`,
-                            }}
-                        >
-                            <FiRefreshCw className="w-5 h-5 text-red-500" />
-                            Confirmar Reset
-                        </DialogTitle>
-                        <DialogDescription
-                            className="text-sm"
-                            style={{
-                                color: isDark ? "#d1d5db" : "#6b7280",
-                                textShadow: isDark ? `0 0 5px ${currentGradient.glow}30` : "none",
-                            }}
-                        >
-                            Tem certeza de que deseja resetar o fluxo? Todas as alterações não salvas serão perdidas.
-                        </DialogDescription>
+                    <DialogHeader className="relative z-10 pb-6">
+                        <div className="flex items-start gap-5">
+                            <div
+                                className="p-4 rounded-2xl"
+                                style={{
+                                    background: isDark
+                                        ? `linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1))`
+                                        : `linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(220, 38, 38, 0.05))`,
+                                    border: `1px solid rgba(239, 68, 68, 0.3)`,
+                                    boxShadow: `0 8px 20px rgba(239, 68, 68, 0.2)`,
+                                }}
+                            >
+                                <FiAlertTriangle
+                                    className="w-7 h-7"
+                                    style={{
+                                        color: "#ef4444",
+                                        filter: "drop-shadow(0 0 6px rgba(239, 68, 68, 0.4))",
+                                    }}
+                                />
+                            </div>
+                            <div className="flex-1">
+                                <DialogTitle
+                                    className="text-2xl font-bold mb-3 flex items-center gap-3"
+                                    style={{
+                                        color: isDark ? "#f8fafc" : "#0f172a",
+                                        textShadow: isDark ? "0 0 15px rgba(248, 250, 252, 0.4)" : "none",
+                                    }}
+                                >
+                                    <FiRefreshCw className="w-6 h-6 text-red-500" />
+                                    Resetar Fluxo de Trabalho
+                                </DialogTitle>
+                                <DialogDescription
+                                    className="text-base leading-relaxed"
+                                    style={{
+                                        color: isDark ? "#cbd5e1" : "#64748b",
+                                    }}
+                                >
+                                    Você está prestes a remover permanentemente todos os componentes e conexões do fluxo atual.
+                                </DialogDescription>
+                            </div>
+                        </div>
                     </DialogHeader>
-                    <div className="relative z-10 grid gap-4 py-4">
-                        <p
-                            className="text-sm font-medium flex items-center gap-2"
+
+                    <div className="relative z-10 space-y-4 py-6">
+                        {/* Warning Box */}
+                        <div
+                            className="p-5 rounded-xl border-l-4"
                             style={{
-                                color: isDark ? "#fca5a5" : "#dc2626",
-                                textShadow: isDark ? `0 0 8px rgba(239, 68, 68, 0.6)` : "none",
+                                background: isDark
+                                    ? `linear-gradient(135deg, rgba(40, 40, 40, 0.1), rgba(20, 20, 20, 0.05))`
+                                    : `linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(220, 38, 38, 0.03))`,
+                                borderLeftColor: "#ef4444",
+                                border: `1px solid rgba(239, 68, 68, 0.2)`,
+                                boxShadow: `0 4px 15px rgba(239, 68, 68, 0.1)`,
                             }}
                         >
-                            <FiX className="w-4 h-4" />
-                            Esta ação é irreversível e não pode ser desfeita.
-                        </p>
+                            <div className="flex items-start gap-4">
+                                <FiX
+                                    className="w-6 h-6 text-red-500 mt-1 flex-shrink-0"
+                                    style={{
+                                        filter: "drop-shadow(0 0 4px rgba(239, 68, 68, 0.4))",
+                                    }}
+                                />
+                                <div className="space-y-2">
+                                    <p
+                                        className="font-semibold text-base"
+                                        style={{
+                                            color: isDark ? "#fca5a5" : "#dc2626",
+                                        }}
+                                    >
+                                        Ação Irreversível
+                                    </p>
+                                    <p
+                                        className="text-sm leading-relaxed"
+                                        style={{
+                                            color: isDark ? "#e2e8f0" : "#475569",
+                                        }}
+                                    >
+                                        Esta operação não pode ser desfeita. Todos os nós, conexões e configurações serão perdidos
+                                        permanentemente.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Impact List */}
+                        <div
+                            className="p-5 rounded-xl"
+                            style={{
+                                background: isDark
+                                    ? `linear-gradient(135deg, rgba(40, 40, 40, 0.1), rgba(20, 20, 20, 0.05))`
+                                    : `linear-gradient(135deg, rgba(241, 245, 249, 0.8), rgba(226, 232, 240, 0.6))`,
+                                border: isDark ? `1px solid rgba(60, 60, 60, 0.3)` : `1px solid rgba(203, 213, 225, 0.5)`,
+                            }}
+                        >
+                            <h4
+                                className="font-semibold text-sm mb-3"
+                                style={{
+                                    color: isDark ? "#f1f5f9" : "#334155",
+                                }}
+                            >
+                                O que será removido:
+                            </h4>
+                            <ul className="space-y-2 text-sm">
+                                {[
+                                    "Todos os nós do fluxo de trabalho",
+                                    "Todas as conexões entre componentes",
+                                    "Configurações personalizadas dos nós",
+                                    "Dados não salvos no fluxo atual",
+                                ].map((item, index) => (
+                                    <li key={index} className="flex items-center gap-3">
+                                        <div
+                                            className="w-1.5 h-1.5 rounded-full"
+                                            style={{
+                                                background: "#ef4444",
+                                                boxShadow: "0 0 4px rgba(239, 68, 68, 0.4)",
+                                            }}
+                                        />
+                                        <span
+                                            style={{
+                                                color: isDark ? "#cbd5e1" : "#64748b",
+                                            }}
+                                        >
+                      {item}
+                    </span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
                     </div>
-                    <div className="relative z-10 flex justify-end gap-3">
+
+                    <div
+                        className="relative z-10 flex justify-end gap-4 pt-6 border-t"
+                        style={{
+                            borderColor: isDark ? "rgba(60, 60, 60, 0.3)" : "rgba(226, 232, 240, 0.5)",
+                        }}
+                    >
                         <Button
                             type="button"
                             variant="secondary"
                             onClick={() => setShowResetDialog(false)}
-                            className="px-6 py-2"
+                            className="px-8 py-3 font-medium"
                             style={{
                                 background: isDark
-                                    ? `linear-gradient(135deg, rgba(75, 85, 99, 0.4), ${currentGradient.primary}20)`
-                                    : `linear-gradient(135deg, rgba(229, 231, 235, 0.6), ${currentGradient.primary}15)`,
-                                color: isDark ? "#d1d5db" : "#6b7280",
-                                border: isDark ? `1px solid ${currentGradient.glow}40` : `1px solid ${currentGradient.primary}30`,
-                                boxShadow: `0 4px 12px ${currentGradient.glow}20`,
+                                    ? "linear-gradient(135deg, rgba(60, 60, 60, 0.4), rgba(40, 40, 40, 0.3))"
+                                    : "linear-gradient(135deg, rgba(241, 245, 249, 0.9), rgba(226, 232, 240, 0.7))",
+                                color: isDark ? "#e2e8f0" : "#475569",
+                                border: isDark ? "1px solid rgba(60, 60, 60, 0.4)" : "1px solid rgba(203, 213, 225, 0.6)",
+                                boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
                             }}
                         >
                             Cancelar
                         </Button>
                         <Button
                             type="button"
-                            variant="destructive"
                             onClick={confirmReset}
-                            className="px-6 py-2 flex items-center gap-2"
+                            className="px-8 py-3 flex items-center gap-3 font-medium text-white"
                             style={{
                                 background: "linear-gradient(135deg, #ef4444, #dc2626)",
                                 border: "1px solid #dc2626",
-                                boxShadow: "0 4px 12px rgba(239, 68, 68, 0.4)",
-                                color: "#ffffff",
+                                boxShadow: "0 4px 15px rgba(239, 68, 68, 0.4), 0 2px 8px rgba(0, 0, 0, 0.1)",
                             }}
                         >
                             <FiTrash2 className="w-4 h-4" />
-                            Resetar
+                            Confirmar Reset
                         </Button>
                     </div>
                 </DialogContent>
             </Dialog>
 
-            {/* Execute Dialog with Theme Colors */}
+            {/* Execute Dialog with Pure Black/White Theme */}
             <Dialog open={showExecuteDialog} onOpenChange={setShowExecuteDialog}>
                 <DialogContent
                     className="sm:max-w-[425px]"
@@ -1811,40 +1935,38 @@ const FlowHeader = ({
                         background: isDark
                             ? `linear-gradient(135deg, 
                  rgba(0,0,0,0.95) 0%, 
-                 ${currentGradient.primary}20 25%, 
-                 ${currentGradient.secondary}15 50%, 
-                 ${currentGradient.primary}20 75%, 
+                 rgba(20, 20, 20, 0.96) 25%,
+                 rgba(40, 40, 40, 0.94) 50%,
+                 rgba(20, 20, 20, 0.96) 75%,
                  rgba(0,0,0,0.95) 100%)`
                             : `linear-gradient(135deg, 
                  rgba(255,255,255,0.95) 0%, 
-                 ${currentGradient.primary}15 25%, 
-                 ${currentGradient.secondary}10 50%, 
-                 ${currentGradient.primary}15 75%, 
+                 rgba(248, 250, 252, 0.96) 25%,
+                 rgba(241, 245, 249, 0.94) 50%,
+                 rgba(248, 250, 252, 0.96) 75%,
                  rgba(255,255,255,0.95) 100%)`,
                         backdropFilter: "blur(25px)",
-                        border: isDark ? `2px solid ${currentGradient.glow}50` : `2px solid ${currentGradient.primary}40`,
+                        border: isDark ? `2px solid rgba(34, 197, 94, 0.4)` : `2px solid rgba(34, 197, 94, 0.3)`,
                         boxShadow: isDark
-                            ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
-                 0 0 0 1px ${currentGradient.glow}30, 
-                 0 0 40px ${currentGradient.glow}40,
-                 inset 0 1px 0 rgba(255, 255, 255, 0.1)`
-                            : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
-                 0 0 0 1px ${currentGradient.primary}30, 
-                 0 0 40px ${currentGradient.primary}25,
-                 inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
+                            ? `0 25px 50px -12px rgba(0, 0, 0, 0.9),
+                 0 0 0 1px rgba(34, 197, 94, 0.2),
+                 0 0 40px rgba(34, 197, 94, 0.3),
+                 inset 0 1px 0 rgba(255, 255, 255, 0.08)`
+                            : `0 25px 50px -12px rgba(0, 0, 0, 0.15),
+                 0 0 0 1px rgba(34, 197, 94, 0.15),
+                 0 0 40px rgba(34, 197, 94, 0.2),
+                 inset 0 1px 0 rgba(255, 255, 255, 0.9)`,
                     }}
                 >
                     {/* Animated background pattern */}
                     <div
-                        className="absolute inset-0 opacity-20 rounded-lg"
+                        className="absolute inset-0 opacity-10 rounded-lg"
                         style={{
                             backgroundImage: isDark
-                                ? `radial-gradient(circle at 20% 30%, ${currentGradient.primary}60 0%, transparent 40%), 
-                   radial-gradient(circle at 80% 70%, ${currentGradient.secondary}60 0%, transparent 40%),
-                   radial-gradient(circle at 50% 50%, ${currentGradient.accent}40 0%, transparent 60%)`
-                                : `radial-gradient(circle at 20% 30%, ${currentGradient.primary}40 0%, transparent 40%), 
-                   radial-gradient(circle at 80% 70%, ${currentGradient.secondary}40 0%, transparent 40%),
-                   radial-gradient(circle at 50% 50%, ${currentGradient.accent}30 0%, transparent 60%)`,
+                                ? `radial-gradient(circle at 25% 25%, rgba(34, 197, 94, 0.4) 0%, transparent 50%),
+                   radial-gradient(circle at 75% 75%, rgba(22, 163, 74, 0.3) 0%, transparent 50%)`
+                                : `radial-gradient(circle at 25% 25%, rgba(34, 197, 94, 0.2) 0%, transparent 50%),
+                   radial-gradient(circle at 75% 75%, rgba(22, 163, 74, 0.15) 0%, transparent 50%)`,
                         }}
                     />
 
@@ -1853,7 +1975,7 @@ const FlowHeader = ({
                             className="text-lg font-bold flex items-center gap-2"
                             style={{
                                 color: isDark ? "#f9fafb" : "#111827",
-                                textShadow: isDark ? `0 0 15px ${currentGradient.glow}60` : `0 0 8px ${currentGradient.primary}40`,
+                                textShadow: isDark ? "0 0 15px rgba(248, 250, 252, 0.4)" : "none",
                             }}
                         >
                             <FiPlayCircle className="w-5 h-5 text-green-500" />
@@ -1863,7 +1985,6 @@ const FlowHeader = ({
                             className="text-sm"
                             style={{
                                 color: isDark ? "#d1d5db" : "#6b7280",
-                                textShadow: isDark ? `0 0 5px ${currentGradient.glow}30` : "none",
                             }}
                         >
                             O fluxo está sendo executado com sucesso. Você pode interagir com o bot para testar o fluxo.
@@ -1888,11 +2009,11 @@ const FlowHeader = ({
                             className="px-6 py-2"
                             style={{
                                 background: isDark
-                                    ? `linear-gradient(135deg, ${currentGradient.primary}60, ${currentGradient.secondary}60)`
-                                    : `linear-gradient(135deg, ${currentGradient.primary}50, ${currentGradient.secondary}50)`,
+                                    ? `linear-gradient(135deg, rgba(34, 197, 94, 0.6), rgba(22, 163, 74, 0.5))`
+                                    : `linear-gradient(135deg, rgba(34, 197, 94, 0.8), rgba(22, 163, 74, 0.7))`,
                                 color: "white",
-                                border: isDark ? `1px solid ${currentGradient.glow}50` : `1px solid ${currentGradient.primary}50`,
-                                boxShadow: `0 4px 12px ${currentGradient.glow}40`,
+                                border: isDark ? `1px solid rgba(34, 197, 94, 0.5)` : `1px solid rgba(34, 197, 94, 0.6)`,
+                                boxShadow: `0 4px 12px rgba(34, 197, 94, 0.4)`,
                             }}
                         >
                             Entendi

@@ -34,22 +34,21 @@ import type { WorkflowNode } from "@/lib/types"
 import { useTheme } from "../ThemeContext"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { BotIcon } from "lucide-react"
 
 const nodeTypes: NodeTypes = {
   sendMessage: (props) => (
-    <SendMessageNode
-      {...props}
-      onRemove={() => removeNodeById(props.id)}
-      onUpdateData={(data) => updateNodeDataById(props.id, data)}
-    />
+      <SendMessageNode
+          {...props}
+          onRemove={() => removeNodeById(props.id)}
+          onUpdateData={(data) => updateNodeDataById(props.id, data)}
+      />
   ),
   options: (props) => (
-    <OptionsNode
-      {...props}
-      onRemove={() => removeNodeById(props.id)}
-      onUpdateData={(data) => updateNodeDataById(props.id, data)}
-    />
+      <OptionsNode
+          {...props}
+          onRemove={() => removeNodeById(props.id)}
+          onUpdateData={(data) => updateNodeDataById(props.id, data)}
+      />
   ),
   process: (props) => <ProcessNode {...props} onRemove={() => removeNodeById(props.id)} />,
   conditional: (props) => <ConditionalNode {...props} onRemove={() => removeNodeById(props.id)} />,
@@ -114,7 +113,7 @@ const createDefaultWorkflow = () => {
       data: {
         label: "Informações Produtos",
         message:
-          "📦 Nossos produtos incluem:\n\n• Soluções de IA\n• Chatbots inteligentes\n• Automação de processos\n• Integração com sistemas",
+            "📦 Nossos produtos incluem:\n\n• Soluções de IA\n• Chatbots inteligentes\n• Automação de processos\n• Integração com sistemas",
         customId: "#3",
       },
       draggable: true,
@@ -126,7 +125,7 @@ const createDefaultWorkflow = () => {
       data: {
         label: "Suporte Técnico",
         message:
-          "🔧 Para suporte técnico:\n\n• Acesse nossa documentação\n• Envie um email para suporte@aura.com\n• Ou continue conversando comigo!",
+            "🔧 Para suporte técnico:\n\n• Acesse nossa documentação\n• Envie um email para suporte@aura.com\n• Ou continue conversando comigo!",
         customId: "#4",
       },
       draggable: true,
@@ -138,7 +137,7 @@ const createDefaultWorkflow = () => {
       data: {
         label: "Transferir Atendente",
         message:
-          "👨‍💼 Transferindo você para um atendente humano...\n\nAguarde um momento que alguém da nossa equipe entrará em contato!",
+            "👨‍💼 Transferindo você para um atendente humano...\n\nAguarde um momento que alguém da nossa equipe entrará em contato!",
         customId: "#5",
       },
       draggable: true,
@@ -150,7 +149,7 @@ const createDefaultWorkflow = () => {
       data: {
         label: "Finalizar Informações",
         message:
-          "Espero que estas informações sobre nossos produtos tenham sido úteis! Posso ajudar com mais alguma coisa?",
+            "Espero que estas informações sobre nossos produtos tenham sido úteis! Posso ajudar com mais alguma coisa?",
         customId: "#6",
       },
       draggable: true,
@@ -294,7 +293,7 @@ const findUnconnectedHandles = (nodes: Node[], edges: Edge[]): string[] => {
 
       if (outgoingConnections.length < options.length) {
         unconnected.push(
-          `${node.data.customId || node.data.label} (${options.length - outgoingConnections.length} opções verdes sem conexão)`,
+            `${node.data.customId || node.data.label} (${options.length - outgoingConnections.length} opções verdes sem conexão)`,
         )
       }
     }
@@ -316,16 +315,16 @@ interface WorkflowBuilderProps {
 }
 
 function WorkflowBuilderInner({
-  onActionsReady,
-  onStartPositionChange,
-  onMousePositionChange,
-  onComponentCountChange,
-  onNodesChange,
-  onEdgesChange,
-  showSidebar = true,
-  onToggleSidebar,
-  onOpenBot,
-}: WorkflowBuilderProps) {
+                                onActionsReady,
+                                onStartPositionChange,
+                                onMousePositionChange,
+                                onComponentCountChange,
+                                onNodesChange,
+                                onEdgesChange,
+                                showSidebar = true,
+                                onToggleSidebar,
+                                onOpenBot,
+                              }: WorkflowBuilderProps) {
   const { theme, currentGradient } = useTheme()
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -410,118 +409,118 @@ function WorkflowBuilderInner({
   }, [nodes, onStartPositionChange, onComponentCountChange])
 
   const handleMouseMove = useCallback(
-    (event: React.MouseEvent) => {
-      if (reactFlowInstance && onMousePositionChange) {
-        const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
-        if (reactFlowBounds) {
-          const position = reactFlowInstance.screenToFlowPosition({
-            x: event.clientX - reactFlowBounds.left,
-            y: event.clientY - reactFlowBounds.top,
-          })
-          onMousePositionChange(position)
+      (event: React.MouseEvent) => {
+        if (reactFlowInstance && onMousePositionChange) {
+          const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
+          if (reactFlowBounds) {
+            const position = reactFlowInstance.screenToFlowPosition({
+              x: event.clientX - reactFlowBounds.left,
+              y: event.clientY - reactFlowBounds.top,
+            })
+            onMousePositionChange(position)
+          }
         }
-      }
-    },
-    [reactFlowInstance, onMousePositionChange],
+      },
+      [reactFlowInstance, onMousePositionChange],
   )
 
   const removeNode = useCallback(
-    (nodeId: string) => {
-      if (nodeId === "start-node") {
+      (nodeId: string) => {
+        if (nodeId === "start-node") {
+          toast({
+            title: "Não é possível remover",
+            description: "O nó INÍCIO não pode ser removido",
+            variant: "destructive",
+          })
+          return
+        }
+
+        setNodes((nds) => nds.filter((node) => node.id !== nodeId))
+        setEdges((eds) => eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
+        setSelectedNode(null)
+
         toast({
-          title: "Não é possível remover",
-          description: "O nó INÍCIO não pode ser removido",
-          variant: "destructive",
+          title: "Nó removido",
+          description: "O nó foi removido com sucesso",
         })
-        return
-      }
-
-      setNodes((nds) => nds.filter((node) => node.id !== nodeId))
-      setEdges((eds) => eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
-      setSelectedNode(null)
-
-      toast({
-        title: "Nó removido",
-        description: "O nó foi removido com sucesso",
-      })
-    },
-    [setNodes, setEdges],
+      },
+      [setNodes, setEdges],
   )
 
   const updateNodeData = useCallback(
-    (nodeId: string, data: any) => {
-      setNodes((nds) =>
-        nds.map((node) => {
-          if (node.id === nodeId) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                ...data,
-              },
-            }
-          }
-          return node
-        }),
-      )
-    },
-    [setNodes],
+      (nodeId: string, data: any) => {
+        setNodes((nds) =>
+            nds.map((node) => {
+              if (node.id === nodeId) {
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...data,
+                  },
+                }
+              }
+              return node
+            }),
+        )
+      },
+      [setNodes],
   )
 
   removeNodeById = removeNode
   updateNodeDataById = updateNodeData
 
   const onConnect = useCallback(
-    (params: Edge | Connection) => {
-      if (params.source === params.target) {
-        toast({
-          title: "❌ Auto-conexão não permitida",
-          description: "Um nó não pode se conectar consigo mesmo",
-          variant: "destructive",
-        })
-        return
-      }
-
-      setEdges((currentEdges) => {
-        const sourceOccupied = currentEdges.some(
-          (edge) => edge.source === params.source && edge.sourceHandle === params.sourceHandle,
-        )
-
-        const targetOccupied = currentEdges.some(
-          (edge) => edge.target === params.target && edge.targetHandle === params.targetHandle,
-        )
-
-        if (targetOccupied) {
+      (params: Edge | Connection) => {
+        if (params.source === params.target) {
           toast({
-            title: "❌ Entrada já ocupada",
-            description: "Esta entrada amarela já possui uma conexão. Remova a conexão existente primeiro.",
+            title: "❌ Auto-conexão não permitida",
+            description: "Um nó não pode se conectar consigo mesmo",
             variant: "destructive",
           })
-          return currentEdges
+          return
         }
 
-        const filteredEdges = currentEdges.filter(
-          (edge) => !(edge.source === params.source && edge.sourceHandle === params.sourceHandle),
-        )
+        setEdges((currentEdges) => {
+          const sourceOccupied = currentEdges.some(
+              (edge) => edge.source === params.source && edge.sourceHandle === params.sourceHandle,
+          )
 
-        const newEdges = addEdge({ ...params, type: "custom" }, filteredEdges)
+          const targetOccupied = currentEdges.some(
+              (edge) => edge.target === params.target && edge.targetHandle === params.targetHandle,
+          )
 
-        if (sourceOccupied) {
-          toast({
-            title: "🔄 Saída substituída",
-            description: "A conexão anterior da saída verde foi removida e uma nova foi criada",
-          })
-        } else {
-          toast({
-            title: "✅ Conexão criada",
-            description: "Nova conexão estabelecida com sucesso",
-          })
-        }
+          if (targetOccupied) {
+            toast({
+              title: "❌ Entrada já ocupada",
+              description: "Esta entrada amarela já possui uma conexão. Remova a conexão existente primeiro.",
+              variant: "destructive",
+            })
+            return currentEdges
+          }
 
-        return newEdges
-      })
-    },
-    [setEdges],
+          const filteredEdges = currentEdges.filter(
+              (edge) => !(edge.source === params.source && edge.sourceHandle === params.sourceHandle),
+          )
+
+          const newEdges = addEdge({ ...params, type: "custom" }, filteredEdges)
+
+          if (sourceOccupied) {
+            toast({
+              title: "🔄 Saída substituída",
+              description: "A conexão anterior da saída verde foi removida e uma nova foi criada",
+            })
+          } else {
+            toast({
+              title: "✅ Conexão criada",
+              description: "Nova conexão estabelecida com sucesso",
+            })
+          }
+
+          return newEdges
+        })
+      },
+      [setEdges],
   )
 
   const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -530,50 +529,50 @@ function WorkflowBuilderInner({
   }, [])
 
   const generateSimpleId = useCallback(
-    (type: string) => {
-      setNodeCounters((prev) => {
-        const newCount = (prev[type] || 0) + 1
-        return { ...prev, [type]: newCount }
-      })
-      const currentCount = (nodeCounters[type] || 0) + 1
-      return `#${currentCount}`
-    },
-    [nodeCounters],
+      (type: string) => {
+        setNodeCounters((prev) => {
+          const newCount = (prev[type] || 0) + 1
+          return { ...prev, [type]: newCount }
+        })
+        const currentCount = (nodeCounters[type] || 0) + 1
+        return `#${currentCount}`
+      },
+      [nodeCounters],
   )
 
   const onDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault()
+      (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault()
 
-      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
-      const type = event.dataTransfer.getData("application/reactflow")
+        const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
+        const type = event.dataTransfer.getData("application/reactflow")
 
-      if (typeof type === "undefined" || !type || type === "start") {
-        return
-      }
-
-      if (reactFlowBounds && reactFlowInstance) {
-        const position = reactFlowInstance.screenToFlowPosition({
-          x: event.clientX - reactFlowBounds.left,
-          y: event.clientY - reactFlowBounds.top,
-        })
-
-        const newNode = createNode({
-          type,
-          position,
-          id: generateNodeId(type),
-        })
-
-        const simpleId = generateSimpleId(type)
-        newNode.data = {
-          ...newNode.data,
-          customId: simpleId,
+        if (typeof type === "undefined" || !type || type === "start") {
+          return
         }
 
-        setNodes((nds) => nds.concat(newNode))
-      }
-    },
-    [reactFlowInstance, setNodes, generateSimpleId],
+        if (reactFlowBounds && reactFlowInstance) {
+          const position = reactFlowInstance.screenToFlowPosition({
+            x: event.clientX - reactFlowBounds.left,
+            y: event.clientY - reactFlowBounds.top,
+          })
+
+          const newNode = createNode({
+            type,
+            position,
+            id: generateNodeId(type),
+          })
+
+          const simpleId = generateSimpleId(type)
+          newNode.data = {
+            ...newNode.data,
+            customId: simpleId,
+          }
+
+          setNodes((nds) => nds.concat(newNode))
+        }
+      },
+      [reactFlowInstance, setNodes, generateSimpleId],
   )
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -588,31 +587,31 @@ function WorkflowBuilderInner({
   }, [])
 
   const searchNodeById = useCallback(
-    (searchId: string) => {
-      const foundNode = nodes.find(
-        (node) =>
-          node.data.customId?.toLowerCase().includes(searchId.toLowerCase()) ||
-          node.data.label?.toLowerCase().includes(searchId.toLowerCase()) ||
-          node.id.toLowerCase().includes(searchId.toLowerCase()),
-      )
+      (searchId: string) => {
+        const foundNode = nodes.find(
+            (node) =>
+                node.data.customId?.toLowerCase().includes(searchId.toLowerCase()) ||
+                node.data.label?.toLowerCase().includes(searchId.toLowerCase()) ||
+                node.id.toLowerCase().includes(searchId.toLowerCase()),
+        )
 
-      if (foundNode) {
-        setCenter(foundNode.position.x + 75, foundNode.position.y + 50, { zoom: 1.5, duration: 800 })
-        setSelectedNode(foundNode)
+        if (foundNode) {
+          setCenter(foundNode.position.x + 75, foundNode.position.y + 50, { zoom: 1.5, duration: 800 })
+          setSelectedNode(foundNode)
 
-        toast({
-          title: "Nó encontrado!",
-          description: `Navegando para o nó: ${foundNode.data.label || foundNode.data.customId}`,
-        })
-      } else {
-        toast({
-          title: "Nó não encontrado",
-          description: "Nenhum nó foi encontrado com esse ID",
-          variant: "destructive",
-        })
-      }
-    },
-    [nodes, setCenter],
+          toast({
+            title: "Nó encontrado!",
+            description: `Navegando para o nó: ${foundNode.data.label || foundNode.data.customId}`,
+          })
+        } else {
+          toast({
+            title: "Nó não encontrado",
+            description: "Nenhum nó foi encontrado com esse ID",
+            variant: "destructive",
+          })
+        }
+      },
+      [nodes, setCenter],
   )
 
   const validateConnectivity = useCallback(() => {
@@ -667,11 +666,11 @@ function WorkflowBuilderInner({
 
     const allDisconnected = [
       ...disconnectedFromStart
-        .filter((id) => id !== "start-node")
-        .map((id) => {
-          const node = nodes.find((n) => n.id === id)
-          return `${node?.data.customId || node?.data.label || id} (não conectado ao INÍCIO)`
-        }),
+          .filter((id) => id !== "start-node")
+          .map((id) => {
+            const node = nodes.find((n) => n.id === id)
+            return `${node?.data.customId || node?.data.label || id} (não conectado ao INÍCIO)`
+          }),
       ...unconnectedHandles,
     ]
 
@@ -688,7 +687,7 @@ function WorkflowBuilderInner({
         description: "Adicione pelo menos um componente ao seu fluxo antes de salvar",
         variant: "destructive",
       })
-      return
+      return false
     }
 
     const validation = validateConnectivity()
@@ -696,7 +695,7 @@ function WorkflowBuilderInner({
     if (!validation.isValid) {
       setDisconnectedNodes(validation.disconnected)
       setShowValidationDialog(true)
-      return
+      return false // Return false to indicate save failed
     }
 
     // SEMPRE salvar o estado atual dos nodes e edges com chave persistente
@@ -714,6 +713,8 @@ function WorkflowBuilderInner({
       title: "✅ Fluxo salvo com sucesso!",
       description: `${nodes.length} componentes salvos e prontos para execução`,
     })
+
+    return true // Return true to indicate successful save
   }, [nodes, edges, nodeCounters, validateConnectivity])
 
   const loadWorkflow = useCallback(() => {
@@ -721,103 +722,103 @@ function WorkflowBuilderInner({
   }, [])
 
   const handleFileUpload = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0]
-      if (!file) return
+      (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0]
+        if (!file) return
 
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        try {
-          const jsonContent = e.target?.result as string
-
-          if (!jsonContent || jsonContent.trim() === "") {
-            throw new Error("Arquivo vazio ou não é um arquivo de texto válido")
-          }
-
-          let workflowData
+        const reader = new FileReader()
+        reader.onload = (e) => {
           try {
-            workflowData = JSON.parse(jsonContent)
-          } catch (parseError) {
-            throw new Error("Arquivo não é um JSON válido - verifique a sintaxe")
-          }
+            const jsonContent = e.target?.result as string
 
-          if (!workflowData || typeof workflowData !== "object") {
-            throw new Error("Arquivo JSON não contém dados válidos")
-          }
-
-          if (!workflowData.flowData || !workflowData._id) {
-            throw new Error("Formato de arquivo inválido - não é um fluxo Aura válido")
-          }
-
-          const { nodes: loadedNodes, edges: loadedEdges, nodeCounters: loadedCounters } = workflowData.flowData
-
-          if (!Array.isArray(loadedNodes)) {
-            throw new Error("Dados de nós corrompidos - estrutura inválida")
-          }
-
-          if (!Array.isArray(loadedEdges)) {
-            throw new Error("Dados de conexões corrompidos - estrutura inválida")
-          }
-
-          for (let i = 0; i < loadedNodes.length; i++) {
-            const node = loadedNodes[i]
-            if (!node.id || !node.type || !node.position || !node.data) {
-              throw new Error(`Nó ${i + 1} tem estrutura inválida - faltam propriedades obrigatórias`)
+            if (!jsonContent || jsonContent.trim() === "") {
+              throw new Error("Arquivo vazio ou não é um arquivo de texto válido")
             }
-          }
 
-          const hasStartNode = loadedNodes.some((node: Node) => node.id === "start-node")
-          if (!hasStartNode) {
-            const startNode = {
-              id: "start-node",
-              type: "start",
-              position: { x: 250, y: 100 },
-              data: {
-                label: "INÍCIO",
-                description: "Ponto de início do fluxo",
-              },
-              deletable: false,
-              draggable: true,
+            let workflowData
+            try {
+              workflowData = JSON.parse(jsonContent)
+            } catch (parseError) {
+              throw new Error("Arquivo não é um JSON válido - verifique a sintaxe")
             }
-            loadedNodes.unshift(startNode)
+
+            if (!workflowData || typeof workflowData !== "object") {
+              throw new Error("Arquivo JSON não contém dados válidos")
+            }
+
+            if (!workflowData.flowData || !workflowData._id) {
+              throw new Error("Formato de arquivo inválido - não é um fluxo Aura válido")
+            }
+
+            const { nodes: loadedNodes, edges: loadedEdges, nodeCounters: loadedCounters } = workflowData.flowData
+
+            if (!Array.isArray(loadedNodes)) {
+              throw new Error("Dados de nós corrompidos - estrutura inválida")
+            }
+
+            if (!Array.isArray(loadedEdges)) {
+              throw new Error("Dados de conexões corrompidos - estrutura inválida")
+            }
+
+            for (let i = 0; i < loadedNodes.length; i++) {
+              const node = loadedNodes[i]
+              if (!node.id || !node.type || !node.position || !node.data) {
+                throw new Error(`Nó ${i + 1} tem estrutura inválida - faltam propriedades obrigatórias`)
+              }
+            }
+
+            const hasStartNode = loadedNodes.some((node: Node) => node.id === "start-node")
+            if (!hasStartNode) {
+              const startNode = {
+                id: "start-node",
+                type: "start",
+                position: { x: 250, y: 100 },
+                data: {
+                  label: "INÍCIO",
+                  description: "Ponto de início do fluxo",
+                },
+                deletable: false,
+                draggable: true,
+              }
+              loadedNodes.unshift(startNode)
+            }
+
+            setNodes(loadedNodes)
+            setEdges(loadedEdges)
+            setNodeCounters(loadedCounters || {})
+
+            // Salvar com chave persistente
+            const workflow = { nodes: loadedNodes, edges: loadedEdges, nodeCounters: loadedCounters || {} }
+            localStorage.setItem(WORKFLOW_KEY, JSON.stringify(workflow))
+
+            // Limpar status de execução para forçar nova execução do fluxo importado
+            localStorage.removeItem(EXECUTED_KEY)
+            window.dispatchEvent(new Event("storage"))
+
+            toast({
+              title: "✅ Fluxo carregado com sucesso!",
+              description: `${loadedNodes.length} componentes carregados - clique em Salvar e depois Executar`,
+            })
+
+            setTimeout(() => {
+              fitView()
+            }, 100)
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Arquivo JSON inválido ou corrompido"
+            setErrorMessage(errorMsg)
+            setShowErrorDialog(true)
           }
+        }
 
-          setNodes(loadedNodes)
-          setEdges(loadedEdges)
-          setNodeCounters(loadedCounters || {})
-
-          // Salvar com chave persistente
-          const workflow = { nodes: loadedNodes, edges: loadedEdges, nodeCounters: loadedCounters || {} }
-          localStorage.setItem(WORKFLOW_KEY, JSON.stringify(workflow))
-
-          // Limpar status de execução para forçar nova execução do fluxo importado
-          localStorage.removeItem(EXECUTED_KEY)
-          window.dispatchEvent(new Event("storage"))
-
-          toast({
-            title: "✅ Fluxo carregado com sucesso!",
-            description: `${loadedNodes.length} componentes carregados - clique em Salvar e depois Executar`,
-          })
-
-          setTimeout(() => {
-            fitView()
-          }, 100)
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : "Arquivo JSON inválido ou corrompido"
-          setErrorMessage(errorMsg)
+        reader.onerror = () => {
+          setErrorMessage("Erro ao ler o arquivo - arquivo pode estar corrompido")
           setShowErrorDialog(true)
         }
-      }
 
-      reader.onerror = () => {
-        setErrorMessage("Erro ao ler o arquivo - arquivo pode estar corrompido")
-        setShowErrorDialog(true)
-      }
-
-      reader.readAsText(file)
-      event.target.value = ""
-    },
-    [setNodes, setEdges, fitView],
+        reader.readAsText(file)
+        event.target.value = ""
+      },
+      [setNodes, setEdges, fitView],
   )
 
   const executeWorkflow = useCallback(() => {
@@ -827,14 +828,14 @@ function WorkflowBuilderInner({
         description: "Adicione alguns nós ao seu fluxo primeiro",
         variant: "destructive",
       })
-      return
+      return false
     }
 
     const validation = validateConnectivity()
     if (!validation.isValid) {
       setDisconnectedNodes(validation.disconnected)
       setShowValidationDialog(true)
-      return
+      return false // Return false to indicate execution failed
     }
 
     // PRIMEIRO: Salvar o estado atual no localStorage com chave persistente
@@ -852,7 +853,7 @@ function WorkflowBuilderInner({
 
     window.dispatchEvent(new Event("storage"))
 
-    return true
+    return true // Return true to indicate successful execution
   }, [nodes, edges, nodeCounters, validateConnectivity])
 
   const resetWorkflow = useCallback(() => {
@@ -1001,8 +1002,8 @@ function WorkflowBuilderInner({
       variant: "dots" as const,
       style: {
         filter: isDark
-          ? `drop-shadow(0 0 6px ${currentGradient.glow}) drop-shadow(0 0 12px ${currentGradient.glow}80) drop-shadow(0 0 18px ${currentGradient.glow}40)`
-          : "none",
+            ? `drop-shadow(0 0 6px ${currentGradient.glow}) drop-shadow(0 0 12px ${currentGradient.glow}80) drop-shadow(0 0 18px ${currentGradient.glow}40)`
+            : "none",
         opacity: isDark ? 0.8 : 1,
       },
     }
@@ -1038,200 +1039,200 @@ function WorkflowBuilderInner({
   }
 
   return (
-    <div className="flex h-full">
-      <input ref={fileInputRef} type="file" accept=".json" onChange={handleFileUpload} style={{ display: "none" }} />
+      <div className="flex h-full">
+        <input ref={fileInputRef} type="file" accept=".json" onChange={handleFileUpload} style={{ display: "none" }} />
 
-      {showSidebar && (
-        <div
-          className={`w-64 border-r p-4 ${isDark ? "bg-black border-gray-800" : "bg-white border-gray-200"} transition-all duration-300`}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>Componentes</h2>
-          </div>
-          <NodeLibrary />
-        </div>
-      )}
-
-      <div className="flex-1 flex flex-col">
-        <div className="flex-1" ref={reactFlowWrapper}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChangeInternal}
-            onEdgesChange={onEdgesChangeInternal}
-            onConnect={onConnect}
-            onInit={setReactFlowInstance}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            onNodeClick={onNodeClick}
-            onPaneClick={onPaneClick}
-            onMouseMove={handleMouseMove}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            fitView
-            snapToGrid
-            snapGrid={[15, 15]}
-            defaultEdgeOptions={{ type: "custom" }}
-            className={isDark ? "dark" : ""}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background {...getBackgroundProps()} />
-            <Controls showZoom={false} showFitView={false} showInteractive={false} />
-            <MiniMap {...getMiniMapProps()} />
-          </ReactFlow>
-        </div>
-      </div>
-
-      {selectedNode && (
-        <div
-          className={`w-80 border-l p-4 ${isDark ? "bg-black border-gray-800" : "bg-white border-gray-200"} transition-all duration-300`}
-        >
-          <NodeConfigPanel
-            node={selectedNode as WorkflowNode}
-            updateNodeData={updateNodeData}
-            onClose={() => setSelectedNode(null)}
-            onRemove={() => removeNode(selectedNode.id)}
-          />
-        </div>
-      )}
-
-      {/* POPUP DE ERRO - JSON Inválido */}
-      <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
-        <DialogContent
-          className={`${isDark ? "bg-black border-red-700" : "bg-white border-red-200"} max-w-lg mx-auto rounded-xl`}
-        >
-          <DialogHeader className="text-center">
-            <DialogTitle
-              className={`text-xl font-bold ${
-                isDark ? "text-white" : "text-gray-900"
-              } flex items-center justify-center gap-2`}
-            >
-              ❌ Arquivo JSON Inválido
-            </DialogTitle>
-            <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-2 text-center`}>
-              <span className="text-red-500 font-bold text-lg">Não foi possível importar o arquivo!</span>
-              <br />
-              <span className="text-sm">Verifique se o arquivo é um fluxo Aura válido:</span>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mt-4">
+        {showSidebar && (
             <div
-              className={`p-4 rounded-lg border ${
-                isDark ? "bg-red-900/20 border-red-700 text-red-300" : "bg-red-50 border-red-200 text-red-700"
-              }`}
+                className={`w-64 border-r p-4 ${isDark ? "bg-black border-gray-800" : "bg-white border-gray-200"} transition-all duration-300`}
             >
-              <div className="flex items-start gap-2">
-                <span className="text-red-500 font-bold text-lg">⚠️</span>
-                <div>
-                  <span className="font-medium block">Erro encontrado:</span>
-                  <span className="text-sm">{errorMessage}</span>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>Componentes</h2>
+              </div>
+              <NodeLibrary />
+            </div>
+        )}
+
+        <div className="flex-1 flex flex-col">
+          <div className="flex-1" ref={reactFlowWrapper}>
+            <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChangeInternal}
+                onEdgesChange={onEdgesChangeInternal}
+                onConnect={onConnect}
+                onInit={setReactFlowInstance}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                onNodeClick={onNodeClick}
+                onPaneClick={onPaneClick}
+                onMouseMove={handleMouseMove}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                fitView
+                snapToGrid
+                snapGrid={[15, 15]}
+                defaultEdgeOptions={{ type: "custom" }}
+                className={isDark ? "dark" : ""}
+                proOptions={{ hideAttribution: true }}
+            >
+              <Background {...getBackgroundProps()} />
+              <Controls showZoom={false} showFitView={false} showInteractive={false} />
+              <MiniMap {...getMiniMapProps()} />
+            </ReactFlow>
+          </div>
+        </div>
+
+        {selectedNode && (
+            <div
+                className={`w-80 border-l p-4 ${isDark ? "bg-black border-gray-800" : "bg-white border-gray-200"} transition-all duration-300`}
+            >
+              <NodeConfigPanel
+                  node={selectedNode as WorkflowNode}
+                  updateNodeData={updateNodeData}
+                  onClose={() => setSelectedNode(null)}
+                  onRemove={() => removeNode(selectedNode.id)}
+              />
+            </div>
+        )}
+
+        {/* POPUP DE ERRO - JSON Inválido */}
+        <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
+          <DialogContent
+              className={`${isDark ? "bg-black border-red-700" : "bg-white border-red-200"} max-w-lg mx-auto rounded-xl`}
+          >
+            <DialogHeader className="text-center">
+              <DialogTitle
+                  className={`text-xl font-bold ${
+                      isDark ? "text-white" : "text-gray-900"
+                  } flex items-center justify-center gap-2`}
+              >
+                ❌ Arquivo JSON Inválido
+              </DialogTitle>
+              <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-2 text-center`}>
+                <span className="text-red-500 font-bold text-lg">Não foi possível importar o arquivo!</span>
+                <br />
+                <span className="text-sm">Verifique se o arquivo é um fluxo Aura válido:</span>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="mt-4">
+              <div
+                  className={`p-4 rounded-lg border ${
+                      isDark ? "bg-red-900/20 border-red-700 text-red-300" : "bg-red-50 border-red-200 text-red-700"
+                  }`}
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-red-500 font-bold text-lg">⚠️</span>
+                  <div>
+                    <span className="font-medium block">Erro encontrado:</span>
+                    <span className="text-sm">{errorMessage}</span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div className="flex justify-center mt-6">
-            <Button
-              onClick={() => setShowErrorDialog(false)}
-              className={`${
-                isDark
-                  ? "bg-red-800 hover:bg-red-700 text-white border-red-600"
-                  : "bg-red-100 hover:bg-red-200 text-red-900 border-red-300"
-              } font-semibold px-6`}
-            >
-              Entendi, vou corrigir!
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* POPUP DE VALIDAÇÃO - Componentes desconectados */}
-      <Dialog open={showValidationDialog} onOpenChange={setShowValidationDialog}>
-        <DialogContent
-          className={`${isDark ? "bg-black border-gray-700" : "bg-white border-gray-200"} max-w-lg mx-auto rounded-xl`}
-        >
-          <DialogHeader className="text-center">
-            <DialogTitle
-              className={`text-xl font-bold ${
-                isDark ? "text-white" : "text-gray-900"
-              } flex items-center justify-center gap-2`}
-            >
-              ⚠️ Componentes Desconectados
-            </DialogTitle>
-            <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-2 text-center`}>
-              <span className="text-red-500 font-bold text-lg">NADA pode ficar vazio ou desconectado!</span>
-              <br />
-              <span className="text-sm">Preencha todas as mensagens e conecte todos os componentes:</span>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 max-h-60 overflow-y-auto mt-4">
-            {disconnectedNodes.map((issue, index) => (
-              <div
-                key={index}
-                className={`p-3 rounded-lg border ${
-                  isDark ? "bg-red-900/20 border-red-700 text-red-300" : "bg-red-50 border-red-200 text-red-700"
-                }`}
+            <div className="flex justify-center mt-6">
+              <Button
+                  onClick={() => setShowErrorDialog(false)}
+                  className={`${
+                      isDark
+                          ? "bg-red-800 hover:bg-red-700 text-white border-red-600"
+                          : "bg-red-100 hover:bg-red-200 text-red-900 border-red-300"
+                  } font-semibold px-6`}
               >
-                <div className="flex items-center gap-2">
-                  <span className="text-red-500 font-bold">🔗</span>
-                  <span className="font-medium">{issue}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="flex justify-center mt-6">
-            <Button
-              onClick={() => setShowValidationDialog(false)}
-              className={`${
-                isDark
-                  ? "bg-gray-800 hover:bg-gray-700 text-white border-gray-600"
-                  : "bg-gray-100 hover:bg-gray-200 text-gray-900 border-gray-300"
-              } font-semibold px-6`}
-            >
-              Entendi, vou conectar tudo!
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+                Entendi, vou corrigir!
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
-      {/* POPUP DE SUCESSO - Fluxo salvo */}
-      <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
-        <DialogContent
-          className={`${isDark ? "bg-black border-gray-700" : "bg-white border-gray-200"} max-w-md mx-auto rounded-xl`}
-        >
-          <DialogHeader className="text-center">
-            <DialogTitle
-              className={`text-2xl font-bold ${
-                isDark ? "text-white" : "text-gray-900"
-              } flex items-center justify-center gap-3`}
-            >
-              ✅ Fluxo Salvo!
-            </DialogTitle>
-            <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-3 text-center text-lg`}>
-              🎉 <strong>Parabéns!</strong> Seu fluxo foi salvo com sucesso!
-              <br />
-              <span className="text-sm mt-2 block">
+        {/* POPUP DE VALIDAÇÃO - Componentes desconectados */}
+        <Dialog open={showValidationDialog} onOpenChange={setShowValidationDialog}>
+          <DialogContent
+              className={`${isDark ? "bg-black border-gray-700" : "bg-white border-gray-200"} max-w-lg mx-auto rounded-xl`}
+          >
+            <DialogHeader className="text-center">
+              <DialogTitle
+                  className={`text-xl font-bold ${
+                      isDark ? "text-white" : "text-gray-900"
+                  } flex items-center justify-center gap-2`}
+              >
+                ⚠️ Componentes Desconectados
+              </DialogTitle>
+              <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-2 text-center`}>
+                <span className="text-red-500 font-bold text-lg">NADA pode ficar vazio ou desconectado!</span>
+                <br />
+                <span className="text-sm">Preencha todas as mensagens e conecte todos os componentes:</span>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 max-h-60 overflow-y-auto mt-4">
+              {disconnectedNodes.map((issue, index) => (
+                  <div
+                      key={index}
+                      className={`p-3 rounded-lg border ${
+                          isDark ? "bg-red-900/20 border-red-700 text-red-300" : "bg-red-50 border-red-200 text-red-700"
+                      }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-red-500 font-bold">🔗</span>
+                      <span className="font-medium">{issue}</span>
+                    </div>
+                  </div>
+              ))}
+            </div>
+            <div className="flex justify-center mt-6">
+              <Button
+                  onClick={() => setShowValidationDialog(false)}
+                  className={`${
+                      isDark
+                          ? "bg-gray-800 hover:bg-gray-700 text-white border-gray-600"
+                          : "bg-gray-100 hover:bg-gray-200 text-gray-900 border-gray-300"
+                  } font-semibold px-6`}
+              >
+                Entendi, vou conectar tudo!
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* POPUP DE SUCESSO - Fluxo salvo */}
+        <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+          <DialogContent
+              className={`${isDark ? "bg-black border-gray-700" : "bg-white border-gray-200"} max-w-md mx-auto rounded-xl`}
+          >
+            <DialogHeader className="text-center">
+              <DialogTitle
+                  className={`text-2xl font-bold ${
+                      isDark ? "text-white" : "text-gray-900"
+                  } flex items-center justify-center gap-3`}
+              >
+                ✅ Fluxo Salvo!
+              </DialogTitle>
+              <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-3 text-center text-lg`}>
+                🎉 <strong>Parabéns!</strong> Seu fluxo foi salvo com sucesso!
+                <br />
+                <span className="text-sm mt-2 block">
                 📊 <strong>{nodes.length} componentes</strong> salvos no navegador
               </span>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-center mt-6">
-            <Button
-              onClick={() => setShowSuccessDialog(false)}
-              className="bg-green-600 hover:bg-green-700 text-white font-semibold px-8 py-2"
-            >
-              🚀 Perfeito!
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-center mt-6">
+              <Button
+                  onClick={() => setShowSuccessDialog(false)}
+                  className="bg-green-600 hover:bg-green-700 text-white font-semibold px-8 py-2"
+              >
+                🚀 Perfeito!
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
   )
 }
 
 export default function WorkflowBuilder(props: WorkflowBuilderProps) {
   return (
-    <ReactFlowProvider>
-      <WorkflowBuilderInner {...props} />
-    </ReactFlowProvider>
+      <ReactFlowProvider>
+        <WorkflowBuilderInner {...props} />
+      </ReactFlowProvider>
   )
 }
