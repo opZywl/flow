@@ -613,13 +613,13 @@ const YenFlowBot = ({
                     border: isDark ? `2px solid rgba(60,60,60,0.5)` : `2px solid rgba(203,213,225,0.4)`,
                     boxShadow: isDark
                         ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
-               0 0 0 1px rgba(60,60,60,0.3), 
-               0 0 40px rgba(0,0,0,0.4),
-               inset 0 1px 0 rgba(255, 255, 255, 0.1)`
+              0 0 0 1px rgba(60,60,60,0.3), 
+              0 0 40px rgba(0,0,0,0.4),
+              inset 0 1px 0 rgba(255, 255, 255, 0.1)`
                         : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
-               0 0 0 1px rgba(203,213,225,0.3), 
-               0 0 40px rgba(0,0,0,0.25),
-               inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
+              0 0 0 1px rgba(203,213,225,0.3), 
+              0 0 40px rgba(0,0,0,0.25),
+              inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
                 }}
             >
                 {/* Animated background pattern */}
@@ -628,11 +628,11 @@ const YenFlowBot = ({
                     style={{
                         backgroundImage: isDark
                             ? `radial-gradient(circle at 20% 30%, rgba(60,60,60,0.6) 0%, transparent 40%), 
-                 radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
+                radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
                             : `radial-gradient(circle at 20% 30%, rgba(203,213,225,0.4) 0%, transparent 40%), 
-                 radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
+                radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
                     }}
                 />
 
@@ -856,28 +856,28 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                 style={{
                     background: isDark
                         ? `linear-gradient(135deg, 
-          rgba(0,0,0,0.95) 0%, 
-          rgba(20,20,20,0.96) 25%, 
-          rgba(40,40,40,0.94) 50%, 
-          rgba(20,20,20,0.96) 75%, 
-          rgba(0,0,0,0.95) 100%)`
+         rgba(0,0,0,0.95) 0%, 
+         rgba(20,20,20,0.96) 25%, 
+         rgba(40,40,40,0.94) 50%, 
+         rgba(20,20,20,0.96) 75%, 
+         rgba(0,0,0,0.95) 100%)`
                         : `linear-gradient(135deg, 
-          rgba(255,255,255,0.95) 0%, 
-          rgba(248,250,252,0.96) 25%, 
-          rgba(241,245,249,0.94) 50%, 
-          rgba(248,250,252,0.96) 75%, 
-          rgba(255,255,255,0.95) 100%)`,
+         rgba(255,255,255,0.95) 0%, 
+         rgba(248,250,252,0.96) 25%, 
+         rgba(241,245,249,0.94) 50%, 
+         rgba(248,250,252,0.96) 75%, 
+         rgba(255,255,255,0.95) 100%)`,
                     backdropFilter: "blur(25px)",
                     border: isDark ? `2px solid rgba(60,60,60,0.5)` : `2px solid rgba(203,213,225,0.4)`,
                     boxShadow: isDark
                         ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
-               0 0 0 1px rgba(60,60,60,0.3), 
-               0 0 40px rgba(0,0,0,0.4),
-               inset 0 1px 0 rgba(255, 255, 255, 0.1)`
+              0 0 0 1px rgba(60,60,60,0.3), 
+              0 0 40px rgba(0,0,0,0.4),
+              inset 0 1px 0 rgba(255, 255, 255, 0.1)`
                         : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
-               0 0 0 1px rgba(203,213,225,0.3), 
-               0 0 40px rgba(0,0,0,0.25),
-               inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
+              0 0 0 1px rgba(203,213,225,0.3), 
+              0 0 40px rgba(0,0,0,0.25),
+              inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
                 }}
             >
                 {/* Animated background pattern */}
@@ -886,11 +886,11 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                     style={{
                         backgroundImage: isDark
                             ? `radial-gradient(circle at 20% 30%, rgba(60,60,60,0.6) 0%, transparent 40%), 
-                 radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
+                radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
                             : `radial-gradient(circle at 20% 30%, rgba(203,213,225,0.4) 0%, transparent 40%), 
-                 radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
+                radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
                     }}
                 />
 
@@ -1184,6 +1184,7 @@ const FlowHeader = ({
     const [showResetDialog, setShowResetDialog] = useState(false)
     const [showExecuteDialog, setShowExecuteDialog] = useState(false)
     const [showImageMenu, setShowImageMenu] = useState(false)
+    const [isWorkflowSaved, setIsWorkflowSaved] = useState(false)
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault()
@@ -1201,11 +1202,16 @@ const FlowHeader = ({
             onReset()
         }
         setShowResetDialog(false)
+        setIsWorkflowSaved(false) // Reset saved state when workflow is reset
     }
 
-    const [isSaved, setIsSaved] = useState(false)
-
     const handleExecute = () => {
+        // Check if workflow has been saved first
+        if (!isWorkflowSaved) {
+            alert("É necessário salvar o fluxo antes de executar!")
+            return
+        }
+
         if (onExecute) {
             try {
                 const result = onExecute()
@@ -1225,10 +1231,13 @@ const FlowHeader = ({
         if (onSave) {
             try {
                 const result = onSave()
-                // Save function will handle its own success/error dialogs
-                // No need to show additional dialogs here
+                // Only set as saved if save was successful
+                if (result === true) {
+                    setIsWorkflowSaved(true)
+                }
             } catch (error) {
                 console.error("Save failed:", error)
+                setIsWorkflowSaved(false)
             }
         }
     }
@@ -1333,6 +1342,11 @@ const FlowHeader = ({
         }
     }
 
+    // Reset saved state when workflow changes
+    useEffect(() => {
+        setIsWorkflowSaved(false)
+    }, [componentCount])
+
     const isDark = theme === "dark"
 
     return (
@@ -1342,55 +1356,58 @@ const FlowHeader = ({
                 style={{
                     background: isDark
                         ? `linear-gradient(135deg, 
-                       #000000 0%, 
-                       #1a1a1a 10%, 
-                       #2a2a2a 20%,
-                       #1a1a1a 30%,
-                       #333333 40%,
-                       #2a2a2a 50%,
-                       #1a1a1a 60%,
-                       #000000 70%,
-                       #1a1a1a 80%,
-                       #000000 90%,
-                       #1a1a1a 100%)`
-                                    : `linear-gradient(135deg, 
-                       #f8fafc 0%, 
-                       #e2e8f0 10%, 
-                       #f1f5f9 20%,
-                       #e2e8f0 30%,
-                       #cbd5e1 40%,
-                       #f1f5f9 50%,
-                       #e2e8f0 60%,
-                       #f8fafc 70%,
-                       #e2e8f0 80%,
-                       #f8fafc 90%,
-                       #e2e8f0 100%)`,
-                                backdropFilter: "blur(20px)",
-                                borderBottom: isDark
-                                    ? `2px solid ${currentGradient.glow}`
-                                    : `2px solid ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}`,
-                                boxShadow: isDark
-                                    ? `0 8px 32px rgba(0, 0, 0, 0.8), 
-                       0 0 60px ${currentGradient.glow}60, 
-                       0 0 120px ${currentGradient.glow}30,
-                       inset 0 2px 0 rgba(255, 255, 255, 0.1),
-                       inset 0 -2px 0 rgba(203,213,225,0.3)`
-                                    : undefined
-                            }}
+                      #000000 0%, 
+                      #1a1a1a 10%, 
+                      #2a2a2a 20%,
+                      #1a1a1a 30%,
+                      #333333 40%,
+                      #2a2a2a 50%,
+                      #1a1a1a 60%,
+                      #000000 70%,
+                      #1a1a1a 80%,
+                      #000000 90%,
+                      #1a1a1a 100%)`
+                        : `linear-gradient(135deg, 
+                      #f8fafc 0%, 
+                      #e2e8f0 10%, 
+                      #f1f5f9 20%,
+                      #e2e8f0 30%,
+                      #cbd5e1 10%,
+                      #f1f5f9 20%,
+                      #e2e8f0 30%,
+                      #cbd5e1 40%,
+                      #f1f5f9 50%,
+                      #e2e8f0 60%,
+                      #f8fafc 70%,
+                      #e2e8f0 80%,
+                      #f8fafc 90%,
+                      #e2e8f0 100%)`,
+                    backdropFilter: "blur(20px)",
+                    borderBottom: isDark
+                        ? `2px solid ${currentGradient.glow}`
+                        : `2px solid ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}`,
+                    boxShadow: isDark
+                        ? `0 8px 32px rgba(0, 0, 0, 0.8), 
+                      0 0 60px ${currentGradient.glow}60, 
+                      0 0 120px ${currentGradient.glow}30,
+                      inset 0 2px 0 rgba(255, 255, 255, 0.1),
+                      inset 0 -2px 0 rgba(203,213,225,0.3)`
+                        : undefined,
+                }}
             >
                 {/* Animated background overlay */}
                 <div
-                className="absolute inset-0 opacity-30"
-                style={{
-                background: isDark
-                    ? `radial-gradient(circle at 20% 20%, ${currentGradient.glow}40 0%, transparent 50%), 
-                 radial-gradient(circle at 80% 80%, rgba(60,60,60,0.4) 0%, transparent 50%),
-                 radial-gradient(circle at 50% 50%, rgba(40,40,40,0.3) 0%, transparent 60%)`
-                    : `radial-gradient(circle at 20% 20%, rgba(203,213,225,0.3) 0%, transparent 50%), 
-                 radial-gradient(circle at 80% 80%, rgba(226,232,240,0.3) 0%, transparent 50%),
-                 radial-gradient(circle at 50% 50%, rgba(241,245,249,0.2) 0%, transparent 60%)`,
-                animation: "pulse 3s ease-in-out infinite alternate",
-            }}
+                    className="absolute inset-0 opacity-30"
+                    style={{
+                        background: isDark
+                            ? `radial-gradient(circle at 20% 20%, ${currentGradient.glow}40 0%, transparent 50%), 
+                radial-gradient(circle at 80% 80%, rgba(60,60,60,0.4) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, rgba(40,40,40,0.3) 0%, transparent 60%)`
+                            : `radial-gradient(circle at 20% 20%, rgba(203,213,225,0.3) 0%, transparent 50%), 
+                radial-gradient(circle at 80% 80%, rgba(226,232,240,0.3) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, rgba(241,245,249,0.2) 0%, transparent 60%)`,
+                        animation: "pulse 3s ease-in-out infinite alternate",
+                    }}
                 />
 
                 <div className="relative z-10 flex items-center justify-between p-4">
@@ -1604,16 +1621,21 @@ const FlowHeader = ({
                             </motion.button>
 
                             <motion.button
-                                whileHover={{ scale: 1.02, y: -1 }}
-                                whileTap={{ scale: 0.98 }}
+                                whileHover={{ scale: isWorkflowSaved ? 1.02 : 1.0, y: isWorkflowSaved ? -1 : 0 }}
+                                whileTap={{ scale: isWorkflowSaved ? 0.98 : 1.0 }}
                                 onClick={handleExecute}
                                 className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
-                                title="Executar Fluxo"
+                                title={isWorkflowSaved ? "Executar Fluxo" : "É necessário salvar o fluxo antes de executar"}
                                 style={{
-                                    background: "linear-gradient(135deg, #3b82f6, #2563eb)",
-                                    border: "1px solid #2563eb",
-                                    boxShadow:
-                                        "0 4px 15px rgba(59, 130, 246, 0.4), 0 0 25px rgba(59, 130, 246, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
+                                    background: isWorkflowSaved
+                                        ? "linear-gradient(135deg, #3b82f6, #2563eb)"
+                                        : "linear-gradient(135deg, #6b7280, #4b5563)",
+                                    border: isWorkflowSaved ? "1px solid #2563eb" : "1px solid #4b5563",
+                                    boxShadow: isWorkflowSaved
+                                        ? "0 4px 15px rgba(59, 130, 246, 0.4), 0 0 25px rgba(59, 130, 246, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)"
+                                        : "0 4px 15px rgba(107, 114, 128, 0.4), 0 0 25px rgba(107, 114, 128, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
+                                    opacity: isWorkflowSaved ? 1 : 0.7,
+                                    cursor: isWorkflowSaved ? "pointer" : "not-allowed",
                                 }}
                             >
                                 <FiPlayCircle className="w-3.5 h-3.5" />
@@ -1721,28 +1743,28 @@ const FlowHeader = ({
                     style={{
                         background: isDark
                             ? `linear-gradient(135deg, 
-                 rgba(0, 0, 0, 0.98) 0%, 
-                 rgba(20, 20, 20, 0.96) 25%,
-                 rgba(40, 40, 40, 0.94) 50%,
-                 rgba(20, 20, 20, 0.96) 75%,
-                 rgba(0, 0, 0, 0.98) 100%)`
+                rgba(0, 0, 0, 0.98) 0%, 
+                rgba(20, 20, 20, 0.96) 25%,
+                rgba(40, 40, 40, 0.94) 50%,
+                rgba(20, 20, 20, 0.96) 75%,
+                rgba(0, 0, 0, 0.98) 100%)`
                             : `linear-gradient(135deg, 
-                 rgba(248, 250, 252, 0.98) 0%, 
-                 rgba(241, 245, 249, 0.96) 25%,
-                 rgba(226, 232, 240, 0.94) 50%,
-                 rgba(241, 245, 249, 0.96) 75%,
-                 rgba(248, 250, 252, 0.98) 100%)`,
+                rgba(248, 250, 252, 0.98) 0%, 
+                rgba(241, 245, 249, 0.96) 25%,
+                rgba(226, 232, 240, 0.94) 50%,
+                rgba(241, 245, 249, 0.96) 75%,
+                rgba(248, 250, 252, 0.98) 100%)`,
                         backdropFilter: "blur(25px)",
                         border: isDark ? `2px solid rgba(239, 68, 68, 0.4)` : `2px solid rgba(239, 68, 68, 0.3)`,
                         boxShadow: isDark
                             ? `0 25px 50px -12px rgba(0, 0, 0, 0.9), 
-                 0 0 0 1px rgba(239, 68, 68, 0.2),
-                 0 0 40px rgba(239, 68, 68, 0.3),
-                 inset 0 1px 0 rgba(255, 255, 255, 0.08)`
+                0 0 0 1px rgba(239, 68, 68, 0.2),
+                0 0 40px rgba(239, 68, 68, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08)`
                             : `0 25px 50px -12px rgba(0, 0, 0, 0.15), 
-                 0 0 0 1px rgba(239, 68, 68, 0.15),
-                 0 0 40px rgba(239, 68, 68, 0.2),
-                 inset 0 1px 0 rgba(255, 255, 255, 0.9)`,
+                0 0 0 1px rgba(239, 68, 68, 0.15),
+                0 0 40px rgba(239, 68, 68, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.9)`,
                     }}
                 >
                     {/* Subtle animated background */}
@@ -1751,9 +1773,9 @@ const FlowHeader = ({
                         style={{
                             backgroundImage: isDark
                                 ? `radial-gradient(circle at 25% 25%, rgba(239, 68, 68, 0.4) 0%, transparent 50%), 
-                   radial-gradient(circle at 75% 75%, rgba(220, 38, 38, 0.3) 0%, transparent 50%)`
+                  radial-gradient(circle at 75% 75%, rgba(220, 38, 38, 0.3) 0%, transparent 50%)`
                                 : `radial-gradient(circle at 25% 25%, rgba(239, 68, 68, 0.2) 0%, transparent 50%), 
-                   radial-gradient(circle at 75% 75%, rgba(220, 38, 38, 0.15) 0%, transparent 50%)`,
+                  radial-gradient(circle at 75% 75%, rgba(220, 38, 38, 0.15) 0%, transparent 50%)`,
                         }}
                     />
 
@@ -1934,28 +1956,28 @@ const FlowHeader = ({
                     style={{
                         background: isDark
                             ? `linear-gradient(135deg, 
-                 rgba(0,0,0,0.95) 0%, 
-                 rgba(20, 20, 20, 0.96) 25%,
-                 rgba(40, 40, 40, 0.94) 50%,
-                 rgba(20, 20, 20, 0.96) 75%,
-                 rgba(0,0,0,0.95) 100%)`
+                rgba(0,0,0,0.95) 0%, 
+                rgba(20, 20, 20, 0.96) 25%,
+                rgba(40, 40, 40, 0.94) 50%,
+                rgba(20, 20, 20, 0.96) 75%,
+                rgba(0,0,0,0.95) 100%)`
                             : `linear-gradient(135deg, 
-                 rgba(255,255,255,0.95) 0%, 
-                 rgba(248, 250, 252, 0.96) 25%,
-                 rgba(241, 245, 249, 0.94) 50%,
-                 rgba(248, 250, 252, 0.96) 75%,
-                 rgba(255,255,255,0.95) 100%)`,
+                rgba(255,255,255,0.95) 0%, 
+                rgba(248, 250, 252, 0.96) 25%,
+                rgba(241, 245, 249, 0.94) 50%, 
+                rgba(248, 250, 252, 0.96) 75%,
+                rgba(255,255,255,0.95) 100%)`,
                         backdropFilter: "blur(25px)",
                         border: isDark ? `2px solid rgba(34, 197, 94, 0.4)` : `2px solid rgba(34, 197, 94, 0.3)`,
                         boxShadow: isDark
                             ? `0 25px 50px -12px rgba(0, 0, 0, 0.9),
-                 0 0 0 1px rgba(34, 197, 94, 0.2),
-                 0 0 40px rgba(34, 197, 94, 0.3),
-                 inset 0 1px 0 rgba(255, 255, 255, 0.08)`
+                0 0 0 1px rgba(34, 197, 94, 0.2),
+                0 0 40px rgba(34, 197, 94, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08)`
                             : `0 25px 50px -12px rgba(0, 0, 0, 0.15),
-                 0 0 0 1px rgba(34, 197, 94, 0.15),
-                 0 0 40px rgba(34, 197, 94, 0.2),
-                 inset 0 1px 0 rgba(255, 255, 255, 0.9)`,
+                0 0 0 1px rgba(34, 197, 94, 0.15),
+                0 0 40px rgba(34, 197, 94, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.9)`,
                     }}
                 >
                     {/* Animated background pattern */}
@@ -1964,9 +1986,9 @@ const FlowHeader = ({
                         style={{
                             backgroundImage: isDark
                                 ? `radial-gradient(circle at 25% 25%, rgba(34, 197, 94, 0.4) 0%, transparent 50%),
-                   radial-gradient(circle at 75% 75%, rgba(22, 163, 74, 0.3) 0%, transparent 50%)`
+                  radial-gradient(circle at 75% 75%, rgba(22, 163, 74, 0.3) 0%, transparent 50%)`
                                 : `radial-gradient(circle at 25% 25%, rgba(34, 197, 94, 0.2) 0%, transparent 50%),
-                   radial-gradient(circle at 75% 75%, rgba(22, 163, 74, 0.15) 0%, transparent 50%)`,
+                  radial-gradient(circle at 75% 75%, rgba(22, 163, 74, 0.15) 0%, transparent 50%)`,
                         }}
                     />
 
