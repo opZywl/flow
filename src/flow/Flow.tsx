@@ -122,7 +122,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
 
     return (
         <div
-            className={`flex items-center gap-2 px-2 py-1 rounded-lg border text-xs transition-all duration-200`}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs transition-all duration-200`}
             style={{
                 background: isDark
                     ? `linear-gradient(135deg, rgba(0,0,0,0.8) 0%, ${currentGradient.primary}15 50%, rgba(0,0,0,0.8) 100%)`
@@ -152,7 +152,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
                     />
                 )}
                 <span
-                    className="font-semibold"
+                    className="font-semibold text-xs"
                     style={{
                         textShadow: isDark ? `0 0 6px ${currentGradient.glow}50` : `0 0 3px ${currentGradient.primary}30`,
                     }}
@@ -163,7 +163,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
 
             {/* Separador */}
             <div
-                className="w-px h-4"
+                className="w-px h-3"
                 style={{
                     background: isDark ? currentGradient.glow : currentGradient.primary,
                     opacity: 0.4,
@@ -191,7 +191,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
 
             {/* Separador */}
             <div
-                className="w-px h-4"
+                className="w-px h-3"
                 style={{
                     background: isDark ? currentGradient.glow : currentGradient.primary,
                     opacity: 0.4,
@@ -219,7 +219,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
 
             {/* Separador */}
             <div
-                className="w-px h-4"
+                className="w-px h-3"
                 style={{
                     background: isDark ? currentGradient.glow : currentGradient.primary,
                     opacity: 0.4,
@@ -1159,7 +1159,7 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
     )
 }
 
-// Flow Header with enhanced visual design
+// Flow Header com design melhorado do FlowDev
 const FlowHeader = ({
                         onZoomIn,
                         onZoomOut,
@@ -1185,6 +1185,12 @@ const FlowHeader = ({
     const [showExecuteDialog, setShowExecuteDialog] = useState(false)
     const [showImageMenu, setShowImageMenu] = useState(false)
     const [isWorkflowSaved, setIsWorkflowSaved] = useState(false)
+    const [isSearchFocused, setIsSearchFocused] = useState(false)
+
+    const primaryColor = currentGradient?.primary || "#000000"
+    const secondaryColor = currentGradient?.secondary || "#000000"
+    const accentColor = currentGradient?.accent || "#000000"
+    const glowColor = currentGradient?.glow || "#000000"
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault()
@@ -1202,7 +1208,7 @@ const FlowHeader = ({
             onReset()
         }
         setShowResetDialog(false)
-        setIsWorkflowSaved(false) // Reset saved state when workflow is reset
+        setIsWorkflowSaved(false)
     }
 
     const handleExecute = () => {
@@ -1215,14 +1221,11 @@ const FlowHeader = ({
         if (onExecute) {
             try {
                 const result = onExecute()
-                // Only show success dialog if execution was successful (returned true)
                 if (result === true) {
                     setShowExecuteDialog(true)
                 }
-                // If result is false, the validation dialog will be shown by the executeWorkflow function
             } catch (error) {
                 console.error("Execution failed:", error)
-                // Don't show the success dialog on error
             }
         }
     }
@@ -1231,7 +1234,6 @@ const FlowHeader = ({
         if (onSave) {
             try {
                 const result = onSave()
-                // Only set as saved if save was successful
                 if (result === true) {
                     setIsWorkflowSaved(true)
                 }
@@ -1283,13 +1285,11 @@ const FlowHeader = ({
             return
         }
 
-        // Ocultar todos os elementos da interface
         headerElement?.classList.add("hiding-for-screenshot")
         sidebarElement?.classList.add("hiding-for-screenshot")
         elegantSidebarElement?.classList.add("hiding-for-screenshot")
         componentsSidebar?.classList.add("hiding-for-screenshot")
 
-        // Ocultar todas as sidebars possíveis
         const allSidebars = document.querySelectorAll('[class*="sidebar"], [class*="Sidebar"], .components-panel')
         allSidebars.forEach((sidebar) => {
             sidebar.classList.add("hiding-for-screenshot")
@@ -1330,7 +1330,6 @@ const FlowHeader = ({
             console.error("Erro ao salvar imagem:", error)
             alert("Ocorreu um erro ao salvar a imagem. Tente novamente.")
         } finally {
-            // Restaurar visibilidade de todos os elementos
             headerElement?.classList.remove("hiding-for-screenshot")
             sidebarElement?.classList.remove("hiding-for-screenshot")
             elegantSidebarElement?.classList.remove("hiding-for-screenshot")
@@ -1348,196 +1347,169 @@ const FlowHeader = ({
     }, [componentCount])
 
     const isDark = theme === "dark"
+    const [isExecuted, setIsExecuted] = useState(false)
+    useEffect(() => {
+        const executedFlow = localStorage.getItem("executedFlow")
+        setIsExecuted(executedFlow === "true")
+    }, [])
 
     return (
         <>
-            <header
-                className="relative overflow-hidden border-b backdrop-blur-xl"
+            <motion.header
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                className="relative z-50 border-b"
                 style={{
                     background: isDark
-                        ? `linear-gradient(135deg, 
-                      #000000 0%, 
-                      #1a1a1a 10%, 
-                      #2a2a2a 20%,
-                      #1a1a1a 30%,
-                      #333333 40%,
-                      #2a2a2a 50%,
-                      #1a1a1a 60%,
-                      #000000 70%,
-                      #1a1a1a 80%,
-                      #000000 90%,
-                      #1a1a1a 100%)`
-                        : `linear-gradient(135deg, 
-                      #f8fafc 0%, 
-                      #e2e8f0 10%, 
-                      #f1f5f9 20%,
-                      #e2e8f0 30%,
-                      #cbd5e1 10%,
-                      #f1f5f9 20%,
-                      #e2e8f0 30%,
-                      #cbd5e1 40%,
-                      #f1f5f9 50%,
-                      #e2e8f0 60%,
-                      #f8fafc 70%,
-                      #e2e8f0 80%,
-                      #f8fafc 90%,
-                      #e2e8f0 100%)`,
+                        ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${primaryColor}15 50%, rgba(0,0,0,0.95) 100%)`
+                        : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${primaryColor}10 50%, rgba(255,255,255,0.95) 100%)`,
                     backdropFilter: "blur(20px)",
-                    borderBottom: isDark
-                        ? `2px solid ${currentGradient.glow}`
-                        : `2px solid ${currentGradient.primary.replace("linear-gradient(135deg, ", "").replace(" 0%, ", "").replace(" 100%)", "")}`,
+                    border: isDark ? `1px solid ${glowColor}40` : `1px solid ${primaryColor}30`,
                     boxShadow: isDark
-                        ? `0 8px 32px rgba(0, 0, 0, 0.8), 
-                      0 0 60px ${currentGradient.glow}60, 
-                      0 0 120px ${currentGradient.glow}30,
-                      inset 0 2px 0 rgba(255, 255, 255, 0.1),
-                      inset 0 -2px 0 rgba(203,213,225,0.3)`
-                        : undefined,
+                        ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 40px ${glowColor}30`
+                        : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 40px ${primaryColor}20`,
+                    minHeight: "60px",
+                    maxHeight: "60px",
                 }}
             >
-                {/* Animated background overlay */}
+                {/* Animated background pattern */}
                 <div
-                    className="absolute inset-0 opacity-30"
+                    className="absolute inset-0 opacity-20"
                     style={{
-                        background: isDark
-                            ? `radial-gradient(circle at 20% 20%, ${currentGradient.glow}40 0%, transparent 50%), 
-                radial-gradient(circle at 80% 80%, rgba(60,60,60,0.4) 0%, transparent 50%),
-                radial-gradient(circle at 50% 50%, rgba(40,40,40,0.3) 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 20%, rgba(203,213,225,0.3) 0%, transparent 50%), 
-                radial-gradient(circle at 80% 80%, rgba(226,232,240,0.3) 0%, transparent 50%),
-                radial-gradient(circle at 50% 50%, rgba(241,245,249,0.2) 0%, transparent 60%)`,
-                        animation: "pulse 3s ease-in-out infinite alternate",
+                        backgroundImage: isDark
+                            ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
+          radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
+          radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
+                            : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
+          radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
+          radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                     }}
                 />
 
-                <div className="relative z-10 flex items-center justify-between p-4">
-                    {/* Left Section */}
-                    <div className="flex items-center gap-4">
-                        {/* Back Button */}
-                        <motion.button
-                            whileHover={{ scale: 1.05, x: -2 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => router.push("/")}
-                            className="flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-300"
-                            style={{
-                                background: isDark
-                                    ? `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`
-                                    : `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`,
-                                color: "#ffffff",
-                                border: `1px solid ${currentGradient.glow}`,
-                                boxShadow: `0 4px 15px ${currentGradient.glow}50, 0 0 25px ${currentGradient.glow}30`,
-                                filter: `drop-shadow(0 0 10px ${currentGradient.glow})`,
-                            }}
-                        >
-                            <FiArrowLeft className="w-4 h-4" />
-                        </motion.button>
+                <div className="max-w-full mx-auto px-4 py-2 relative z-10">
+                    <div className="flex items-center justify-between h-11">
+                        {/* Left Section - Logo & Navigation */}
+                        <div className="flex items-center space-x-4">
+                            {/* Logo & Back */}
+                            <div className="flex items-center space-x-3">
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => router.push("/")}
+                                    className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                    style={{
+                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                        color: isDark ? "#ffffff" : "#000000",
+                                    }}
+                                >
+                                    <FiArrowLeft className="w-3.5 h-3.5" />
+                                </motion.button>
 
-                        {/* Sidebar Toggle */}
-                        <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={onToggleSidebar}
-                            className="flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-300"
-                            title="Mostrar/Ocultar Componentes"
-                            style={{
-                                background: isDark
-                                    ? `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`
-                                    : `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`,
-                                color: "#ffffff",
-                                border: `1px solid ${currentGradient.glow}`,
-                                boxShadow: `0 4px 15px ${currentGradient.glow}50, 0 0 25px ${currentGradient.glow}30`,
-                                filter: `drop-shadow(0 0 10px ${currentGradient.glow})`,
-                            }}
-                        >
-                            <FiSidebar className="w-4 h-4" />
-                        </motion.button>
-
-                        {/* Search and Controls */}
-                        <div className="flex items-center gap-3">
-                            {/* Enhanced Search */}
-                            <form onSubmit={handleSearch} className="relative">
-                                <div className="relative group">
-                                    <FiSearch
-                                        className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 transition-colors"
+                                <div className="flex items-center space-x-3">
+                                    <h1
+                                        className="text-lg font-semibold tracking-tight"
                                         style={{
-                                            color: currentGradient.glow,
-                                            filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
+                                            color: isDark ? "#ffffff" : "#000000",
+                                            fontWeight: 600,
+                                            letterSpacing: "-0.01em",
+                                            fontFamily: "system-ui, -apple-system, sans-serif",
                                         }}
-                                    />
-                                    <Input
-                                        type="text"
-                                        placeholder="Buscar por ID..."
-                                        value={searchValue}
-                                        onChange={(e) => setSearchValue(e.target.value)}
-                                        className="w-48 h-9 text-sm pl-10 pr-3 rounded-xl border-2 transition-all duration-300"
+                                    >
+                                        Flow Builder
+                                    </h1>
+                                    <div
+                                        className="px-2 py-0.5 rounded-full text-xs font-medium"
                                         style={{
-                                            background: isDark
-                                                ? `linear-gradient(135deg, rgba(0,0,0,0.8), rgba(20,20,20,0.3))`
-                                                : `linear-gradient(135deg, rgba(255,255,255,0.9), rgba(241,245,249,0.2))`,
-                                            color: isDark ? "#f9fafb" : "#111827",
-                                            border: `2px solid ${currentGradient.glow}`,
-                                            backdropFilter: "blur(15px)",
-                                            boxShadow: `0 4px 20px ${currentGradient.glow}40, 0 0 30px ${currentGradient.glow}20, inset 0 1px 0 rgba(255,255,255,0.2)`,
+                                            background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                            color: isDark ? "#a1a1aa" : "#71717a",
+                                            fontFamily: "system-ui, -apple-system, sans-serif",
                                         }}
-                                    />
+                                    >
+                                        Beta
+                                    </div>
                                 </div>
-                            </form>
+                            </div>
 
-                            {/* Zoom Controls */}
-                            <div
-                                className="flex items-center gap-1 p-1 rounded-xl backdrop-blur-sm"
-                                style={{
-                                    background: isDark
-                                        ? `linear-gradient(135deg, rgba(40,40,40,0.4), rgba(60,60,60,0.3))`
-                                        : `linear-gradient(135deg, rgba(241,245,249,0.3), rgba(226,232,240,0.2))`,
-                                    border: `1px solid ${currentGradient.glow}`,
-                                    boxShadow: `0 4px 15px ${currentGradient.glow}30`,
-                                }}
-                            >
+                            {/* Quick Actions */}
+                            <div className="flex items-center space-x-2">
                                 <motion.button
-                                    whileHover={{ scale: 1.1 }}
-                                    whileTap={{ scale: 0.9 }}
-                                    onClick={onZoomOut}
-                                    className="p-1.5 rounded-lg transition-all duration-200"
-                                    title="Diminuir Zoom"
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={onToggleSidebar}
+                                    className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
                                     style={{
-                                        color: "#ffffff",
-                                        filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
+                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                        color: isDark ? "#a1a1aa" : "#71717a",
+                                    }}
+                                    title="Toggle Sidebar"
+                                >
+                                    <FiSidebar className="w-3.5 h-3.5" />
+                                </motion.button>
+
+                                {/* Zoom Controls */}
+                                <div
+                                    className="flex items-center rounded-lg p-0.5 space-x-0.5"
+                                    style={{
+                                        background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
                                     }}
                                 >
-                                    <FiZoomOut className="w-3.5 h-3.5" />
-                                </motion.button>
-                                <motion.button
-                                    whileHover={{ scale: 1.1 }}
-                                    whileTap={{ scale: 0.9 }}
-                                    onClick={onZoomIn}
-                                    className="p-1.5 rounded-lg transition-all duration-200"
-                                    title="Aumentar Zoom"
-                                    style={{
-                                        color: "#ffffff",
-                                        filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
-                                    }}
-                                >
-                                    <FiZoomIn className="w-3.5 h-3.5" />
-                                </motion.button>
-                                <motion.button
-                                    whileHover={{ scale: 1.1 }}
-                                    whileTap={{ scale: 0.9 }}
-                                    onClick={onFitView}
-                                    className="p-1.5 rounded-lg transition-all duration-200"
-                                    title="Ajustar à Tela"
-                                    style={{
-                                        color: "#ffffff",
-                                        filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
-                                    }}
-                                >
-                                    <FiMaximize className="w-3.5 h-3.5" />
-                                </motion.button>
+                                    {[
+                                        { icon: FiZoomOut, action: onZoomOut, title: "Zoom Out" },
+                                        { icon: FiZoomIn, action: onZoomIn, title: "Zoom In" },
+                                        { icon: FiMaximize, action: onFitView, title: "Fit View" },
+                                    ].map(({ icon: Icon, action, title }, index) => (
+                                        <motion.button
+                                            key={index}
+                                            whileHover={{ scale: 1.05 }}
+                                            whileTap={{ scale: 0.95 }}
+                                            onClick={action}
+                                            className="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150"
+                                            style={{
+                                                color: isDark ? "#a1a1aa" : "#71717a",
+                                            }}
+                                            title={title}
+                                        >
+                                            <Icon className="w-3.5 h-3.5" />
+                                        </motion.button>
+                                    ))}
+                                </div>
                             </div>
                         </div>
 
-                        {/* Enhanced Status Indicator */}
-                        <div className="status-indicator">
+                        {/* Center Section - Search & Status */}
+                        <div className="flex items-center space-x-4">
+                            {/* Search */}
+                            <motion.form
+                                onSubmit={handleSearch}
+                                className="relative"
+                                animate={{ width: isSearchFocused ? 280 : 240 }}
+                                transition={{ duration: 0.2, ease: "easeOut" }}
+                            >
+                                <div className="relative">
+                                    <FiSearch
+                                        className="absolute left-3 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5"
+                                        style={{ color: isDark ? "#71717a" : "#a1a1aa" }}
+                                    />
+                                    <Input
+                                        type="text"
+                                        placeholder="Search nodes..."
+                                        value={searchValue}
+                                        onChange={(e) => setSearchValue(e.target.value)}
+                                        onFocus={() => setIsSearchFocused(true)}
+                                        onBlur={() => setIsSearchFocused(false)}
+                                        className="w-full h-8 pl-9 pr-3 text-sm rounded-lg border-0 transition-all duration-200 focus:outline-none focus:ring-2"
+                                        style={{
+                                            background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                            color: isDark ? "#ffffff" : "#000000",
+                                            focusRingColor: primaryColor,
+                                            fontFamily: "system-ui, -apple-system, sans-serif",
+                                        }}
+                                    />
+                                </div>
+                            </motion.form>
+
+                            {/* Status Indicator - Versão completa mas compacta */}
                             <FlowStatusIndicator
                                 startPosition={startPosition}
                                 mousePosition={mousePosition}
@@ -1546,185 +1518,141 @@ const FlowHeader = ({
                                 currentGradient={currentGradient}
                             />
                         </div>
-                    </div>
 
-                    {/* Right Section */}
-                    <div className="flex items-center gap-2">
-                        {/* Action Buttons */}
-                        <div className="flex items-center gap-1.5">
-                            <motion.button
-                                whileHover={{ scale: 1.02, y: -1 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={handleSave}
-                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
-                                title="Salvar Fluxo"
+                        {/* Right Section - Actions */}
+                        <div className="flex items-center space-x-2">
+                            {/* Primary Actions */}
+                            <div className="flex items-center space-x-1.5">
+                                {[
+                                    {
+                                        icon: FiSave,
+                                        action: handleSave,
+                                        title: "Save",
+                                        variant: "custom",
+                                    },
+                                    {
+                                        icon: FiDownload,
+                                        action: onLoad,
+                                        title: "Load",
+                                        variant: "secondary",
+                                    },
+                                    {
+                                        icon: FiDownload,
+                                        action: onDownload,
+                                        title: "Export",
+                                        variant: "secondary",
+                                    },
+                                    {
+                                        icon: FiPlayCircle,
+                                        action: handleExecute,
+                                        title: "Execute",
+                                        variant: "primary",
+                                    },
+                                ].map(({ icon: Icon, action, title, variant }, index) => (
+                                    <motion.button
+                                        key={index}
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        onClick={action}
+                                        className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
+                                        style={{
+                                            background:
+                                                variant === "primary"
+                                                    ? isDark
+                                                        ? "#ffffff"
+                                                        : "#000000"
+                                                    : variant === "custom"
+                                                        ? isDark
+                                                            ? `linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))`
+                                                            : `linear-gradient(135deg, rgba(0,0,0,0.04), rgba(0,0,0,0.02))`
+                                                        : isDark
+                                                            ? "rgba(255, 255, 255, 0.1)"
+                                                            : "rgba(0, 0, 0, 0.05)",
+                                            color: variant === "primary" ? (isDark ? "#000000" : "#ffffff") : isDark ? "#ffffff" : "#000000",
+                                            border:
+                                                variant === "custom"
+                                                    ? isDark
+                                                        ? `1px solid ${glowColor}30`
+                                                        : `1px solid ${primaryColor}20`
+                                                    : "none",
+                                            boxShadow: variant === "custom" ? `0 4px 15px ${glowColor}20` : "none",
+                                            fontFamily: "system-ui, -apple-system, sans-serif",
+                                        }}
+                                        title={title}
+                                    >
+                                        <Icon className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline text-xs">{title}</span>
+                                    </motion.button>
+                                ))}
+                            </div>
+
+                            {/* Divider */}
+                            <div
+                                className="w-px h-6"
                                 style={{
-                                    background: "linear-gradient(135deg, #22c55e, #16a34a)",
-                                    border: "1px solid #16a34a",
-                                    boxShadow:
-                                        "0 4px 15px rgba(34, 197, 94, 0.4), 0 0 25px rgba(34, 197, 94, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
+                                    background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
                                 }}
-                            >
-                                <FiSave className="w-3.5 h-3.5" />
-                                Salvar
-                            </motion.button>
+                            />
 
-                            <motion.button
-                                whileHover={{ scale: 1.02, y: -1 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={handleReset}
-                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
-                                title="Resetar Fluxo"
-                                style={{
-                                    background: "linear-gradient(135deg, #ef4444, #dc2626)",
-                                    border: "1px solid #dc2626",
-                                    boxShadow:
-                                        "0 4px 15px rgba(239, 68, 68, 0.4), 0 0 25px rgba(239, 68, 68, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-                                }}
-                            >
-                                <FiRefreshCw className="w-3.5 h-3.5" />
-                                Resetar
-                            </motion.button>
+                            {/* Utility Actions */}
+                            <div className="flex items-center space-x-1">
+                                {[
+                                    { icon: FiImage, action: () => setShowImageMenu(true), title: "Image Options" },
+                                    { icon: FiSettings, action: onOpenColorPanel, title: "Settings" },
+                                    { icon: isDark ? FiSun : FiMoon, action: toggleTheme, title: "Toggle Theme" },
+                                ].map(({ icon: Icon, action, title }, index) => (
+                                    <motion.button
+                                        key={index}
+                                        whileHover={{ scale: 1.05 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        onClick={action}
+                                        className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
+                                        style={{
+                                            background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                            color: isDark ? "#a1a1aa" : "#71717a",
+                                        }}
+                                        title={title}
+                                    >
+                                        <Icon className="w-3.5 h-3.5" />
+                                    </motion.button>
+                                ))}
 
-                            <motion.button
-                                whileHover={{ scale: 1.02, y: -1 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={onDownload}
-                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
-                                title="Download do Fluxo"
-                                style={{
-                                    background: "linear-gradient(135deg, #a855f7, #9333ea)",
-                                    border: "1px solid #9333ea",
-                                    boxShadow:
-                                        "0 4px 15px rgba(168, 85, 247, 0.4), 0 0 25px rgba(168, 85, 247, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-                                }}
-                            >
-                                <FiDownload className="w-3.5 h-3.5" />
-                                Download
-                            </motion.button>
+                                {/* Reset Button - Special */}
+                                <motion.button
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    onClick={handleReset}
+                                    className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
+                                    style={{
+                                        background: "rgba(239, 68, 68, 0.1)",
+                                        color: "#ef4444",
+                                    }}
+                                    title="Reset Flow"
+                                >
+                                    <FiRefreshCw className="w-3.5 h-3.5" />
+                                </motion.button>
 
-                            <motion.button
-                                whileHover={{ scale: 1.02, y: -1 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={onLoad}
-                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
-                                title="Carregar Fluxo"
-                                style={{
-                                    background: "linear-gradient(135deg, #6b7280, #4b5563)",
-                                    border: "1px solid #4b5563",
-                                    boxShadow:
-                                        "0 4px 15px rgba(107, 114, 128, 0.4), 0 0 25px rgba(107, 114, 128, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-                                }}
-                            >
-                                <FiDownload className="w-3.5 h-3.5" />
-                                Carregar
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{ scale: isWorkflowSaved ? 1.02 : 1.0, y: isWorkflowSaved ? -1 : 0 }}
-                                whileTap={{ scale: isWorkflowSaved ? 0.98 : 1.0 }}
-                                onClick={handleExecute}
-                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
-                                title={isWorkflowSaved ? "Executar Fluxo" : "É necessário salvar o fluxo antes de executar"}
-                                style={{
-                                    background: isWorkflowSaved
-                                        ? "linear-gradient(135deg, #3b82f6, #2563eb)"
-                                        : "linear-gradient(135deg, #6b7280, #4b5563)",
-                                    border: isWorkflowSaved ? "1px solid #2563eb" : "1px solid #4b5563",
-                                    boxShadow: isWorkflowSaved
-                                        ? "0 4px 15px rgba(59, 130, 246, 0.4), 0 0 25px rgba(59, 130, 246, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)"
-                                        : "0 4px 15px rgba(107, 114, 128, 0.4), 0 0 25px rgba(107, 114, 128, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-                                    opacity: isWorkflowSaved ? 1 : 0.7,
-                                    cursor: isWorkflowSaved ? "pointer" : "not-allowed",
-                                }}
-                            >
-                                <FiPlayCircle className="w-3.5 h-3.5" />
-                                Executar
-                            </motion.button>
-                        </div>
-
-                        {/* Divider */}
-                        <div
-                            className="w-px h-6 opacity-60"
-                            style={{
-                                background: currentGradient.glow,
-                                boxShadow: `0 0 10px ${currentGradient.glow}`,
-                            }}
-                        />
-
-                        {/* Utility Buttons */}
-                        <div className="flex items-center gap-1.5">
-                            <motion.button
-                                whileHover={{ scale: 1.1, rotate: 180 }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={toggleTheme}
-                                className="p-2.5 rounded-xl transition-all duration-300 text-white"
-                                title={isDark ? "Modo Claro" : "Modo Escuro"}
-                                style={{
-                                    background: isDark
-                                        ? "linear-gradient(135deg, #f59e0b, #d97706)"
-                                        : "linear-gradient(135deg, #6366f1, #4f46e5)",
-                                    border: isDark ? "1px solid #d97706" : "1px solid #4f46e5",
-                                    boxShadow: isDark
-                                        ? "0 4px 15px rgba(245, 158, 11, 0.4), 0 0 25px rgba(245, 158, 11, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)"
-                                        : "0 4px 15px rgba(99, 102, 241, 0.4), 0 0 25px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-                                }}
-                            >
-                                {isDark ? <FiSun className="w-4 h-4" /> : <FiMoon className="w-4 h-4" />}
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{ scale: 1.1 }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={() => setShowImageMenu(!showImageMenu)}
-                                className="p-2.5 rounded-xl transition-all duration-300 text-white"
-                                title="Opções de Imagem"
-                                style={{
-                                    background: "linear-gradient(135deg, #ec4899, #db2777)",
-                                    border: "1px solid #db2777",
-                                    boxShadow:
-                                        "0 4px 15px rgba(236, 72, 153, 0.4), 0 0 25px rgba(236, 72, 153, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-                                }}
-                            >
-                                <FiImage className="w-4 h-4" />
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{ scale: 1.1, rotate: 90 }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={onOpenColorPanel}
-                                className="p-2.5 rounded-xl transition-all duration-300 text-white"
-                                title="Abrir Painel de Cores"
-                                style={{
-                                    background: "linear-gradient(135deg, #10b981, #059669)",
-                                    border: "1px solid #059669",
-                                    boxShadow:
-                                        "0 4px 15px rgba(16, 185, 129, 0.4), 0 0 25px rgba(16, 185, 129, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-                                }}
-                            >
-                                <FiSettings className="w-4 h-4" />
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{ scale: 1.02, y: -1 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={onOpenBot}
-                                className="px-3 py-2 text-sm font-medium rounded-xl transition-all duration-300 flex items-center gap-1.5 text-white"
-                                title="Abrir ChatBot"
-                                style={{
-                                    background: "linear-gradient(135deg, #06b6d4, #0891b2)",
-                                    border: "1px solid #0891b2",
-                                    boxShadow:
-                                        "0 4px 15px rgba(6, 182, 212, 0.4), 0 0 25px rgba(6, 182, 212, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-                                }}
-                            >
-                                <BotIcon className="w-3.5 h-3.5" />
-                                Ativar Bot
-                            </motion.button>
+                                {/* Bot Button - Special */}
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={onOpenBot}
+                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
+                                    style={{
+                                        background: "linear-gradient(135deg, #06b6d4, #0891b2)",
+                                        color: "#ffffff",
+                                        fontFamily: "system-ui, -apple-system, sans-serif",
+                                    }}
+                                    title="Open Bot"
+                                >
+                                    <BotIcon className="w-3.5 h-3.5" />
+                                    <span className="hidden lg:inline text-xs">¥$ Bot</span>
+                                </motion.button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </header>
+            </motion.header>
 
             {/* Image Menu Dialog */}
             <ImageMenu
@@ -1736,7 +1664,7 @@ const FlowHeader = ({
                 theme={theme}
             />
 
-            {/* Reset Dialog with Enhanced Design */}
+            {/* Reset Dialog - Enhanced Design */}
             <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
                 <DialogContent
                     className="sm:max-w-[480px]"
