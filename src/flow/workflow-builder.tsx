@@ -2,6 +2,9 @@
 
 import type React from "react"
 import { useState, useCallback, useRef, useEffect } from "react"
+import { FiSave, FiLayers } from "react-icons/fi"
+import { motion } from "framer-motion"
+
 import ReactFlow, {
   ReactFlowProvider,
   Background,
@@ -1195,33 +1198,118 @@ function WorkflowBuilderInner({
         </Dialog>
 
         {/* POPUP DE SUCESSO - Fluxo salvo */}
+        {/*** POPUP DE SUCESSO – Fluxo Salvo (VISUAL NEON) ***/}
         <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
           <DialogContent
-              className={`${isDark ? "bg-black border-gray-700" : "bg-white border-gray-200"} max-w-md mx-auto rounded-xl`}
+              className="sm:max-w-[450px] p-0 bg-transparent border-0"
+              style={{ background: "transparent", border: "none", boxShadow: "none" }}
           >
-            <DialogHeader className="text-center">
-              <DialogTitle
-                  className={`text-2xl font-bold ${
-                      isDark ? "text-white" : "text-gray-900"
-                  } flex items-center justify-center gap-3`}
-              >
-                ✅ Fluxo Salvo!
-              </DialogTitle>
-              <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-3 text-center text-lg`}>
-                🎉 <strong>Parabéns!</strong> Seu fluxo foi salvo com sucesso!
-                <br />
-                <span className="text-sm mt-2 block">
-                📊 <strong>{nodes.length} componentes</strong> salvos no navegador
-              </span>
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex justify-center mt-6">
-              <Button
-                  onClick={() => setShowSuccessDialog(false)}
-                  className="bg-green-600 hover:bg-green-700 text-white font-semibold px-8 py-2"
-              >
-                🚀 Perfeito!
-              </Button>
+            <div
+                className="relative rounded-2xl overflow-hidden"
+                style={{
+                  background: isDark
+                      ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${currentGradient.primary}15 50%, rgba(0,0,0,0.95) 100%)`
+                      : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}10 50%, rgba(255,255,255,0.95) 100%)`,
+                  border: isDark
+                      ? `1px solid ${currentGradient.glow}40`
+                      : `1px solid ${currentGradient.primary}30`,
+                  boxShadow: isDark
+                      ? `0 25px 50px -12px rgba(0,0,0,0.8), 0 0 40px ${currentGradient.glow}30`
+                      : `0 25px 50px -12px rgba(0,0,0,0.3), 0 0 40px ${currentGradient.primary}20`,
+                  backdropFilter: "blur(20px)",
+                }}
+            >
+              {/* brilho de fundo */}
+              <div
+                  className="absolute inset-0 opacity-20 rounded-2xl"
+                  style={{
+                    backgroundImage: isDark
+                        ? `radial-gradient(circle at 20% 30%, ${currentGradient.primary}60 0%, transparent 40%),
+               radial-gradient(circle at 80% 70%, ${currentGradient.secondary}60 0%, transparent 40%),
+               radial-gradient(circle at 50% 50%, ${currentGradient.accent}40 0%, transparent 60%)`
+                        : `radial-gradient(circle at 20% 30%, ${currentGradient.primary}40 0%, transparent 40%),
+               radial-gradient(circle at 80% 70%, ${currentGradient.secondary}40 0%, transparent 40%),
+               radial-gradient(circle at 50% 50%, ${currentGradient.accent}30 0%, transparent 60%)`,
+                  }}
+              />
+
+              <DialogHeader className="relative z-10 p-6 pb-2">
+                <div className="flex items-center gap-4 mb-2">
+                  <div
+                      className="p-4 rounded-2xl"
+                      style={{
+                        background: "rgba(34,197,94,0.2)",
+                        boxShadow: "0 8px 20px rgba(34,197,94,0.3)",
+                      }}
+                  >
+                    <FiSave
+                        className="w-8 h-8 text-green-400"
+                        style={{ filter: "drop-shadow(0 0 8px rgba(34,197,94,0.6))" }}
+                    />
+                  </div>
+                  <div>
+                    <DialogTitle
+                        className="text-xl font-bold mb-1"
+                        style={{
+                          color: isDark ? "#ffffff" : "#111827",
+                          textShadow: isDark
+                              ? `0 0 15px ${currentGradient.glow}60`
+                              : `0 0 8px ${currentGradient.primary}40`,
+                          fontFamily: "system-ui, -apple-system, sans-serif",
+                        }}
+                    >
+                      Fluxo Salvo!
+                    </DialogTitle>
+                    <DialogDescription
+                        className="text-sm"
+                        style={{
+                          color: isDark ? "#d1d5db" : "#6b7280",
+                          textShadow: isDark ? `0 0 5px ${currentGradient.glow}30` : "none",
+                          fontFamily: "system-ui, -apple-system, sans-serif",
+                        }}
+                    >
+                      Parabéns! Seu fluxo foi salvo com sucesso!
+                    </DialogDescription>
+                  </div>
+                </div>
+
+                {/* detalhes */}
+                <div
+                    className="mt-2 px-3 py-3 text-sm font-medium rounded-lg flex items-center gap-2"
+                    style={{
+                      background: isDark ? "rgba(0,255,128,0.05)" : "rgba(0,128,64,0.05)",
+                      border: isDark
+                          ? `1px solid ${currentGradient.glow}30`
+                          : `1px solid ${currentGradient.primary}20`,
+                      color: isDark ? "#34d399" : "#065f46",
+                      fontFamily: "system-ui, -apple-system, sans-serif",
+                    }}
+                >
+                  <FiLayers className="w-4 h-4" />
+                  {nodes.length} componentes salvos
+                  <span className="text-xs ml-2">
+            Todos os dados foram armazenados no navegador com segurança.
+          </span>
+                </div>
+              </DialogHeader>
+
+              <div className="relative z-10 flex justify-end gap-3 p-6 pt-2">
+                <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setShowSuccessDialog(false)}
+                    className="px-6 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
+                    style={{
+                      background: "rgba(34,197,94,0.15)",
+                      color: "#ffffff",
+                      border: `1px solid rgba(34,197,94,0.4)`,
+                      boxShadow: "0 0 8px rgba(34,197,94,0.5)",
+                      fontFamily: "system-ui, -apple-system, sans-serif",
+                    }}
+                >
+                  Perfeito!
+                </motion.button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
