@@ -381,7 +381,6 @@ export default function NodeLibrary() {
                             }}
                             onMouseLeave={(e) => {
                                 e.currentTarget.style.background = isDark
-                                e.currentTarget.style.background = isDark
                                     ? `linear-gradient(135deg, ${getPrimaryColor()}20 0%, ${getSecondaryColor()}15 100%)`
                                     : `linear-gradient(135deg, ${getPrimaryColor()}10 0%, ${getSecondaryColor()}08 100%)`
                                 e.currentTarget.style.borderColor = isDark ? `${getPrimaryColor()}40` : `${getPrimaryColor()}30`
