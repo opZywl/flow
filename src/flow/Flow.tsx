@@ -1062,7 +1062,7 @@ const FlowHeader = ({
                         workflowContainerRef,
                     }: any) => {
     const router = useRouter()
-    const { theme, toggleTheme, currentGradient } = useTheme()
+    const { theme, toggleTheme, currentGradient, glowAnimation, glowEnabled } = useTheme()
     const [searchValue, setSearchValue] = useState("")
     const [showResetDialog, setShowResetDialog] = useState(false)
     const [showExecuteDialog, setShowExecuteDialog] = useState(false)
@@ -1252,8 +1252,39 @@ const FlowHeader = ({
         setIsExecuted(executedFlow === "true")
     }, [])
 
+    // Função para criar estilos de botão com glow animation - CORRIGIDA
+    const getButtonStyle = (baseStyle: any) => {
+        if (!glowEnabled) return baseStyle
+
+        const glowStyles: React.CSSProperties = {
+            ...baseStyle,
+            border: `1px solid var(--glow-color)`,
+            boxShadow: `0 0 var(--glow-blur) var(--glow-spread) var(--glow-color)`,
+            transition: "all 0.3s ease",
+        }
+
+        if (glowAnimation) {
+            glowStyles.animation = "glow-pulse 2s ease-in-out infinite alternate"
+        }
+
+        return glowStyles
+    }
+
     return (
         <>
+            <style jsx>{`
+        @keyframes glow-pulse {
+          0% {
+            box-shadow: 0 0 var(--glow-blur) var(--glow-spread) var(--glow-color);
+            transform: scale(1);
+          }
+          100% {
+            box-shadow: 0 0 calc(var(--glow-blur) * 1.5) calc(var(--glow-spread) * 1.5) var(--glow-color-strong);
+            transform: scale(1.02);
+          }
+        }
+      `}</style>
+
             <motion.header
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1264,7 +1295,7 @@ const FlowHeader = ({
                         ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${primaryColor}15 50%, rgba(0,0,0,0.95) 100%)`
                         : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${primaryColor}10 50%, rgba(255,255,255,0.95) 100%)`,
                     backdropFilter: "blur(20px)",
-                    border: isDark ? `1px solid ${glowColor}40` : `1px solid ${primaryColor}30`,
+                    borderBottom: `2px solid ${glowColor}`,
                     boxShadow: isDark
                         ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 40px ${glowColor}30`
                         : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 40px ${primaryColor}20`,
@@ -1294,10 +1325,10 @@ const FlowHeader = ({
                                     whileTap={{ scale: 0.98 }}
                                     onClick={() => router.push("/")}
                                     className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
                                         color: isDark ? "#ffffff" : "#000000",
-                                    }}
+                                    })}
                                 >
                                     <FiArrowLeft className="w-3.5 h-3.5" />
                                 </motion.button>
@@ -1333,10 +1364,10 @@ const FlowHeader = ({
                                     whileTap={{ scale: 0.98 }}
                                     onClick={onToggleSidebar}
                                     className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
                                         color: isDark ? "#a1a1aa" : "#71717a",
-                                    }}
+                                    })}
                                     title="Toggle Sidebar"
                                 >
                                     <FiSidebar className="w-3.5 h-3.5" />
@@ -1344,9 +1375,9 @@ const FlowHeader = ({
 
                                 <div
                                     className="flex items-center rounded-lg p-0.5 space-x-0.5"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                    }}
+                                    })}
                                 >
                                     {[
                                         { icon: FiZoomOut, action: onZoomOut, title: "Zoom Out" },
@@ -1391,12 +1422,12 @@ const FlowHeader = ({
                                         onFocus={() => setIsSearchFocused(true)}
                                         onBlur={() => setIsSearchFocused(false)}
                                         className="w-full h-8 pl-9 pr-3 text-sm rounded-lg border-0 transition-all duration-200 focus:outline-none focus:ring-2"
-                                        style={{
+                                        style={getButtonStyle({
                                             background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
                                             color: isDark ? "#ffffff" : "#000000",
                                             focusRingColor: primaryColor,
                                             fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
+                                        })}
                                     />
                                 </div>
                             </motion.form>
@@ -1417,11 +1448,11 @@ const FlowHeader = ({
                                     whileTap={{ scale: 0.98 }}
                                     onClick={handleSave}
                                     className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
                                         color: isDark ? "#ffffff" : "#000000",
                                         fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
+                                    })}
                                     title="Save"
                                 >
                                     <FiSave className="w-3.5 h-3.5" />
@@ -1433,11 +1464,11 @@ const FlowHeader = ({
                                     whileTap={{ scale: 0.98 }}
                                     onClick={onLoad}
                                     className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
                                         color: isDark ? "#ffffff" : "#000000",
                                         fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
+                                    })}
                                     title="Load"
                                 >
                                     <FiUpload className="w-3.5 h-3.5" />
@@ -1449,11 +1480,11 @@ const FlowHeader = ({
                                     whileTap={{ scale: 0.98 }}
                                     onClick={onDownload}
                                     className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
                                         color: isDark ? "#ffffff" : "#000000",
                                         fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
+                                    })}
                                     title="Export"
                                 >
                                     <FiDownload className="w-3.5 h-3.5" />
@@ -1466,7 +1497,7 @@ const FlowHeader = ({
                                     onClick={handleExecute}
                                     disabled={!isWorkflowSaved}
                                     className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: isWorkflowSaved
                                             ? isDark
                                                 ? "#ffffff"
@@ -1477,7 +1508,7 @@ const FlowHeader = ({
                                         color: isWorkflowSaved ? (isDark ? "#000000" : "#ffffff") : isDark ? "#666666" : "#999999",
                                         fontFamily: "system-ui, -apple-system, sans-serif",
                                         cursor: isWorkflowSaved ? "pointer" : "not-allowed",
-                                    }}
+                                    })}
                                     title="Execute"
                                 >
                                     <FiPlayCircle className="w-3.5 h-3.5" />
@@ -1504,10 +1535,10 @@ const FlowHeader = ({
                                         whileTap={{ scale: 0.95 }}
                                         onClick={action}
                                         className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
-                                        style={{
+                                        style={getButtonStyle({
                                             background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
                                             color: isDark ? "#a1a1aa" : "#71717a",
-                                        }}
+                                        })}
                                         title={title}
                                     >
                                         <Icon className="w-3.5 h-3.5" />
@@ -1519,10 +1550,10 @@ const FlowHeader = ({
                                     whileTap={{ scale: 0.95 }}
                                     onClick={handleReset}
                                     className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: "rgba(239, 68, 68, 0.1)",
                                         color: "#ef4444",
-                                    }}
+                                    })}
                                     title="Reset Flow"
                                 >
                                     <FiRefreshCw className="w-3.5 h-3.5" />
@@ -1533,11 +1564,11 @@ const FlowHeader = ({
                                     whileTap={{ scale: 0.98 }}
                                     onClick={onOpenBot}
                                     className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={{
+                                    style={getButtonStyle({
                                         background: "linear-gradient(135deg, #06b6d4, #0891b2)",
                                         color: "#ffffff",
                                         fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
+                                    })}
                                     title="Open Bot"
                                 >
                                     <BotIcon className="w-3.5 h-3.5" />
