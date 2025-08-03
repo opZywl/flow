@@ -150,7 +150,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
                         />
                     )}
                 </motion.div>
-                <span className="font-medium">{isExecuted ? "Active" : "Inactive"}</span>
+                <span className="font-medium">{isExecuted ? "Ativo" : "Inativo"}</span>
             </div>
 
             <div
@@ -189,7 +189,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
                     }}
                 />
                 <span className="font-mono text-xs">
-          CURSOR ({Math.round(mousePosition.x)}, {Math.round(mousePosition.y)})
+          Mouse ({Math.round(mousePosition.x)}, {Math.round(mousePosition.y)})
         </span>
             </div>
 
@@ -208,7 +208,7 @@ const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, the
                         filter: `drop-shadow(0 0 4px ${currentGradient.glow}60)`,
                     }}
                 />
-                <span className="font-medium">{componentCount} nodes</span>
+                <span className="font-medium">{componentCount} Componentes</span>
             </div>
         </motion.div>
     )
@@ -1416,7 +1416,7 @@ const FlowHeader = ({
                                     />
                                     <Input
                                         type="text"
-                                        placeholder="Search nodes..."
+                                        placeholder="Procurar ID do Componente..."
                                         value={searchValue}
                                         onChange={(e) => setSearchValue(e.target.value)}
                                         onFocus={() => setIsSearchFocused(true)}
