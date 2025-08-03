@@ -1050,11 +1050,10 @@ function WorkflowBuilderInner({
                 className="w-64 p-4 transition-all duration-300"
                 style={{
                   background: isDark
-                      ? `linear-gradient(135deg, rgba(0,0,0,0.85) 0%, ${currentGradient.primary}10 50%, rgba(0,0,0,0.85) 100%)`
-                      : `linear-gradient(135deg, rgba(255,255,255,0.85) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.85) 100%)`,
-                  border: "1px solid transparent",
-                  backdropFilter: "blur(12px)",
-                  borderRight: isDark ? `1px solid ${currentGradient.glow}20` : `1px solid ${currentGradient.primary}15`,
+                      ? `linear-gradient(135deg, rgba(0,0,0,0.4) 0%, ${currentGradient.primary}10 50%, rgba(0,0,0,0.4) 100%)`
+                      : `linear-gradient(135deg, rgba(255,255,255,0.4) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.4) 100%)`,
+                  border: isDark ? `1px solid ${currentGradient.glow}20` : `1px solid ${currentGradient.primary}15`,
+                  borderRight: isDark ? `1px solid ${currentGradient.glow}30` : `1px solid ${currentGradient.primary}20`,
                 }}
             >
               <NodeLibrary />
