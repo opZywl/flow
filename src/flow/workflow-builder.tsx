@@ -1047,11 +1047,16 @@ function WorkflowBuilderInner({
 
         {showSidebar && (
             <div
-                className={`w-64 border-r p-4 ${isDark ? "bg-black border-gray-800" : "bg-white border-gray-200"} transition-all duration-300`}
+                className="w-64 p-4 transition-all duration-300"
+                style={{
+                  background: isDark
+                      ? `linear-gradient(135deg, rgba(0,0,0,0.85) 0%, ${currentGradient.primary}10 50%, rgba(0,0,0,0.85) 100%)`
+                      : `linear-gradient(135deg, rgba(255,255,255,0.85) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.85) 100%)`,
+                  border: "1px solid transparent",
+                  backdropFilter: "blur(12px)",
+                  borderRight: isDark ? `1px solid ${currentGradient.glow}20` : `1px solid ${currentGradient.primary}15`,
+                }}
             >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>Componentes</h2>
-              </div>
               <NodeLibrary />
             </div>
         )}
@@ -1210,9 +1215,7 @@ function WorkflowBuilderInner({
                   background: isDark
                       ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${currentGradient.primary}15 50%, rgba(0,0,0,0.95) 100%)`
                       : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}10 50%, rgba(255,255,255,0.95) 100%)`,
-                  border: isDark
-                      ? `1px solid ${currentGradient.glow}40`
-                      : `1px solid ${currentGradient.primary}30`,
+                  border: isDark ? `1px solid ${currentGradient.glow}40` : `1px solid ${currentGradient.primary}30`,
                   boxShadow: isDark
                       ? `0 25px 50px -12px rgba(0,0,0,0.8), 0 0 40px ${currentGradient.glow}30`
                       : `0 25px 50px -12px rgba(0,0,0,0.3), 0 0 40px ${currentGradient.primary}20`,
@@ -1278,18 +1281,14 @@ function WorkflowBuilderInner({
                     className="mt-2 px-3 py-3 text-sm font-medium rounded-lg flex items-center gap-2"
                     style={{
                       background: isDark ? "rgba(0,255,128,0.05)" : "rgba(0,128,64,0.05)",
-                      border: isDark
-                          ? `1px solid ${currentGradient.glow}30`
-                          : `1px solid ${currentGradient.primary}20`,
+                      border: isDark ? `1px solid ${currentGradient.glow}30` : `1px solid ${currentGradient.primary}20`,
                       color: isDark ? "#34d399" : "#065f46",
                       fontFamily: "system-ui, -apple-system, sans-serif",
                     }}
                 >
                   <FiLayers className="w-4 h-4" />
                   {nodes.length} componentes salvos
-                  <span className="text-xs ml-2">
-            Todos os dados foram armazenados no navegador com segurança.
-          </span>
+                  <span className="text-xs ml-2">Todos os dados foram armazenados no navegador com segurança.</span>
                 </div>
               </DialogHeader>
 
