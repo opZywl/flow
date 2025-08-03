@@ -1319,44 +1319,21 @@ const FlowHeader = ({
                 <div className="max-w-full mx-auto px-4 py-2 relative z-10">
                     <div className="flex items-center justify-between h-11">
                         <div className="flex items-center space-x-4">
-                            <div className="flex items-center space-x-3">
                                 <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={() => router.push("/")}
-                                    className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    onClick={onOpenBot}
+                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
                                     style={getButtonStyle({
-                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        color: isDark ? "#ffffff" : "#000000",
+                                        background: "linear-gradient(135deg, #06b6d4, #0891b2)",
+                                        color: "#ffffff",
+                                        fontFamily: "system-ui, -apple-system, sans-serif",
                                     })}
+                                    title="Open Bot"
                                 >
-                                    <FiArrowLeft className="w-3.5 h-3.5" />
+                                    <BotIcon className="w-3.5 h-3.5" />
+                                    <span className="hidden lg:inline text-xs">Bot</span>
                                 </motion.button>
-
-                                <div className="flex items-center space-x-3">
-                                    <h1
-                                        className="text-lg font-semibold tracking-tight"
-                                        style={{
-                                            color: isDark ? "#ffffff" : "#000000",
-                                            fontWeight: 600,
-                                            letterSpacing: "-0.01em",
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Flow Builder
-                                    </h1>
-                                    <div
-                                        className="px-2 py-0.5 rounded-full text-xs font-medium"
-                                        style={{
-                                            background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                            color: isDark ? "#a1a1aa" : "#71717a",
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Beta
-                                    </div>
-                                </div>
-                            </div>
 
                             <div className="flex items-center space-x-2">
                                 <motion.button
@@ -1557,22 +1534,6 @@ const FlowHeader = ({
                                     title="Reset Flow"
                                 >
                                     <FiRefreshCw className="w-3.5 h-3.5" />
-                                </motion.button>
-
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={onOpenBot}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: "linear-gradient(135deg, #06b6d4, #0891b2)",
-                                        color: "#ffffff",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    })}
-                                    title="Open Bot"
-                                >
-                                    <BotIcon className="w-3.5 h-3.5" />
-                                    <span className="hidden lg:inline text-xs">¥$ Bot</span>
                                 </motion.button>
                             </div>
                         </div>

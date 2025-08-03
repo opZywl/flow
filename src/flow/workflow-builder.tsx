@@ -88,7 +88,7 @@ const createDefaultWorkflow = () => {
       position: { x: 250, y: 200 },
       data: {
         label: "Mensagem de Boas-vindas",
-        message: "Olá! Bem-vindo ao AURA! 🤖\n\nSou seu assistente virtual e estou aqui para ajudar você.",
+        message: "Olá! Bem-vindo ao ¥$! 🤖\n\nSou seu assistente virtual e estou aqui para ajudar você.",
         customId: "#1",
       },
       draggable: true,
@@ -128,7 +128,7 @@ const createDefaultWorkflow = () => {
       data: {
         label: "Suporte Técnico",
         message:
-            "🔧 Para suporte técnico:\n\n• Acesse nossa documentação\n• Envie um email para suporte@aura.com\n• Ou continue conversando comigo!",
+            "🔧 Para suporte técnico:\n\n• Acesse nossa documentação\n• Envie um email para lucas.user.xyz@gmail.com\n• Ou continue conversando comigo!",
         customId: "#4",
       },
       draggable: true,
@@ -750,7 +750,7 @@ function WorkflowBuilderInner({
             }
 
             if (!workflowData.flowData || !workflowData._id) {
-              throw new Error("Formato de arquivo inválido - não é um fluxo Aura válido")
+              throw new Error("Formato de arquivo inválido - não é um fluxo válido")
             }
 
             const { nodes: loadedNodes, edges: loadedEdges, nodeCounters: loadedCounters } = workflowData.flowData
@@ -851,7 +851,7 @@ function WorkflowBuilderInner({
 
     toast({
       title: "✅ Fluxo executado com sucesso!",
-      description: "Fluxo atual salvo e executado - bot Aura atualizado!",
+      description: "Fluxo atual salvo e executado - bot atualizado!",
     })
 
     window.dispatchEvent(new Event("storage"))
@@ -918,8 +918,8 @@ function WorkflowBuilderInner({
       }))
 
       const workflowData = {
-        _id: `aura_flow_${Date.now()}`,
-        _tag: "Fluxo Aura",
+        _id: `yzy_flow_${Date.now()}`,
+        _tag: "Fluxo ¥$",
         _insertedAt: new Date().toISOString(),
         _enabled: true,
         flowData: {
@@ -941,7 +941,7 @@ function WorkflowBuilderInner({
 
       const link = document.createElement("a")
       link.href = url
-      link.download = `aura_flow_${new Date().toISOString().split("T")[0]}.json`
+      link.download = `yzy_flow_${new Date().toISOString().split("T")[0]}.json`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -1119,7 +1119,7 @@ function WorkflowBuilderInner({
               <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-2 text-center`}>
                 <span className="text-red-500 font-bold text-lg">Não foi possível importar o arquivo!</span>
                 <br />
-                <span className="text-sm">Verifique se o arquivo é um fluxo Aura válido:</span>
+                <span className="text-sm">Verifique se o arquivo é um fluxo válido:</span>
               </DialogDescription>
             </DialogHeader>
             <div className="mt-4">
