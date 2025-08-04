@@ -8,7 +8,6 @@ import ColorPanel from "../ColorPanel"
 import WorkflowBuilder from "./workflow-builder"
 import { useRouter } from "next/navigation"
 import {
-    FiArrowLeft,
     FiSearch,
     FiSave,
     FiPlayCircle,
@@ -42,6 +41,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Avatar } from "@/components/ui/avatar"
 import { motion, AnimatePresence } from "framer-motion"
 import html2canvas from "html2canvas"
+import IntegrationsMenu from "./integrations/IntegrationsMenu"
 
 const FlowElegantSidebar = ({ currentGradient, theme }: { currentGradient: any; theme: string }) => {
     return (
@@ -561,13 +561,13 @@ const YenFlowBot = ({
                     border: isDark ? `2px solid rgba(60,60,60,0.5)` : `2px solid rgba(203,213,225,0.4)`,
                     boxShadow: isDark
                         ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
-              0 0 0 1px rgba(60,60,60,0.3), 
-              0 0 40px rgba(0,0,0,0.4),
-              inset 0 1px 0 rgba(255, 255, 255, 0.1)`
+             0 0 0 1px rgba(60,60,60,0.3), 
+             0 0 40px rgba(0,0,0,0.4),
+             inset 0 1px 0 rgba(255, 255, 255, 0.1)`
                         : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
-              0 0 0 1px rgba(203,213,225,0.3), 
-              0 0 40px rgba(0,0,0,0.25),
-              inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
+             0 0 0 1px rgba(203,213,225,0.3), 
+             0 0 40px rgba(0,0,0,0.25),
+             inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
                 }}
             >
                 <div
@@ -575,11 +575,11 @@ const YenFlowBot = ({
                     style={{
                         backgroundImage: isDark
                             ? `radial-gradient(circle at 20% 30%, rgba(60,60,60,0.6) 0%, transparent 40%), 
-                radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
-                radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
+               radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
+               radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
                             : `radial-gradient(circle at 20% 30%, rgba(203,213,225,0.4) 0%, transparent 40%), 
-                radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
-                radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
+               radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
+               radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
                     }}
                 />
 
@@ -821,11 +821,11 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                         style={{
                             backgroundImage: isDark
                                 ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
-                  radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
-                  radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
+                 radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
+                 radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
                                 : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
-                  radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
-                  radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
+                 radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
+                 radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                         }}
                     />
 
@@ -1067,6 +1067,7 @@ const FlowHeader = ({
     const [showResetDialog, setShowResetDialog] = useState(false)
     const [showExecuteDialog, setShowExecuteDialog] = useState(false)
     const [showImageMenu, setShowImageMenu] = useState(false)
+    const [showIntegrationsMenu, setShowIntegrationsMenu] = useState(false)
     const [isWorkflowSaved, setIsWorkflowSaved] = useState(false)
     const [isSearchFocused, setIsSearchFocused] = useState(false)
 
@@ -1273,17 +1274,26 @@ const FlowHeader = ({
     return (
         <>
             <style jsx>{`
-        @keyframes glow-pulse {
-          0% {
-            box-shadow: 0 0 var(--glow-blur) var(--glow-spread) var(--glow-color);
-            transform: scale(1);
-          }
-          100% {
-            box-shadow: 0 0 calc(var(--glow-blur) * 1.5) calc(var(--glow-spread) * 1.5) var(--glow-color-strong);
-            transform: scale(1.02);
-          }
-        }
-      `}</style>
+       @keyframes glow-pulse {
+         0% {
+           box-shadow: 0 0 var(--glow-blur) var(--glow-spread) var(--glow-color);
+           transform: scale(1);
+         }
+         100% {
+           box-shadow: 0 0 calc(var(--glow-blur) * 1.5) calc(var(--glow-spread) * 1.5) var(--glow-color-strong);
+           transform: scale(1.02);
+         }
+       }
+       
+       .flow-background {
+         background-image: var(--flow-background-image, url('/background-pattern.png')), 
+                          radial-gradient(circle at 25% 25%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                          radial-gradient(circle at 75% 75%, rgba(255, 119, 198, 0.3) 0%, transparent 50%);
+         background-size: 100px 100px, 800px 800px, 600px 600px;
+         background-position: 0 0, 0 0, 100% 100%;
+         background-repeat: repeat, no-repeat, no-repeat;
+       }
+     `}</style>
 
             <motion.header
                 initial={{ opacity: 0, y: -10 }}
@@ -1308,77 +1318,61 @@ const FlowHeader = ({
                     style={{
                         backgroundImage: isDark
                             ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
-          radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
-          radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
+         radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
+         radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
                             : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
-          radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
-          radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
+         radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
+         radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                     }}
                 />
 
                 <div className="max-w-full mx-auto px-4 py-2 relative z-10">
                     <div className="flex items-center justify-between h-11">
+                        {/* Seção Esquerda - Sidebar + Zoom */}
                         <div className="flex items-center space-x-4">
-                                <motion.button
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
-                                    onClick={onOpenBot}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: "linear-gradient(135deg, #06b6d4, #0891b2)",
-                                        color: "#ffffff",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    })}
-                                    title="Open Bot"
-                                >
-                                    <BotIcon className="w-3.5 h-3.5" />
-                                    <span className="hidden lg:inline text-xs">Bot</span>
-                                </motion.button>
+                            <motion.button
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
+                                onClick={onToggleSidebar}
+                                className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
+                                style={getButtonStyle({
+                                    background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                    color: isDark ? "#a1a1aa" : "#71717a",
+                                })}
+                                title="Toggle Sidebar"
+                            >
+                                <FiSidebar className="w-3.5 h-3.5" />
+                            </motion.button>
 
-                            <div className="flex items-center space-x-2">
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={onToggleSidebar}
-                                    className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        color: isDark ? "#a1a1aa" : "#71717a",
-                                    })}
-                                    title="Toggle Sidebar"
-                                >
-                                    <FiSidebar className="w-3.5 h-3.5" />
-                                </motion.button>
-
-                                <div
-                                    className="flex items-center rounded-lg p-0.5 space-x-0.5"
-                                    style={getButtonStyle({
-                                        background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                    })}
-                                >
-                                    {[
-                                        { icon: FiZoomOut, action: onZoomOut, title: "Zoom Out" },
-                                        { icon: FiZoomIn, action: onZoomIn, title: "Zoom In" },
-                                        { icon: FiMaximize, action: onFitView, title: "Fit View" },
-                                    ].map(({ icon: Icon, action, title }, index) => (
-                                        <motion.button
-                                            key={index}
-                                            whileHover={{ scale: 1.05 }}
-                                            whileTap={{ scale: 0.95 }}
-                                            onClick={action}
-                                            className="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150"
-                                            style={{
-                                                color: isDark ? "#a1a1aa" : "#71717a",
-                                            }}
-                                            title={title}
-                                        >
-                                            <Icon className="w-3.5 h-3.5" />
-                                        </motion.button>
-                                    ))}
-                                </div>
+                            <div
+                                className="flex items-center rounded-lg p-0.5 space-x-0.5"
+                                style={getButtonStyle({
+                                    background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
+                                })}
+                            >
+                                {[
+                                    { icon: FiZoomOut, action: onZoomOut, title: "Zoom Out" },
+                                    { icon: FiZoomIn, action: onZoomIn, title: "Zoom In" },
+                                    { icon: FiMaximize, action: onFitView, title: "Fit View" },
+                                ].map(({ icon: Icon, action, title }, index) => (
+                                    <motion.button
+                                        key={index}
+                                        whileHover={{ scale: 1.05 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        onClick={action}
+                                        className="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150"
+                                        style={{
+                                            color: isDark ? "#a1a1aa" : "#71717a",
+                                        }}
+                                        title={title}
+                                    >
+                                        <Icon className="w-3.5 h-3.5" />
+                                    </motion.button>
+                                ))}
                             </div>
                         </div>
 
+                        {/* Seção Central - Search + Status */}
                         <div className="flex items-center space-x-4">
                             <motion.form
                                 onSubmit={handleSearch}
@@ -1418,6 +1412,7 @@ const FlowHeader = ({
                             />
                         </div>
 
+                        {/* Seção Direita - Actions */}
                         <div className="flex items-center space-x-2">
                             <div className="flex items-center space-x-1.5">
                                 <motion.button
@@ -1434,6 +1429,22 @@ const FlowHeader = ({
                                 >
                                     <FiSave className="w-3.5 h-3.5" />
                                     <span className="hidden sm:inline text-xs">Save</span>
+                                </motion.button>
+
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={onOpenBot}
+                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
+                                    style={getButtonStyle({
+                                        background: "linear-gradient(135deg, #06b6d4, #0891b2)",
+                                        color: "#ffffff",
+                                        fontFamily: "system-ui, -apple-system, sans-serif",
+                                    })}
+                                    title="Open Bot"
+                                >
+                                    <BotIcon className="w-3.5 h-3.5" />
+                                    <span className="hidden lg:inline text-xs">Bot</span>
                                 </motion.button>
 
                                 <motion.button
@@ -1501,6 +1512,20 @@ const FlowHeader = ({
                             />
 
                             <div className="flex items-center space-x-1">
+                                <motion.button
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    onClick={() => setShowIntegrationsMenu(true)}
+                                    className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
+                                    style={getButtonStyle({
+                                        background: "linear-gradient(135deg, #8B5CF6, #7C3AED)",
+                                        color: "#ffffff",
+                                    })}
+                                    title="Integrações"
+                                >
+                                    <FiLayers className="w-3.5 h-3.5" />
+                                </motion.button>
+
                                 {[
                                     { icon: FiImage, action: () => setShowImageMenu(true), title: "Image Options" },
                                     { icon: FiSettings, action: onOpenColorPanel, title: "Settings" },
@@ -1541,6 +1566,13 @@ const FlowHeader = ({
                 </div>
             </motion.header>
 
+            <IntegrationsMenu
+                isOpen={showIntegrationsMenu}
+                onClose={() => setShowIntegrationsMenu(false)}
+                theme={theme}
+                currentGradient={currentGradient}
+            />
+
             <ImageMenu
                 isOpen={showImageMenu}
                 onClose={() => setShowImageMenu(false)}
@@ -1577,11 +1609,11 @@ const FlowHeader = ({
                             style={{
                                 backgroundImage: isDark
                                     ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
-                    radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
-                    radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
+                   radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
+                   radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
                                     : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
-                    radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
-                    radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
+                   radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
+                   radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                             }}
                         />
 
@@ -1710,11 +1742,11 @@ const FlowHeader = ({
                             style={{
                                 backgroundImage: isDark
                                     ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
-                    radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
-                    radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
+                   radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
+                   radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
                                     : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
-                    radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
-                    radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
+                   radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
+                   radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                             }}
                         />
 
