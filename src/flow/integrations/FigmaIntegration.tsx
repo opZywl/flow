@@ -19,6 +19,8 @@ import {
     FiGithub,
 } from "react-icons/fi"
 import { FigmaAPI, FigmaOAuth, type FigmaFile, type FigmaUser } from "../../lib/figma-api"
+import Image from "next/image"
+import figmaIcon from "@/public/icons/figma.png"
 
 interface FigmaIntegrationProps {
     isOpen: boolean
@@ -323,11 +325,16 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                 <div
                                     className="p-3 rounded-xl"
                                     style={{
-                                        background: `linear-gradient(135deg, #F24E1E, #FF6B35)`,
+                                        background: `linear-gradient(135deg, #F24E1E, #0099CC)`,
                                         boxShadow: `0 8px 20px #F24E1E40`,
                                     }}
                                 >
-                                    <FiLayers className="w-6 h-6 text-white" />
+                                    <Image
+                                        src={figmaIcon}
+                                        alt="Blip"
+                                        width={24}
+                                        height={24}
+                                    />
                                 </div>
                                 <div>
                                     <h2

@@ -3,6 +3,7 @@
 import type React from "react"
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import Image from "next/image"
 import {
     FiX,
     FiZap,
@@ -40,6 +41,7 @@ const IntegrationsMenu: React.FC<IntegrationsMenuProps> = ({ isOpen, onClose, th
             category: "CHATBOT",
             status: "active",
             isActive: true,
+            logoPath: "/icons/blip.png",
         },
         {
             id: "figma",
@@ -50,6 +52,7 @@ const IntegrationsMenu: React.FC<IntegrationsMenuProps> = ({ isOpen, onClose, th
             category: "DESIGN",
             status: "active",
             isActive: true,
+            logoPath: "/icons/figma.png",
         },
         {
             id: "telegram",
@@ -266,12 +269,22 @@ const IntegrationsMenu: React.FC<IntegrationsMenuProps> = ({ isOpen, onClose, th
                                                 boxShadow: integration.isActive ? `0 4px 12px ${integration.color}40` : "none",
                                             }}
                                         >
-                                            <integration.icon
-                                                className="w-5 h-5"
-                                                style={{
-                                                    color: integration.isActive ? "white" : isDark ? "#9ca3af" : "#6b7280",
-                                                }}
-                                            />
+                                            {integration.logoPath ? (
+                                                <Image
+                                                    src={integration.logoPath || "/placeholder.svg"}
+                                                    alt={`${integration.name} logo`}
+                                                    width={20}
+                                                    height={20}
+                                                    className="w-5 h-5 object-contain"
+                                                />
+                                            ) : (
+                                                <integration.icon
+                                                    className="w-5 h-5"
+                                                    style={{
+                                                        color: integration.isActive ? "white" : isDark ? "#9ca3af" : "#6b7280",
+                                                    }}
+                                                />
+                                            )}
                                         </div>
                                         <div
                                             className="px-2 py-1 rounded-full text-xs font-medium"

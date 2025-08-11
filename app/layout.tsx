@@ -5,6 +5,7 @@ import { Inter } from "next/font/google"
 import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { ThemeProvider } from "@/components/theme-provider"
+import { HomeThemeProvider } from "@/src/ThemeContext"
 import Script from "next/script"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -17,16 +18,16 @@ export const metadata: Metadata = {
     shortcut: "/favicon.png",
     apple: "/favicon.png",
   },
-    generator: 'v0.dev'
+  generator: "v0.dev",
 }
 
 export default function RootLayout({
-  children,
-}: {
+                                     children,
+                                   }: {
   children: React.ReactNode
 }) {
   return (
-    <html lang="pt-BR" suppressHydrationWarning>
+      <html lang="pt-BR" suppressHydrationWarning>
       <head>
         <style>{`
 html {
@@ -35,15 +36,13 @@ html {
   --font-mono: ${GeistMono.variable};
 }
         `}</style>
-        <Script id="disable-react-devtools" strategy="beforeInteractive">
-
-        </Script>
+        <Script id="disable-react-devtools" strategy="beforeInteractive"></Script>
       </head>
       <body className={inter.className}>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} disableTransitionOnChange={false}>
-          {children}
-        </ThemeProvider>
+      <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} disableTransitionOnChange={false}>
+        <HomeThemeProvider>{children}</HomeThemeProvider>
+      </ThemeProvider>
       </body>
-    </html>
+      </html>
   )
 }

@@ -20,6 +20,8 @@ import {
     FiRefreshCw,
 } from "react-icons/fi"
 import { BlipAPI, type FlowInfo, type BlipAccount } from "../../lib/blip-api"
+import Image from "next/image"
+import blipIcon from "@/public/icons/blip.png"
 
 interface BlipIntegrationProps {
     isOpen: boolean
@@ -341,7 +343,12 @@ const BlipIntegration: React.FC<BlipIntegrationProps> = ({ isOpen, onClose, them
                                         boxShadow: `0 8px 20px #00D4FF40`,
                                     }}
                                 >
-                                    <FiMessageSquare className="w-6 h-6 text-white" />
+                                    <Image
+                                        src={blipIcon}
+                                        alt="Blip"
+                                        width={24}
+                                        height={24}
+                                    />
                                 </div>
                                 <div>
                                     <h2

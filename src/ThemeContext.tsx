@@ -84,6 +84,8 @@ interface HomeThemeContextType {
   applyGlowFadeSettings: () => void
   showChannelModal: boolean
   setShowChannelModal: (show: boolean) => void
+  showIntegrationsModal: boolean
+  setShowIntegrationsModal: (show: boolean) => void
   sidebarCollapsed: boolean
   toggleSidebar: () => void
   setSidebarCollapsed: (collapsed: boolean) => void
@@ -103,7 +105,7 @@ interface ThemeProviderProps {
   children: ReactNode
 }
 
-export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
+export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [theme, setTheme] = useState<HomeTheme>("dark")
   const [currentGradient, setCurrentGradient] = useState<GradientTheme>(gradientThemes[0]) // Blue Purple theme
   const [showColorPanel, setShowColorPanel] = useState(false)
@@ -120,6 +122,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [glowEnabled, setGlowEnabled] = useState(true)
   const [fadeEnabled, setFadeEnabled] = useState(true)
   const [showChannelModal, setShowChannelModal] = useState(false)
+  const [showIntegrationsModal, setShowIntegrationsModal] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   // Extract colors from gradient theme
@@ -175,8 +178,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       root.style.setProperty("--glow-spread", `${glowThickness / 2}px`)
 
       const glowStyle = glowEnabled
-        ? `0 0 ${glowThickness}px var(--glow-color), 0 0 ${glowThickness * 2}px var(--glow-color-light)`
-        : "none"
+          ? `0 0 ${glowThickness}px var(--glow-color), 0 0 ${glowThickness * 2}px var(--glow-color-light)`
+          : "none"
       root.style.setProperty("--title-glow", glowStyle)
 
       if (glowAnimation) {
@@ -213,6 +216,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       const savedGradient = localStorage.getItem("home-gradient")
       const savedGlowFade = localStorage.getItem("panel-glow-fade-settings")
       const savedSidebarState = localStorage.getItem("sidebarCollapsed")
+      const savedIntegrationsModalState = localStorage.getItem("showIntegrationsModal")
 
       if (savedTheme === "dark" || savedTheme === "light") {
         setTheme(savedTheme)
@@ -234,6 +238,10 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
 
       if (savedSidebarState) {
         setSidebarCollapsed(savedSidebarState === "true")
+      }
+
+      if (savedIntegrationsModalState) {
+        setShowIntegrationsModal(savedIntegrationsModalState === "true")
       }
 
       if (savedGlowFade) {
@@ -342,6 +350,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     applyGlowFadeSettings,
     showChannelModal,
     setShowChannelModal,
+    showIntegrationsModal,
+    setShowIntegrationsModal,
     sidebarCollapsed,
     toggleSidebar,
     setSidebarCollapsed,
@@ -349,11 +359,13 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
 
   if (!isLoaded) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-        <div className="text-lg">Loading...</div>
-      </div>
+        <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
+          <div className="text-lg">Loading...</div>
+        </div>
     )
   }
 
   return <HomeThemeContext.Provider value={value}>{children}</HomeThemeContext.Provider>
 }
+
+export { HomeThemeProvider as ThemeProvider }
