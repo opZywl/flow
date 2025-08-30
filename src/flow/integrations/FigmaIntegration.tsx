@@ -5,7 +5,6 @@ import { useState, useCallback, useEffect } from "react"
 import { motion } from "framer-motion"
 import { toast } from "@/components/ui/use-toast"
 import {
-    FiLayers,
     FiX,
     FiKey,
     FiCheck,
@@ -20,7 +19,6 @@ import {
 } from "react-icons/fi"
 import { FigmaAPI, FigmaOAuth, type FigmaFile, type FigmaUser } from "../../lib/figma-api"
 import Image from "next/image"
-import figmaIcon from "@/public/icons/figma.png"
 
 interface FigmaIntegrationProps {
     isOpen: boolean
@@ -329,12 +327,7 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                         boxShadow: `0 8px 20px #F24E1E40`,
                                     }}
                                 >
-                                    <Image
-                                        src={figmaIcon}
-                                        alt="Blip"
-                                        width={24}
-                                        height={24}
-                                    />
+                                    <Image src="/icons/figma.png" alt="Figma" width={24} height={24} />
                                 </div>
                                 <div>
                                     <h2
@@ -461,7 +454,7 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                                 </>
                                             ) : (
                                                 <>
-                                                    <FiLayers className="w-5 h-5 text-[#F24E1E]" />
+                                                    <Image src="/icons/figma.png" alt="Figma" width={20} height={20} className="w-5 h-5" />
                                                     Entrar com Figma
                                                 </>
                                             )}
