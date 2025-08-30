@@ -276,6 +276,9 @@ const IntegrationsMenu: React.FC<IntegrationsMenuProps> = ({ isOpen, onClose, th
                                                     width={20}
                                                     height={20}
                                                     className="w-5 h-5 object-contain"
+                                                    style={{
+                                                        filter: integration.isActive ? "brightness(0) invert(1)" : "none",
+                                                    }}
                                                 />
                                             ) : (
                                                 <integration.icon
