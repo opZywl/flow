@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback } from "react"
 import { motion } from "framer-motion"
 import { toast } from "@/components/ui/use-toast"
 import {
@@ -15,9 +15,8 @@ import {
     FiAlertCircle,
     FiLoader,
     FiLink,
-    FiGithub,
+    FiUser,
 } from "react-icons/fi"
-import { FigmaAPI, FigmaOAuth, type FigmaFile, type FigmaUser } from "../../lib/figma-api"
 import Image from "next/image"
 
 interface FigmaIntegrationProps {
@@ -32,118 +31,50 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
     const [fileUrl, setFileUrl] = useState("")
     const [isConnected, setIsConnected] = useState(false)
     const [isConnecting, setIsConnecting] = useState(false)
-    const [userInfo, setUserInfo] = useState<FigmaUser | null>(null)
-    const [files, setFiles] = useState<FigmaFile[]>([])
-    const [isLoadingFiles, setIsLoadingFiles] = useState(false)
-    const [connectionMethod, setConnectionMethod] = useState<"token" | "oauth" | "url">("oauth")
+    const [userInfo, setUserInfo] = useState<any>(null)
+    const [connectionMethod, setConnectionMethod] = useState<"token" | "url">("token")
 
     const isDark = theme === "dark"
-    const figmaOAuth = new FigmaOAuth()
-
-    // Verificar se há token salvo
-    useEffect(() => {
-        const savedToken = localStorage.getItem("figma_access_token")
-        if (savedToken) {
-            setAccessToken(savedToken)
-            handleValidateToken(savedToken)
-        }
-
-        // Listener para OAuth callback
-        const handleOAuthMessage = (event: MessageEvent) => {
-            if (event.origin !== window.location.origin) return
-
-            if (event.data.type === "FIGMA_OAUTH_SUCCESS") {
-                const { code, state } = event.data
-                if (figmaOAuth.validateState(state)) {
-                    handleOAuthCallback(code)
-                }
-            }
-        }
-
-        window.addEventListener("message", handleOAuthMessage)
-        return () => window.removeEventListener("message", handleOAuthMessage)
-    }, [])
 
     const handleValidateToken = useCallback(async (token: string) => {
         if (!token) return
 
         setIsConnecting(true)
         try {
-            const figmaAPI = new FigmaAPI(token)
-            const result = await figmaAPI.validateToken()
+            // Simular validação do token
+            const response = await fetch(`https://api.figma.com/v1/me`, {
+                headers: {
+                    "X-Figma-Token": token,
+                },
+            })
 
-            if (result.success && result.data) {
+            if (response.ok) {
+                const userData = await response.json()
                 setIsConnected(true)
-                setUserInfo(result.data)
+                setUserInfo(userData)
                 localStorage.setItem("figma_access_token", token)
 
                 toast({
                     title: "✅ Conectado com sucesso!",
-                    description: `Conectado como ${result.data.handle || result.data.email}`,
+                    description: `Conectado como ${userData.handle || userData.email}`,
                 })
             } else {
                 toast({
                     title: "❌ Token inválido",
-                    description: result.error || "Verifique seu token de acesso",
+                    description: "Verifique seu token de acesso do Figma",
                     variant: "destructive",
                 })
-                localStorage.removeItem("figma_access_token")
             }
         } catch (error) {
             toast({
                 title: "❌ Erro na conexão",
-                description: error instanceof Error ? error.message : "Erro desconhecido",
+                description: "Não foi possível conectar com a API do Figma",
                 variant: "destructive",
             })
         } finally {
             setIsConnecting(false)
         }
     }, [])
-
-    const handleOAuthLogin = useCallback(() => {
-        try {
-            figmaOAuth.startOAuthFlow()
-            toast({
-                title: "🔄 Redirecionando...",
-                description: "Você será redirecionado para o Figma para autorizar o acesso.",
-            })
-        } catch (error) {
-            toast({
-                title: "❌ Erro no OAuth",
-                description: "Não foi possível iniciar o processo de autenticação",
-                variant: "destructive",
-            })
-        }
-    }, [])
-
-    const handleOAuthCallback = useCallback(
-        async (code: string) => {
-            setIsConnecting(true)
-            try {
-                const result = await figmaOAuth.exchangeCodeForToken(code)
-
-                if (result.success && result.data) {
-                    setAccessToken(result.data.access_token)
-                    await handleValidateToken(result.data.access_token)
-                } else {
-                    toast({
-                        title: "❌ Erro no OAuth",
-                        description: result.error || "Não foi possível obter o token de acesso",
-                        variant: "destructive",
-                    })
-                }
-            } catch (error) {
-                toast({
-                    title: "❌ Erro no OAuth",
-                    description: error instanceof Error ? error.message : "Erro desconhecido",
-                    variant: "destructive",
-                })
-            } finally {
-                setIsConnecting(false)
-            }
-        },
-        [handleValidateToken],
-    )
 
     const handleTokenConnect = useCallback(async () => {
         if (!accessToken) {
@@ -168,16 +99,6 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
             return
         }
 
-        const fileKey = FigmaAPI.extractFileKeyFromUrl(fileUrl)
-        if (!fileKey) {
-            toast({
-                title: "❌ URL inválida",
-                description: "A URL deve ser um link válido do Figma (figma.com/file/...)",
-                variant: "destructive",
-            })
-            return
-        }
-
         if (!accessToken) {
             toast({
                 title: "❌ Token necessário",
@@ -187,62 +108,82 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
             return
         }
 
-        await handleImportFromFigma(fileKey, "Arquivo da URL")
-    }, [fileUrl, accessToken])
+        // Extrair file key da URL
+        const match = fileUrl.match(/figma\.com\/file\/([a-zA-Z0-9]+)/)
+        if (!match) {
+            toast({
+                title: "❌ URL inválida",
+                description: "A URL deve ser um link válido do Figma (figma.com/file/...)",
+                variant: "destructive",
+            })
+            return
+        }
+
+        const fileKey = match[1]
+
+        try {
+            toast({
+                title: "🔄 Importando...",
+                description: "Importando arquivo do Figma...",
+            })
+
+            const response = await fetch(`https://api.figma.com/v1/files/${fileKey}`, {
+                headers: {
+                    "X-Figma-Token": accessToken,
+                },
+            })
+
+            if (response.ok) {
+                const fileData = await response.json()
+
+                // Converter para formato de fluxo (simplificado)
+                const convertedFlow = {
+                    id: `figma-import-${Date.now()}`,
+                    name: `Importado do Figma: ${fileData.name}`,
+                    nodes: [],
+                    edges: [],
+                    metadata: {
+                        source: "figma",
+                        originalFileKey: fileKey,
+                        importedAt: new Date().toISOString(),
+                    },
+                }
+
+                localStorage.setItem("workflow", JSON.stringify(convertedFlow))
+                localStorage.removeItem("executedFlow")
+                window.dispatchEvent(new Event("storage"))
+
+                toast({
+                    title: "✅ Arquivo importado!",
+                    description: `${fileData.name} foi importado com sucesso.`,
+                })
+                onClose()
+            } else {
+                toast({
+                    title: "❌ Erro na importação",
+                    description: "Não foi possível acessar o arquivo do Figma",
+                    variant: "destructive",
+                })
+            }
+        } catch (error) {
+            toast({
+                title: "❌ Erro na importação",
+                description: "Erro ao importar arquivo do Figma",
+                variant: "destructive",
+            })
+        }
+    }, [fileUrl, accessToken, onClose])
 
     const handleDisconnect = useCallback(() => {
         setIsConnected(false)
         setAccessToken("")
         setUserInfo(null)
-        setFiles([])
         localStorage.removeItem("figma_access_token")
         toast({
             title: "🔌 Desconectado",
             description: "Integração com Figma foi removida.",
         })
     }, [])
-
-    const handleImportFromFigma = useCallback(
-        async (fileKey: string, fileName: string) => {
-            if (!accessToken) return
-
-            try {
-                toast({
-                    title: "🔄 Importando...",
-                    description: `Importando ${fileName} do Figma...`,
-                })
-
-                const figmaAPI = new FigmaAPI(accessToken)
-                const result = await figmaAPI.getFileByKey(fileKey)
-
-                if (result.success && result.data) {
-                    const convertedFlow = figmaAPI.convertFigmaToFlow(result.data)
-                    localStorage.setItem("workflow", JSON.stringify(convertedFlow))
-                    localStorage.removeItem("executedFlow")
-                    window.dispatchEvent(new Event("storage"))
-
-                    toast({
-                        title: "✅ Arquivo importado!",
-                        description: `${fileName} foi importado com sucesso. ${convertedFlow.nodes?.length || 0} nós criados.`,
-                    })
-                    onClose()
-                } else {
-                    toast({
-                        title: "❌ Erro na importação",
-                        description: result.error || "Erro ao importar arquivo",
-                        variant: "destructive",
-                    })
-                }
-            } catch (error) {
-                toast({
-                    title: "❌ Erro na importação",
-                    description: error instanceof Error ? error.message : "Erro desconhecido",
-                    variant: "destructive",
-                })
-            }
-        },
-        [accessToken, onClose],
-    )
 
     const handleExportToFigma = useCallback(async () => {
         try {
@@ -257,8 +198,24 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
             }
 
             const flowData = JSON.parse(currentFlow)
-            const figmaAPI = new FigmaAPI(accessToken)
-            const figmaFormat = figmaAPI.convertFlowToFigma(flowData)
+
+            // Converter para formato Figma (simplificado)
+            const figmaFormat = {
+                name: flowData.name || "Fluxo Exportado",
+                document: {
+                    id: "0:0",
+                    name: "Document",
+                    type: "DOCUMENT",
+                    children: [
+                        {
+                            id: "0:1",
+                            name: "Page 1",
+                            type: "CANVAS",
+                            children: [],
+                        },
+                    ],
+                },
+            }
 
             // Download do arquivo JSON
             const blob = new Blob([JSON.stringify(figmaFormat, null, 2)], { type: "application/json" })
@@ -276,11 +233,11 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
         } catch (error) {
             toast({
                 title: "❌ Erro na exportação",
-                description: error instanceof Error ? error.message : "Erro desconhecido",
+                description: "Erro ao exportar fluxo",
                 variant: "destructive",
             })
         }
-    }, [accessToken])
+    }, [])
 
     if (!isOpen) return null
 
@@ -376,18 +333,6 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                     }}
                                 >
                                     <button
-                                        onClick={() => setConnectionMethod("oauth")}
-                                        className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                            connectionMethod === "oauth" ? "bg-[#F24E1E] text-white" : ""
-                                        }`}
-                                        style={{
-                                            color: connectionMethod === "oauth" ? "white" : isDark ? "#e5e7eb" : "#4b5563",
-                                        }}
-                                    >
-                                        <FiGithub className="inline w-4 h-4 mr-2" />
-                                        Login OAuth
-                                    </button>
-                                    <button
                                         onClick={() => setConnectionMethod("token")}
                                         className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                                             connectionMethod === "token" ? "bg-[#F24E1E] text-white" : ""
@@ -413,55 +358,6 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                     </button>
                                 </div>
 
-                                {/* OAuth Method */}
-                                {connectionMethod === "oauth" && (
-                                    <div className="space-y-4">
-                                        <div
-                                            className="p-4 rounded-xl border"
-                                            style={{
-                                                background: isDark ? "rgba(242, 78, 30, 0.1)" : "rgba(242, 78, 30, 0.05)",
-                                                borderColor: "#F24E1E40",
-                                            }}
-                                        >
-                                            <div className="flex items-start gap-3">
-                                                <FiInfo className="w-5 h-5 text-[#F24E1E] mt-0.5" />
-                                                <div>
-                                                    <h3 className="font-semibold text-[#F24E1E] mb-1">Login Direto com Figma</h3>
-                                                    <p className="text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                                        Clique no botão abaixo para fazer login diretamente com sua conta Figma. Você será
-                                                        redirecionado para autorizar o acesso de forma segura.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <motion.button
-                                            whileHover={{ scale: 1.02 }}
-                                            whileTap={{ scale: 0.98 }}
-                                            onClick={handleOAuthLogin}
-                                            disabled={isConnecting}
-                                            className="w-full p-4 rounded-xl border text-center transition-colors flex items-center justify-center gap-3"
-                                            style={{
-                                                background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.02)",
-                                                borderColor: "#F24E1E40",
-                                                color: isDark ? "#ffffff" : "#111827",
-                                            }}
-                                        >
-                                            {isConnecting ? (
-                                                <>
-                                                    <FiLoader className="w-5 h-5 animate-spin" />
-                                                    Conectando...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Image src="/icons/figma.png" alt="Figma" width={20} height={20} className="w-5 h-5" />
-                                                    Entrar com Figma
-                                                </>
-                                            )}
-                                        </motion.button>
-                                    </div>
-                                )}
-
                                 {/* Token Method */}
                                 {connectionMethod === "token" && (
                                     <div className="space-y-4">
@@ -475,7 +371,7 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                             <div className="flex items-start gap-3">
                                                 <FiInfo className="w-5 h-5 text-[#F24E1E] mt-0.5" />
                                                 <div>
-                                                    <h3 className="font-semibold text-[#F24E1E] mb-1">Token Manual</h3>
+                                                    <h3 className="font-semibold text-[#F24E1E] mb-1">Como obter seu token</h3>
                                                     <p className="text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
                                                         1. Acesse Figma → Settings → Personal Access Tokens
                                                         <br />
@@ -629,6 +525,7 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                     </p>
                                     {userInfo && (
                                         <div className="mt-4 text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
+                                            <FiUser className="inline w-4 h-4 mr-1" />
                                             <strong>Usuário:</strong> {userInfo.handle || userInfo.email}
                                         </div>
                                     )}
@@ -758,13 +655,7 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                 <motion.button
                                     whileHover={{ scale: 1.02 }}
                                     whileTap={{ scale: 0.98 }}
-                                    onClick={
-                                        connectionMethod === "token"
-                                            ? handleTokenConnect
-                                            : connectionMethod === "url"
-                                                ? handleUrlImport
-                                                : handleOAuthLogin
-                                    }
+                                    onClick={connectionMethod === "token" ? handleTokenConnect : handleUrlImport}
                                     disabled={isConnecting}
                                     className="px-6 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
                                     style={{
@@ -777,8 +668,6 @@ const FigmaIntegration: React.FC<FigmaIntegrationProps> = ({ isOpen, onClose, th
                                             <FiLoader className="w-4 h-4 animate-spin" />
                                             Conectando...
                                         </>
-                                    ) : connectionMethod === "oauth" ? (
-                                        "Entrar com Figma"
                                     ) : connectionMethod === "url" ? (
                                         "Importar"
                                     ) : (

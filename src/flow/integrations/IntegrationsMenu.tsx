@@ -277,7 +277,8 @@ const IntegrationsMenu: React.FC<IntegrationsMenuProps> = ({ isOpen, onClose, th
                                                     height={20}
                                                     className="w-5 h-5 object-contain"
                                                     style={{
-                                                        filter: integration.isActive ? "brightness(0) invert(1)" : "none",
+                                                        filter:
+                                                            integration.isActive && integration.id !== "figma" ? "brightness(0) invert(1)" : "none",
                                                     }}
                                                 />
                                             ) : (
