@@ -5,7 +5,7 @@ import type React from "react"
 import { memo, useState, useEffect } from "react"
 import { Handle, Position, type NodeProps } from "reactflow"
 import { List, Plus, Minus, X } from "lucide-react"
-import type { NodeData } from "@/lib/types"
+import type { NodeData } from "@/flow/utils/types"
 
 interface OptionsNodeProps extends NodeProps<NodeData> {
   onRemove?: () => void
@@ -39,7 +39,7 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
 
   const removeOption = (index: number) => {
     if (options.length > 1) {
-      const newOptions = options.filter((_, i) => i !== index)
+      const newOptions = options.filter((_, i: number) => i !== index)
       setOptions(newOptions)
       if (onUpdateData) onUpdateData({ options: newOptions })
     }
@@ -106,7 +106,7 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
 
       {/* Tabela de opções com layout melhorado */}
       <div className="space-y-1 mb-3">
-        {options.map((option, index) => (
+        {options.map((option: { text: string; digit: string }, index: number) => (
           <div key={index} className="flex items-center gap-2 text-xs">
             <input
               type="text"
@@ -151,7 +151,7 @@ export const OptionsNode = memo(({ data, isConnectable, onRemove, onUpdateData }
       />
 
       {/* Múltiplas saídas VERDES - layout melhorado para muitas opções */}
-      {options.map((_, index) => {
+      {options.map((_: unknown, index: number) => {
         let topPosition: string
 
         if (hasMany) {

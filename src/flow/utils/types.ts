@@ -25,6 +25,11 @@ export interface NodeData {
   // Code node properties
   codeLanguage?: "javascript" | "typescript"
   code?: string
+
+  // Options node properties (adicionados para evitar erros TS2339)
+  options?: { text: string; digit: string }[]
+  customId?: string
+  message?: string
 }
 
 export type WorkflowNode = Node<NodeData>

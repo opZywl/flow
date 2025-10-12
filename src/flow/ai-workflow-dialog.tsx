@@ -1,8 +1,7 @@
 "use client"
 
 import type React from "react"
-
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,6 +23,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     const { theme } = useTheme()
     const [description, setDescription] = useState("")
     const [size, setSize] = useState("medium")
+    const [customNodeCount, setCustomNodeCount] = useState(10)
     const [model, setModel] = useState("gpt-4o")
     const [apiKey, setApiKey] = useState("")
     const [imageFile, setImageFile] = useState<File | null>(null)
@@ -33,8 +33,17 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     const [activeTab, setActiveTab] = useState("text")
     const [generatedWorkflow, setGeneratedWorkflow] = useState<any>(null)
     const [lastPrompt, setLastPrompt] = useState<string>("")
+    const [validationErrors, setValidationErrors] = useState<string[]>([])
+
+    const successMessageRef = useRef<HTMLDivElement>(null)
 
     const isDark = theme === "dark"
+
+    useEffect(() => {
+        if (generatedWorkflow && successMessageRef.current) {
+            successMessageRef.current.scrollIntoView({ behavior: "smooth", block: "start" })
+        }
+    }, [generatedWorkflow])
 
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
@@ -77,6 +86,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
         }
 
         setIsGenerating(true)
+        setValidationErrors([])
 
         toast({
             title: "Construindo workflow...",
@@ -87,11 +97,14 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
             const payload: any = {
                 description: activeTab === "text" ? description : "Recrie o workflow baseado na imagem fornecida",
                 size,
+                customNodeCount: size === "custom" ? customNodeCount : undefined,
                 model,
                 apiKey,
                 additionalContext: activeTab === "image" ? additionalContext : undefined,
                 imageUrl: activeTab === "image" ? imagePreview : undefined,
             }
+
+            console.log("Enviando requisição para gerar workflow...")
 
             const response = await fetch("/api/generate-workflow", {
                 method: "POST",
@@ -103,19 +116,37 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
 
             const data = await response.json()
 
+            console.log("Resposta recebida:", data)
+
             if (!response.ok || !data.success) {
-                throw new Error(data.error || "Erro ao gerar workflow")
+                if (data.validationErrors && Array.isArray(data.validationErrors)) {
+                    setValidationErrors(data.validationErrors)
+                    throw new Error(`Erros de validação encontrados:\n${data.validationErrors.join("\n")}`)
+                }
+                throw new Error(data.error || data.details || "Erro ao gerar workflow")
             }
+
+            if (!data.workflow || !data.workflow.nodes || !data.workflow.edges) {
+                throw new Error("Workflow gerado está incompleto ou inválido")
+            }
+
+            const invalidEdges = data.workflow.edges.filter((edge: any) => !edge.type || edge.type !== "custom")
+            if (invalidEdges.length > 0) {
+                console.error("Edges inválidas encontradas:", invalidEdges)
+                throw new Error(`${invalidEdges.length} conexão(ões) sem o tipo "custom" correto`)
+            }
+
+            console.log("Workflow validado com sucesso!")
 
             toast({
                 title: "Workflow gerado com sucesso!",
-                description: `${data.workflow.nodes.length} nós criados`,
+                description: `${data.workflow.nodes.length} nós e ${data.workflow.edges.length} conexões criadas`,
             })
 
             setGeneratedWorkflow(data.workflow)
             setLastPrompt(data.prompt || "")
         } catch (error: any) {
-            console.error("[v0] Erro:", error)
+            console.error("Erro:", error)
             toast({
                 title: "Erro ao gerar workflow",
                 description: error.message || "Tente novamente mais tarde",
@@ -176,23 +207,162 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     const handleImport = () => {
         if (!generatedWorkflow) return
 
-        onWorkflowGenerated(generatedWorkflow)
-        onOpenChange(false)
+        try {
+            console.log("Validando workflow antes de importar...")
 
-        // Limpar formulário
-        setDescription("")
-        setImageFile(null)
-        setImagePreview(null)
-        setAdditionalContext("")
-        setSize("medium")
-        setModel("gpt-4o")
-        setGeneratedWorkflow(null)
-        setLastPrompt("")
+            // Verificar estrutura básica
+            if (!generatedWorkflow.nodes || !Array.isArray(generatedWorkflow.nodes)) {
+                throw new Error("Workflow não possui array de nós válido")
+            }
 
-        toast({
-            title: "Workflow importado!",
-            description: "O workflow foi carregado no canvas",
-        })
+            if (!generatedWorkflow.edges || !Array.isArray(generatedWorkflow.edges)) {
+                throw new Error("Workflow não possui array de edges válido")
+            }
+
+            // Verificar nó start
+            const startNode = generatedWorkflow.nodes.find((n: any) => n.type === "start" || n.id === "start-node")
+            if (!startNode) {
+                throw new Error("Workflow não possui nó de início (start)")
+            }
+
+            if (startNode.id !== "start-node") {
+                throw new Error(`Nó start deve ter id "start-node", mas tem "${startNode.id}"`)
+            }
+
+            // Verificar se todos os nós têm estrutura válida
+            for (let i = 0; i < generatedWorkflow.nodes.length; i++) {
+                const node = generatedWorkflow.nodes[i]
+
+                if (!node.id || typeof node.id !== "string") {
+                    throw new Error(`Nó ${i} não tem ID válido`)
+                }
+
+                if (!node.type || typeof node.type !== "string") {
+                    throw new Error(`Nó ${i} (${node.id}) não tem tipo válido`)
+                }
+
+                if (!node.position || typeof node.position.x !== "number" || typeof node.position.y !== "number") {
+                    throw new Error(`Nó ${i} (${node.id}) não tem posição válida`)
+                }
+
+                if (!node.data || typeof node.data !== "object") {
+                    throw new Error(`Nó ${i} (${node.id}) não tem data válido`)
+                }
+
+                // Verificar mensagens obrigatórias
+                if (node.type === "sendMessage") {
+                    if (!node.data.message || typeof node.data.message !== "string" || !node.data.message.trim()) {
+                        throw new Error(`Nó ${node.id} (sendMessage) não tem mensagem válida`)
+                    }
+                }
+
+                if (node.type === "options") {
+                    if (!node.data.message || typeof node.data.message !== "string" || !node.data.message.trim()) {
+                        throw new Error(`Nó ${node.id} (options) não tem mensagem válida`)
+                    }
+                    if (!node.data.options || !Array.isArray(node.data.options) || node.data.options.length === 0) {
+                        throw new Error(`Nó ${node.id} (options) não tem opções válidas`)
+                    }
+                }
+            }
+
+            // Verificar edges - CRÍTICO
+            const invalidEdges: string[] = []
+            for (let i = 0; i < generatedWorkflow.edges.length; i++) {
+                const edge = generatedWorkflow.edges[i]
+
+                if (!edge.id || typeof edge.id !== "string") {
+                    invalidEdges.push(`Edge ${i} não tem ID válido`)
+                }
+
+                if (!edge.source || typeof edge.source !== "string") {
+                    invalidEdges.push(`Edge ${i} (${edge.id}) não tem source válido`)
+                }
+
+                if (!edge.target || typeof edge.target !== "string") {
+                    invalidEdges.push(`Edge ${i} (${edge.id}) não tem target válido`)
+                }
+
+                if (!edge.type || edge.type !== "custom") {
+                    invalidEdges.push(`Edge ${i} (${edge.id}) deve ter type "custom", mas tem "${edge.type || "undefined"}"`)
+                }
+
+                // Verificar se source e target existem
+                const sourceExists = generatedWorkflow.nodes.some((n: any) => n.id === edge.source)
+                const targetExists = generatedWorkflow.nodes.some((n: any) => n.id === edge.target)
+
+                if (!sourceExists) {
+                    invalidEdges.push(`Edge ${edge.id} referencia source inexistente: ${edge.source}`)
+                }
+
+                if (!targetExists) {
+                    invalidEdges.push(`Edge ${edge.id} referencia target inexistente: ${edge.target}`)
+                }
+            }
+
+            if (invalidEdges.length > 0) {
+                console.error("Edges inválidas encontradas:", invalidEdges)
+                throw new Error(`Erros nas conexões:\n${invalidEdges.join("\n")}`)
+            }
+
+            // Verificar conectividade
+            const nodeIds = new Set(generatedWorkflow.nodes.map((n: any) => n.id))
+            const connectedToStart = new Set<string>(["start-node"])
+            const queue = ["start-node"]
+
+            while (queue.length > 0) {
+                const currentId = queue.shift()!
+                const outgoingEdges = generatedWorkflow.edges.filter((e: any) => e.source === currentId)
+
+                for (const edge of outgoingEdges) {
+                    if (!connectedToStart.has(edge.target)) {
+                        connectedToStart.add(edge.target)
+                        queue.push(edge.target)
+                    }
+                }
+            }
+
+            const disconnectedNodes = Array.from(nodeIds).filter((id) => !connectedToStart.has(id))
+            if (disconnectedNodes.length > 0) {
+                const disconnectedLabels = disconnectedNodes.map((id) => {
+                    const node = generatedWorkflow.nodes.find((n: any) => n.id === id)
+                    return node?.data?.customId || node?.data?.label || id
+                })
+                throw new Error(`Nós desconectados do início: ${disconnectedLabels.join(", ")}`)
+            }
+
+            console.log("Workflow validado com sucesso!")
+            console.log("Nós:", generatedWorkflow.nodes.length)
+            console.log("Edges:", generatedWorkflow.edges.length)
+            console.log("Todos os nós conectados ao start")
+            console.log("Todas as edges com type 'custom'")
+
+            onWorkflowGenerated(generatedWorkflow)
+            onOpenChange(false)
+
+            // Limpar estado
+            setDescription("")
+            setImageFile(null)
+            setImagePreview(null)
+            setAdditionalContext("")
+            setSize("medium")
+            setModel("gpt-4o")
+            setGeneratedWorkflow(null)
+            setLastPrompt("")
+            setValidationErrors([])
+
+            toast({
+                title: "Workflow importado!",
+                description: "O workflow foi carregado no canvas com sucesso. Clique em Salvar e depois Executar.",
+            })
+        } catch (error: any) {
+            console.error("Erro ao importar:", error)
+            toast({
+                title: "Erro ao importar workflow",
+                description: error.message,
+                variant: "destructive",
+            })
+        }
     }
 
     const getSizeDescription = (size: string) => {
@@ -204,7 +374,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
             case "large":
                 return "11-20 nós - Workflows complexos e detalhados"
             case "custom":
-                return "3-30 nós - Personalizado conforme necessidade"
+                return `${customNodeCount} nós - Personalizado conforme necessidade`
             default:
                 return ""
         }
@@ -239,8 +409,28 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     </DialogDescription>
                 </DialogHeader>
 
+                {validationErrors.length > 0 && (
+                    <div
+                        className={`p-4 rounded-lg border-2 ${
+                            isDark ? "bg-red-900/20 border-red-500/50" : "bg-red-50 border-red-500/50"
+                        }`}
+                    >
+                        <h4 className={`font-semibold mb-2 ${isDark ? "text-red-400" : "text-red-700"}`}>
+                            Erros de Validação Encontrados:
+                        </h4>
+                        <ul className={`text-sm space-y-1 ${isDark ? "text-red-300" : "text-red-600"}`}>
+                            {validationErrors.map((error, index) => (
+                                <li key={index} className="flex items-start gap-2">
+                                    <span>•</span>
+                                    <span>{error}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+
                 {generatedWorkflow ? (
-                    <div className="space-y-4">
+                    <div className="space-y-4" ref={successMessageRef}>
                         <div
                             className={`p-6 rounded-lg border-2 ${
                                 isDark
@@ -257,7 +447,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                                         Workflow Gerado com Sucesso!
                                     </h3>
                                     <p className={`text-sm ${isDark ? "text-gray-400" : "text-gray-600"}`}>
-                                        {generatedWorkflow.nodes.length} nós criados
+                                        {generatedWorkflow.nodes.length} nós e {generatedWorkflow.edges.length} conexões criadas
                                     </p>
                                 </div>
                             </div>
@@ -301,7 +491,10 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
 
                         <Button
                             variant="ghost"
-                            onClick={() => setGeneratedWorkflow(null)}
+                            onClick={() => {
+                                setGeneratedWorkflow(null)
+                                setValidationErrors([])
+                            }}
                             className={`w-full ${isDark ? "text-gray-400 hover:text-white" : "text-gray-600 hover:text-gray-900"}`}
                         >
                             Gerar Novo Workflow
@@ -509,13 +702,43 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="small">Pequeno</SelectItem>
-                                    <SelectItem value="medium">Médio</SelectItem>
-                                    <SelectItem value="large">Grande</SelectItem>
+                                    <SelectItem value="small">Pequeno (3-5 nós)</SelectItem>
+                                    <SelectItem value="medium">Médio (6-10 nós)</SelectItem>
+                                    <SelectItem value="large">Grande (11-20 nós)</SelectItem>
                                     <SelectItem value="custom">Personalizado</SelectItem>
                                 </SelectContent>
                             </Select>
                             <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-500"}`}>{getSizeDescription(size)}</p>
+
+                            {size === "custom" && (
+                                <div className="mt-3 space-y-2">
+                                    <Label htmlFor="customNodeCount" className={isDark ? "text-gray-200" : "text-gray-700"}>
+                                        Quantidade Exata de Nós (3-30)
+                                    </Label>
+                                    <Input
+                                        id="customNodeCount"
+                                        type="number"
+                                        min={3}
+                                        max={30}
+                                        value={customNodeCount}
+                                        onChange={(e) => {
+                                            const value = Number.parseInt(e.target.value)
+                                            if (!isNaN(value) && value >= 3 && value <= 30) {
+                                                setCustomNodeCount(value)
+                                            }
+                                        }}
+                                        className={`${
+                                            isDark
+                                                ? "bg-gray-900 border-gray-700 text-white placeholder:text-gray-500"
+                                                : "bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
+                                        }`}
+                                        disabled={isGenerating}
+                                    />
+                                    <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-500"}`}>
+                                        A IA gerará EXATAMENTE {customNodeCount} nós para seu workflow personalizado
+                                    </p>
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex justify-end gap-3 mt-6">
