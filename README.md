@@ -2,7 +2,7 @@
 
 Um construtor de workflows visual e interativo desenvolvido com React, Next.js e TypeScript. Permite criar, editar e executar fluxos de trabalho através de uma interface drag-and-drop intuitiva.
 
-## ✨ Funcionalidades
+## ✨ Funcionalidadesx
 
 - 🎨 **Interface Visual**: Construa workflows arrastando e soltando componentes
 - 🔄 **Execução em Tempo Real**: Execute workflows e veja os resultados instantaneamente
