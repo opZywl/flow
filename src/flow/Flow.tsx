@@ -42,6 +42,7 @@ import { Avatar } from "@/components/ui/avatar"
 import { motion, AnimatePresence } from "framer-motion"
 import html2canvas from "html2canvas"
 import IntegrationsMenu from "./integrations/IntegrationsMenu"
+import AIWorkflowDialog from "./ai-workflow-dialog"
 
 const FlowElegantSidebar = ({ currentGradient, theme }: { currentGradient: any; theme: string }) => {
     return (
@@ -560,12 +561,12 @@ const YenFlowBot = ({
                     backdropFilter: "blur(25px)",
                     border: isDark ? `2px solid rgba(60,60,60,0.5)` : `2px solid rgba(203,213,225,0.4)`,
                     boxShadow: isDark
-                        ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 
-             0 0 0 1px rgba(60,60,60,0.3), 
+                        ? `0 25px 50px -12px rgba(0, 0, 0, 0.8),
+             0 0 0 1px rgba(60,60,60,0.3),
              0 0 40px rgba(0,0,0,0.4),
              inset 0 1px 0 rgba(255, 255, 255, 0.1)`
-                        : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 
-             0 0 0 1px rgba(203,213,225,0.3), 
+                        : `0 25px 50px -12px rgba(0, 0, 0, 0.3),
+             0 0 0 1px rgba(203,213,225,0.3),
              0 0 40px rgba(0,0,0,0.25),
              inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
                 }}
@@ -574,10 +575,10 @@ const YenFlowBot = ({
                     className="absolute inset-0 opacity-20 rounded-lg"
                     style={{
                         backgroundImage: isDark
-                            ? `radial-gradient(circle at 20% 30%, rgba(60,60,60,0.6) 0%, transparent 40%), 
+                            ? `radial-gradient(circle at 20% 30%, rgba(60,60,60,0.6) 0%, transparent 40%),
                radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
                radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 30%, rgba(203,213,225,0.4) 0%, transparent 40%), 
+                            : `radial-gradient(circle at 20% 30%, rgba(203,213,225,0.4) 0%, transparent 40%),
                radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
                radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
                     }}
@@ -820,10 +821,10 @@ const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBa
                         className="absolute inset-0 opacity-20 rounded-2xl"
                         style={{
                             backgroundImage: isDark
-                                ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
+                                ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%),
                  radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
                  radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
-                                : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
+                                : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%),
                  radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
                  radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                         }}
@@ -1056,13 +1057,14 @@ const FlowHeader = ({
                         onToggleSidebar,
                         onOpenBot,
                         onOpenColorPanel,
+                        onOpenAIDialog,
                         startPosition,
                         mousePosition,
                         componentCount,
                         workflowContainerRef,
                     }: any) => {
     const router = useRouter()
-    const { theme, toggleTheme, currentGradient, glowAnimation, glowEnabled } = useTheme()
+    const { theme, toggleTheme, currentGradient, glowAnimation, glowEnabled, setShowColorPanel } = useTheme()
     const [searchValue, setSearchValue] = useState("")
     const [showResetDialog, setShowResetDialog] = useState(false)
     const [showExecuteDialog, setShowExecuteDialog] = useState(false)
@@ -1070,6 +1072,8 @@ const FlowHeader = ({
     const [showIntegrationsMenu, setShowIntegrationsMenu] = useState(false)
     const [isWorkflowSaved, setIsWorkflowSaved] = useState(false)
     const [isSearchFocused, setIsSearchFocused] = useState(false)
+    // Removed unused showAIDialog state from here as it's now managed in FlowLayout
+    // const [showAIDialog, setShowAIDialog] = useState(false)
 
     const primaryColor = currentGradient?.primary || "#000000"
     const secondaryColor = currentGradient?.secondary || "#000000"
@@ -1274,26 +1278,34 @@ const FlowHeader = ({
     return (
         <>
             <style jsx>{`
-       @keyframes glow-pulse {
-         0% {
-           box-shadow: 0 0 var(--glow-blur) var(--glow-spread) var(--glow-color);
-           transform: scale(1);
-         }
-         100% {
-           box-shadow: 0 0 calc(var(--glow-blur) * 1.5) calc(var(--glow-spread) * 1.5) var(--glow-color-strong);
-           transform: scale(1.02);
-         }
-       }
-       
-       .flow-background {
-         background-image: var(--flow-background-image, url('/background-pattern.png')), 
-                          radial-gradient(circle at 25% 25%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
-                          radial-gradient(circle at 75% 75%, rgba(255, 119, 198, 0.3) 0%, transparent 50%);
-         background-size: 100px 100px, 800px 800px, 600px 600px;
-         background-position: 0 0, 0 0, 100% 100%;
-         background-repeat: repeat, no-repeat, no-repeat;
-       }
-     `}</style>
+              :root {
+                --glow-blur: 8px;
+                --glow-spread: 8px;
+                --glow-color: rgba(99,102,241,0.6); /* ajuste conforme tema */
+                --glow-color-strong: rgba(99,102,241,1);
+                --flow-background-image: url('/background-pattern.png');
+              }
+            
+              @keyframes glow-pulse {
+                0% {
+                  box-shadow: 0 0 var(--glow-blur) var(--glow-spread) var(--glow-color);
+                  transform: scale(1);
+                }
+                100% {
+                  box-shadow: 0 0 calc(var(--glow-blur) * 1.5) calc(var(--glow-spread) * 1.5) var(--glow-color-strong);
+                  transform: scale(1.02);
+                }
+              }
+            
+              .flow-background {
+                background-image: var(--flow-background-image, url('/background-pattern.png')),
+                                 radial-gradient(circle at 25% 25%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                                 radial-gradient(circle at 75% 75%, rgba(255, 119, 198, 0.3) 0%, transparent 50%);
+                background-size: 100px 100px, 800px 800px, 600px 600px;
+                background-position: 0 0, 0 0, 100% 100%;
+                background-repeat: repeat, no-repeat, no-repeat;
+              }
+            `}</style>
 
             <motion.header
                 initial={{ opacity: 0, y: -10 }}
@@ -1317,10 +1329,10 @@ const FlowHeader = ({
                     className="absolute inset-0 opacity-20"
                     style={{
                         backgroundImage: isDark
-                            ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
+                            ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%),
          radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
          radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
+                            : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%),
          radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
          radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                     }}
@@ -1415,6 +1427,22 @@ const FlowHeader = ({
                         {/* Seção Direita - Actions */}
                         <div className="flex items-center space-x-2">
                             <div className="flex items-center space-x-1.5">
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={onOpenAIDialog}
+                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
+                                    style={getButtonStyle({
+                                        background: "linear-gradient(135deg, #a855f7, #ec4899)",
+                                        color: "#ffffff",
+                                        fontFamily: "system-ui, -apple-system, sans-serif",
+                                    })}
+                                    title="Criar Workflow com IA"
+                                >
+                                    <FiPlayCircle className="w-3.5 h-3.5" />
+                                    <span className="hidden lg:inline text-xs">Criar com IA</span>
+                                </motion.button>
+
                                 <motion.button
                                     whileHover={{ scale: 1.02 }}
                                     whileTap={{ scale: 0.98 }}
@@ -1608,10 +1636,10 @@ const FlowHeader = ({
                             className="absolute inset-0 opacity-20 rounded-2xl"
                             style={{
                                 backgroundImage: isDark
-                                    ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
+                                    ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%),
                    radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
                    radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
-                                    : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
+                                    : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%),
                    radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
                    radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                             }}
@@ -1741,10 +1769,10 @@ const FlowHeader = ({
                             className="absolute inset-0 opacity-20 rounded-2xl"
                             style={{
                                 backgroundImage: isDark
-                                    ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%), 
+                                    ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%),
                    radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
                    radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
-                                    : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%), 
+                                    : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%),
                    radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
                    radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
                             }}
@@ -1838,7 +1866,7 @@ const FlowHeader = ({
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
                                 onClick={() => setShowExecuteDialog(false)}
-                                className="px-8 py-3 text-sm font-semibold rounded-xl transition-all duration-200 flex items-center gap-2"
+                                className="px-8 py-3 text-sm font-semibold rounded-xl transition-all duration-200"
                                 style={{
                                     background: `linear-gradient(135deg, rgba(34, 197, 94, 0.9), rgba(16, 185, 129, 0.8))`,
                                     color: "#ffffff",
@@ -1859,7 +1887,7 @@ const FlowHeader = ({
 }
 
 const FlowLayout = () => {
-    const { theme, showColorPanel, showSearch, currentGradient, setShowColorPanel } = useTheme()
+    const { theme, showColorPanel, setShowColorPanel, currentGradient } = useTheme()
     const [mounted, setMounted] = useState(false)
     const [workflowActions, setWorkflowActions] = useState<any>(null)
     const [startPosition, setStartPosition] = useState({ x: 250, y: 100 })
@@ -1869,6 +1897,7 @@ const FlowLayout = () => {
     const [showBot, setShowBot] = useState(false)
     const [flowNodes, setFlowNodes] = useState<any[]>([])
     const [flowEdges, setFlowEdges] = useState<any[]>([])
+    const [showAIDialog, setShowAIDialog] = useState(false)
     const workflowContainerRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -1895,6 +1924,16 @@ const FlowLayout = () => {
         setWorkflowActions(actions)
     }, [])
 
+    const handleGenerateWorkflow = useCallback(
+        (workflow: any) => {
+            console.log("[v0] Carregando workflow gerado pela IA...")
+            if (workflowActions?.loadWorkflow) {
+                workflowActions.loadWorkflow(workflow)
+            }
+        },
+        [workflowActions],
+    )
+
     if (!mounted) {
         return (
             <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
@@ -1920,6 +1959,7 @@ const FlowLayout = () => {
                 onToggleSidebar={toggleSidebar}
                 onOpenBot={openBot}
                 onOpenColorPanel={setShowColorPanel}
+                onOpenAIDialog={() => setShowAIDialog(true)}
                 startPosition={startPosition}
                 mousePosition={mousePosition}
                 componentCount={componentCount}
@@ -1941,6 +1981,12 @@ const FlowLayout = () => {
             </main>
 
             <YenFlowBot isOpen={showBot} onClose={closeBot} />
+
+            <AIWorkflowDialog
+                open={showAIDialog}
+                onOpenChange={setShowAIDialog}
+                onWorkflowGenerated={handleGenerateWorkflow}
+            />
 
             {showColorPanel && <ColorPanel />}
         </div>

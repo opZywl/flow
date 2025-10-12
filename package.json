@@ -11,7 +11,7 @@
     "start-alt": "next start -p 3002"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^0.0.66",
+    "@ai-sdk/openai": "^2.0.49",
     "@hookform/resolvers": "^3.9.1",
     "@neondatabase/serverless": "^0.10.1",
     "@radix-ui/react-accordion": "latest",
@@ -41,7 +41,7 @@
     "@radix-ui/react-toggle": "latest",
     "@radix-ui/react-toggle-group": "latest",
     "@radix-ui/react-tooltip": "latest",
-    "ai": "4.3.19",
+    "ai": "^5.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "latest",
