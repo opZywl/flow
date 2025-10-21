@@ -9,7 +9,19 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Sparkles, Upload, Loader2, ImageIcon, Type, Download, FileJson, Key, FileCode } from "lucide-react"
+import {
+    Sparkles,
+    Upload,
+    Loader2,
+    ImageIcon,
+    Type,
+    Download,
+    FileJson,
+    Key,
+    FileCode,
+    CheckCircle2,
+    AlertCircle,
+} from "lucide-react"
 import { useTheme } from "../ThemeContext"
 import { toast } from "@/components/ui/use-toast"
 
@@ -34,7 +46,6 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     const [generatedWorkflow, setGeneratedWorkflow] = useState<any>(null)
     const [lastPrompt, setLastPrompt] = useState<string>("")
     const [validationErrors, setValidationErrors] = useState<string[]>([])
-
     const successMessageRef = useRef<HTMLDivElement>(null)
 
     const isDark = theme === "dark"
@@ -210,7 +221,6 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
         try {
             console.log("Validando workflow antes de importar...")
 
-            // Verificar estrutura básica
             if (!generatedWorkflow.nodes || !Array.isArray(generatedWorkflow.nodes)) {
                 throw new Error("Workflow não possui array de nós válido")
             }
@@ -219,7 +229,6 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                 throw new Error("Workflow não possui array de edges válido")
             }
 
-            // Verificar nó start
             const startNode = generatedWorkflow.nodes.find((n: any) => n.type === "start" || n.id === "start-node")
             if (!startNode) {
                 throw new Error("Workflow não possui nó de início (start)")
@@ -229,7 +238,6 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                 throw new Error(`Nó start deve ter id "start-node", mas tem "${startNode.id}"`)
             }
 
-            // Verificar se todos os nós têm estrutura válida
             for (let i = 0; i < generatedWorkflow.nodes.length; i++) {
                 const node = generatedWorkflow.nodes[i]
 
@@ -249,7 +257,6 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     throw new Error(`Nó ${i} (${node.id}) não tem data válido`)
                 }
 
-                // Verificar mensagens obrigatórias
                 if (node.type === "sendMessage") {
                     if (!node.data.message || typeof node.data.message !== "string" || !node.data.message.trim()) {
                         throw new Error(`Nó ${node.id} (sendMessage) não tem mensagem válida`)
@@ -266,47 +273,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                 }
             }
 
-            // Verificar edges - CRÍTICO
-            const invalidEdges: string[] = []
-            for (let i = 0; i < generatedWorkflow.edges.length; i++) {
-                const edge = generatedWorkflow.edges[i]
-
-                if (!edge.id || typeof edge.id !== "string") {
-                    invalidEdges.push(`Edge ${i} não tem ID válido`)
-                }
-
-                if (!edge.source || typeof edge.source !== "string") {
-                    invalidEdges.push(`Edge ${i} (${edge.id}) não tem source válido`)
-                }
-
-                if (!edge.target || typeof edge.target !== "string") {
-                    invalidEdges.push(`Edge ${i} (${edge.id}) não tem target válido`)
-                }
-
-                if (!edge.type || edge.type !== "custom") {
-                    invalidEdges.push(`Edge ${i} (${edge.id}) deve ter type "custom", mas tem "${edge.type || "undefined"}"`)
-                }
-
-                // Verificar se source e target existem
-                const sourceExists = generatedWorkflow.nodes.some((n: any) => n.id === edge.source)
-                const targetExists = generatedWorkflow.nodes.some((n: any) => n.id === edge.target)
-
-                if (!sourceExists) {
-                    invalidEdges.push(`Edge ${edge.id} referencia source inexistente: ${edge.source}`)
-                }
-
-                if (!targetExists) {
-                    invalidEdges.push(`Edge ${edge.id} referencia target inexistente: ${edge.target}`)
-                }
-            }
-
-            if (invalidEdges.length > 0) {
-                console.error("Edges inválidas encontradas:", invalidEdges)
-                throw new Error(`Erros nas conexões:\n${invalidEdges.join("\n")}`)
-            }
-
-            // Verificar conectividade
-            const nodeIds = new Set(generatedWorkflow.nodes.map((n: any) => n.id))
+            const nodeIds = new Set(generatedWorkflow.nodes.map((n: any) => String(n.id)))
             const connectedToStart = new Set<string>(["start-node"])
             const queue = ["start-node"]
 
@@ -322,11 +289,13 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                 }
             }
 
-            const disconnectedNodes = Array.from(nodeIds).filter((id) => !connectedToStart.has(id))
-            if (disconnectedNodes.length > 0) {
-                const disconnectedLabels = disconnectedNodes.map((id) => {
-                    const node = generatedWorkflow.nodes.find((n: any) => n.id === id)
-                    return node?.data?.customId || node?.data?.label || id
+            const disconnectedNodes = Array.from(nodeIds) as string[]
+            const filteredDisconnectedNodes = disconnectedNodes.filter((id: string) => !connectedToStart.has(id))
+
+            if (filteredDisconnectedNodes.length > 0) {
+                const disconnectedLabels = filteredDisconnectedNodes.map((id: string) => {
+                    const node = generatedWorkflow.nodes.find((n: any) => String(n.id) === id)
+                    return String(node?.data?.customId || node?.data?.label || id)
                 })
                 throw new Error(`Nós desconectados do início: ${disconnectedLabels.join(", ")}`)
             }
@@ -340,7 +309,6 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
             onWorkflowGenerated(generatedWorkflow)
             onOpenChange(false)
 
-            // Limpar estado
             setDescription("")
             setImageFile(null)
             setImagePreview(null)
@@ -383,396 +351,435 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
-                className={`max-w-2xl max-h-[90vh] overflow-y-auto ${
-                    isDark
-                        ? "bg-black/95 border border-gray-800/50 backdrop-blur-md"
-                        : "bg-white border border-gray-200 backdrop-blur-md"
+                className={`max-w-3xl max-h-[90vh] overflow-hidden p-0 ${
+                    isDark ? "bg-zinc-950 border-zinc-800" : "bg-white border-zinc-200"
                 }`}
             >
-                <DialogHeader className="relative z-10">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-2 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500">
-                            <Sparkles className="h-5 w-5 text-white" />
-                        </div>
-                        <DialogTitle
-                            className={`text-xl font-bold ${
-                                isDark
-                                    ? "text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400"
-                                    : "text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-cyan-600"
-                            }`}
+                <DialogHeader className={`px-6 pt-6 pb-4 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+                    <div className="flex items-start gap-4">
+                        <div
+                            className={`p-3 rounded-xl ${isDark ? "bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20" : "bg-gradient-to-br from-violet-100 to-fuchsia-100"}`}
                         >
-                            Criar Workflow com IA
-                        </DialogTitle>
+                            <Sparkles className={`h-6 w-6 ${isDark ? "text-violet-400" : "text-violet-600"}`} />
+                        </div>
+                        <div className="flex-1">
+                            <DialogTitle className={`text-2xl font-semibold mb-1 ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
+                                Criar Workflow com IA
+                            </DialogTitle>
+                            <DialogDescription className={`text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                                Descreva o workflow que deseja criar ou faça upload de uma imagem de referência
+                            </DialogDescription>
+                        </div>
                     </div>
-                    <DialogDescription className={isDark ? "text-gray-400" : "text-gray-600"}>
-                        Descreva o workflow que deseja criar ou faça upload de uma imagem de referência
-                    </DialogDescription>
                 </DialogHeader>
 
-                {validationErrors.length > 0 && (
-                    <div
-                        className={`p-4 rounded-lg border-2 ${
-                            isDark ? "bg-red-900/20 border-red-500/50" : "bg-red-50 border-red-500/50"
-                        }`}
-                    >
-                        <h4 className={`font-semibold mb-2 ${isDark ? "text-red-400" : "text-red-700"}`}>
-                            Erros de Validação Encontrados:
-                        </h4>
-                        <ul className={`text-sm space-y-1 ${isDark ? "text-red-300" : "text-red-600"}`}>
-                            {validationErrors.map((error, index) => (
-                                <li key={index} className="flex items-start gap-2">
-                                    <span>•</span>
-                                    <span>{error}</span>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-
-                {generatedWorkflow ? (
-                    <div className="space-y-4" ref={successMessageRef}>
+                <div className="overflow-y-auto max-h-[calc(90vh-140px)] px-6 py-4">
+                    {validationErrors.length > 0 && (
                         <div
-                            className={`p-6 rounded-lg border-2 ${
-                                isDark
-                                    ? "bg-gradient-to-br from-gray-900 to-gray-800 border-green-500/30"
-                                    : "bg-gradient-to-br from-green-50 to-emerald-50 border-green-500/30"
+                            className={`mb-4 p-4 rounded-lg border ${
+                                isDark ? "bg-red-950/30 border-red-900/50" : "bg-red-50 border-red-200"
                             }`}
                         >
-                            <div className="flex items-center gap-3 mb-4">
-                                <div className="p-2 rounded-lg bg-green-500">
-                                    <Sparkles className="h-5 w-5 text-white" />
+                            <div className="flex items-start gap-3">
+                                <AlertCircle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${isDark ? "text-red-400" : "text-red-600"}`} />
+                                <div className="flex-1">
+                                    <h4 className={`font-semibold mb-2 ${isDark ? "text-red-400" : "text-red-700"}`}>
+                                        Erros de Validação Encontrados
+                                    </h4>
+                                    <ul className={`text-sm space-y-1 ${isDark ? "text-red-300" : "text-red-600"}`}>
+                                        {validationErrors.map((error, index) => (
+                                            <li key={index} className="flex items-start gap-2">
+                                                <span className="mt-1">•</span>
+                                                <span>{error}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
-                                <div>
-                                    <h3 className={`font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>
-                                        Workflow Gerado com Sucesso!
-                                    </h3>
-                                    <p className={`text-sm ${isDark ? "text-gray-400" : "text-gray-600"}`}>
-                                        {generatedWorkflow.nodes.length} nós e {generatedWorkflow.edges.length} conexões criadas
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex flex-col gap-3">
-                                <div className="flex gap-3">
-                                    <Button
-                                        onClick={handleImport}
-                                        className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white"
-                                    >
-                                        <FileJson className="h-4 w-4 mr-2" />
-                                        Importar Direto
-                                    </Button>
-                                    <Button
-                                        onClick={handleDownload}
-                                        variant="outline"
-                                        className={`flex-1 ${
-                                            isDark
-                                                ? "bg-gray-800 border-gray-700 text-white hover:bg-gray-700"
-                                                : "bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
-                                        }`}
-                                    >
-                                        <Download className="h-4 w-4 mr-2" />
-                                        Download JSON
-                                    </Button>
-                                </div>
-                                <Button
-                                    onClick={handleDownloadPrompt}
-                                    variant="outline"
-                                    className={`w-full ${
-                                        isDark
-                                            ? "bg-gray-800 border-gray-700 text-white hover:bg-gray-700"
-                                            : "bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
-                                    }`}
-                                >
-                                    <FileCode className="h-4 w-4 mr-2" />
-                                    Download Prompt Completo
-                                </Button>
                             </div>
                         </div>
+                    )}
 
-                        <Button
-                            variant="ghost"
-                            onClick={() => {
-                                setGeneratedWorkflow(null)
-                                setValidationErrors([])
-                            }}
-                            className={`w-full ${isDark ? "text-gray-400 hover:text-white" : "text-gray-600 hover:text-gray-900"}`}
-                        >
-                            Gerar Novo Workflow
-                        </Button>
-                    </div>
-                ) : (
-                    <>
-                        <div className="space-y-2">
-                            <Label htmlFor="apiKey" className={isDark ? "text-gray-200" : "text-gray-700"}>
-                                <div className="flex items-center gap-2">
-                                    <Key className="h-4 w-4" />
-                                    Chave da API OpenAI
-                                </div>
-                            </Label>
-                            <Input
-                                id="apiKey"
-                                type="password"
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                placeholder="sk-proj-..."
-                                className={`${
+                    {generatedWorkflow ? (
+                        <div className="space-y-4" ref={successMessageRef}>
+                            <div
+                                className={`p-6 rounded-xl border ${
                                     isDark
-                                        ? "bg-gray-900 border-gray-700 text-white placeholder:text-gray-500"
-                                        : "bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
-                                }`}
-                                disabled={isGenerating}
-                            />
-                            <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-500"}`}>
-                                Sua chave não será armazenada e é usada apenas para esta requisição
-                            </p>
-                        </div>
-
-                        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                            <TabsList
-                                className={`grid w-full grid-cols-2 mb-4 ${
-                                    isDark ? "bg-gray-900 border border-gray-800" : "bg-gray-100 border border-gray-200"
+                                        ? "bg-gradient-to-br from-emerald-950/30 to-teal-950/30 border-emerald-900/50"
+                                        : "bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200"
                                 }`}
                             >
-                                <TabsTrigger
-                                    value="text"
-                                    className={`flex items-center gap-2 ${
-                                        isDark
-                                            ? "data-[state=active]:bg-gray-800 data-[state=active]:text-white"
-                                            : "data-[state=active]:bg-white data-[state=active]:text-gray-900"
-                                    }`}
-                                >
-                                    <Type className="h-4 w-4" />
-                                    Descrição em Texto
-                                </TabsTrigger>
-                                <TabsTrigger
-                                    value="image"
-                                    className={`flex items-center gap-2 ${
-                                        isDark
-                                            ? "data-[state=active]:bg-gray-800 data-[state=active]:text-white"
-                                            : "data-[state=active]:bg-white data-[state=active]:text-gray-900"
-                                    }`}
-                                >
-                                    <ImageIcon className="h-4 w-4" />
-                                    Baseado em Imagem
-                                </TabsTrigger>
-                            </TabsList>
-
-                            <TabsContent value="text" className="space-y-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="description" className={isDark ? "text-gray-200" : "text-gray-700"}>
-                                        Descreva o workflow
-                                    </Label>
-                                    <Textarea
-                                        id="description"
-                                        value={description}
-                                        onChange={(e) => setDescription(e.target.value)}
-                                        placeholder="Ex: hospital - criar um fluxo de atendimento para agendamento de consultas"
-                                        className={`min-h-[120px] ${
-                                            isDark
-                                                ? "bg-gray-900 border-gray-700 text-white placeholder:text-gray-500"
-                                                : "bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
-                                        }`}
-                                        disabled={isGenerating}
-                                    />
-                                    <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-500"}`}>
-                                        Seja específico sobre o que o workflow deve fazer
-                                    </p>
-                                </div>
-                            </TabsContent>
-
-                            <TabsContent value="image" className="space-y-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="image" className={isDark ? "text-gray-200" : "text-gray-700"}>
-                                        Upload de Imagem do Workflow
-                                    </Label>
-                                    <div
-                                        className={`border-2 border-dashed rounded-lg p-6 text-center ${
-                                            isDark ? "border-gray-700 bg-gray-900" : "border-gray-300 bg-gray-50"
-                                        }`}
-                                    >
-                                        {imagePreview ? (
-                                            <div className="space-y-3">
-                                                <img
-                                                    src={imagePreview || "/placeholder.svg"}
-                                                    alt="Preview"
-                                                    className="max-h-48 mx-auto rounded-lg"
-                                                />
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setImageFile(null)
-                                                        setImagePreview(null)
-                                                    }}
-                                                    disabled={isGenerating}
-                                                    className={
-                                                        isDark
-                                                            ? "bg-gray-800 border-gray-700 text-white hover:bg-gray-700"
-                                                            : "bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
-                                                    }
-                                                >
-                                                    Remover Imagem
-                                                </Button>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-3">
-                                                <Upload className={`h-12 w-12 mx-auto ${isDark ? "text-gray-600" : "text-gray-400"}`} />
-                                                <div>
-                                                    <Label
-                                                        htmlFor="image-upload"
-                                                        className={`cursor-pointer text-sm font-medium ${
-                                                            isDark ? "text-purple-400" : "text-purple-600"
-                                                        } hover:underline`}
-                                                    >
-                                                        Clique para fazer upload
-                                                    </Label>
-                                                    <Input
-                                                        id="image-upload"
-                                                        type="file"
-                                                        accept="image/*"
-                                                        onChange={handleImageUpload}
-                                                        className="hidden"
-                                                        disabled={isGenerating}
-                                                    />
-                                                </div>
-                                                <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-500"}`}>
-                                                    PNG, JPG ou JPEG até 10MB
-                                                </p>
-                                            </div>
-                                        )}
+                                <div className="flex items-start gap-4 mb-6">
+                                    <div className={`p-2.5 rounded-lg ${isDark ? "bg-emerald-500/20" : "bg-emerald-500"}`}>
+                                        <CheckCircle2 className={`h-6 w-6 ${isDark ? "text-emerald-400" : "text-white"}`} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className={`text-lg font-semibold mb-1 ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
+                                            Workflow Gerado com Sucesso
+                                        </h3>
+                                        <p className={`text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                                            {generatedWorkflow.nodes.length} nós e {generatedWorkflow.edges.length} conexões criadas
+                                        </p>
                                     </div>
                                 </div>
 
-                                <div className="space-y-2">
-                                    <Label htmlFor="context" className={isDark ? "text-gray-200" : "text-gray-700"}>
-                                        Contexto Adicional (Opcional)
-                                    </Label>
-                                    <Textarea
-                                        id="context"
-                                        value={additionalContext}
-                                        onChange={(e) => setAdditionalContext(e.target.value)}
-                                        placeholder="Adicione detalhes sobre o workflow da imagem..."
-                                        className={`min-h-[80px] ${
+                                <div className="space-y-2.5">
+                                    <Button
+                                        onClick={handleImport}
+                                        className={`w-full h-11 font-medium ${
                                             isDark
-                                                ? "bg-gray-900 border-gray-700 text-white placeholder:text-gray-500"
-                                                : "bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
+                                                ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white"
+                                                : "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white"
                                         }`}
-                                        disabled={isGenerating}
-                                    />
+                                    >
+                                        <FileJson className="h-4 w-4 mr-2" />
+                                        Importar para o Canvas
+                                    </Button>
+
+                                    <div className="grid grid-cols-2 gap-2.5">
+                                        <Button
+                                            onClick={handleDownload}
+                                            variant="outline"
+                                            className={`h-10 ${
+                                                isDark
+                                                    ? "bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800"
+                                                    : "bg-white border-zinc-300 text-zinc-900 hover:bg-zinc-50"
+                                            }`}
+                                        >
+                                            <Download className="h-4 w-4 mr-2" />
+                                            Download JSON
+                                        </Button>
+                                        <Button
+                                            onClick={handleDownloadPrompt}
+                                            variant="outline"
+                                            className={`h-10 ${
+                                                isDark
+                                                    ? "bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800"
+                                                    : "bg-white border-zinc-300 text-zinc-900 hover:bg-zinc-50"
+                                            }`}
+                                        >
+                                            <FileCode className="h-4 w-4 mr-2" />
+                                            Prompt Completo
+                                        </Button>
+                                    </div>
                                 </div>
-                            </TabsContent>
-                        </Tabs>
+                            </div>
 
-                        <div className="space-y-2">
-                            <Label htmlFor="model" className={isDark ? "text-gray-200" : "text-gray-700"}>
-                                Modelo GPT
-                            </Label>
-                            <Select value={model} onValueChange={setModel} disabled={isGenerating}>
-                                <SelectTrigger
-                                    id="model"
-                                    className={
-                                        isDark ? "bg-gray-900 border-gray-700 text-white" : "bg-white border-gray-300 text-gray-900"
-                                    }
-                                >
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="gpt-4o">GPT-4o (Recomendado)</SelectItem>
-                                    <SelectItem value="gpt-4o-mini">GPT-4o Mini (Rápido)</SelectItem>
-                                    <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                                    <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (Econômico)</SelectItem>
-                                </SelectContent>
-                            </Select>
-                            <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-500"}`}>
-                                Modelos mais avançados geram workflows mais precisos
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="size" className={isDark ? "text-gray-200" : "text-gray-700"}>
-                                Tamanho do Workflow
-                            </Label>
-                            <Select value={size} onValueChange={setSize} disabled={isGenerating}>
-                                <SelectTrigger
-                                    id="size"
-                                    className={
-                                        isDark ? "bg-gray-900 border-gray-700 text-white" : "bg-white border-gray-300 text-gray-900"
-                                    }
-                                >
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="small">Pequeno (3-5 nós)</SelectItem>
-                                    <SelectItem value="medium">Médio (6-10 nós)</SelectItem>
-                                    <SelectItem value="large">Grande (11-20 nós)</SelectItem>
-                                    <SelectItem value="custom">Personalizado</SelectItem>
-                                </SelectContent>
-                            </Select>
-                            <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-500"}`}>{getSizeDescription(size)}</p>
-
-                            {size === "custom" && (
-                                <div className="mt-3 space-y-2">
-                                    <Label htmlFor="customNodeCount" className={isDark ? "text-gray-200" : "text-gray-700"}>
-                                        Quantidade Exata de Nós (3-30)
-                                    </Label>
-                                    <Input
-                                        id="customNodeCount"
-                                        type="number"
-                                        min={3}
-                                        max={30}
-                                        value={customNodeCount}
-                                        onChange={(e) => {
-                                            const value = Number.parseInt(e.target.value)
-                                            if (!isNaN(value) && value >= 3 && value <= 30) {
-                                                setCustomNodeCount(value)
-                                            }
-                                        }}
-                                        className={`${
-                                            isDark
-                                                ? "bg-gray-900 border-gray-700 text-white placeholder:text-gray-500"
-                                                : "bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"
-                                        }`}
-                                        disabled={isGenerating}
-                                    />
-                                    <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-500"}`}>
-                                        A IA gerará EXATAMENTE {customNodeCount} nós para seu workflow personalizado
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex justify-end gap-3 mt-6">
                             <Button
-                                variant="outline"
-                                onClick={() => onOpenChange(false)}
-                                disabled={isGenerating}
-                                className={
-                                    isDark
-                                        ? "bg-gray-800 border-gray-700 text-white hover:bg-gray-700"
-                                        : "bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
-                                }
+                                variant="ghost"
+                                onClick={() => {
+                                    setGeneratedWorkflow(null)
+                                    setValidationErrors([])
+                                }}
+                                className={`w-full ${isDark ? "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900" : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100"}`}
                             >
-                                Cancelar
+                                Gerar Novo Workflow
                             </Button>
-                            <Button
-                                onClick={handleGenerate}
-                                disabled={isGenerating}
-                                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white"
-                            >
-                                {isGenerating ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Construindo...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Sparkles className="h-4 w-4 mr-2" />
-                                        Gerar Workflow
-                                    </>
+                        </div>
+                    ) : (
+                        <div className="space-y-5">
+                            <div className="space-y-2">
+                                <Label
+                                    htmlFor="apiKey"
+                                    className={`text-sm font-medium flex items-center gap-2 ${isDark ? "text-zinc-200" : "text-zinc-700"}`}
+                                >
+                                    <Key className="h-4 w-4" />
+                                    Chave da API OpenAI
+                                </Label>
+                                <Input
+                                    id="apiKey"
+                                    type="password"
+                                    value={apiKey}
+                                    onChange={(e) => setApiKey(e.target.value)}
+                                    placeholder="sk-proj-..."
+                                    className={`h-10 ${
+                                        isDark
+                                            ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-violet-500"
+                                            : "bg-white border-zinc-300 text-zinc-900 placeholder:text-zinc-400 focus:border-violet-500"
+                                    }`}
+                                    disabled={isGenerating}
+                                />
+                                <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                                    Sua chave não será armazenada e é usada apenas para esta requisição
+                                </p>
+                            </div>
+
+                            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                                <TabsList
+                                    className={`grid w-full grid-cols-2 h-11 p-1 ${
+                                        isDark ? "bg-zinc-900 border border-zinc-800" : "bg-zinc-100 border border-zinc-200"
+                                    }`}
+                                >
+                                    <TabsTrigger
+                                        value="text"
+                                        className={`flex items-center gap-2 rounded-md ${
+                                            isDark
+                                                ? "data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-50"
+                                                : "data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-sm"
+                                        }`}
+                                    >
+                                        <Type className="h-4 w-4" />
+                                        Descrição em Texto
+                                    </TabsTrigger>
+                                    <TabsTrigger
+                                        value="image"
+                                        className={`flex items-center gap-2 rounded-md ${
+                                            isDark
+                                                ? "data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-50"
+                                                : "data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-sm"
+                                        }`}
+                                    >
+                                        <ImageIcon className="h-4 w-4" />
+                                        Baseado em Imagem
+                                    </TabsTrigger>
+                                </TabsList>
+
+                                <TabsContent value="text" className="space-y-4 mt-4">
+                                    <div className="space-y-2">
+                                        <Label
+                                            htmlFor="description"
+                                            className={`text-sm font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}
+                                        >
+                                            Descreva o workflow
+                                        </Label>
+                                        <Textarea
+                                            id="description"
+                                            value={description}
+                                            onChange={(e) => setDescription(e.target.value)}
+                                            placeholder="Ex: hospital - criar um fluxo de atendimento para agendamento de consultas"
+                                            className={`min-h-[120px] resize-none ${
+                                                isDark
+                                                    ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-violet-500"
+                                                    : "bg-white border-zinc-300 text-zinc-900 placeholder:text-zinc-400 focus:border-violet-500"
+                                            }`}
+                                            disabled={isGenerating}
+                                        />
+                                        <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                                            Seja específico sobre o que o workflow deve fazer
+                                        </p>
+                                    </div>
+                                </TabsContent>
+
+                                <TabsContent value="image" className="space-y-4 mt-4">
+                                    <div className="space-y-2">
+                                        <Label
+                                            htmlFor="image"
+                                            className={`text-sm font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}
+                                        >
+                                            Upload de Imagem do Workflow
+                                        </Label>
+                                        <div
+                                            className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+                                                isDark
+                                                    ? "border-zinc-700 bg-zinc-900/50 hover:border-zinc-600"
+                                                    : "border-zinc-300 bg-zinc-50 hover:border-zinc-400"
+                                            }`}
+                                        >
+                                            {imagePreview ? (
+                                                <div className="space-y-4">
+                                                    <img
+                                                        src={imagePreview || "/placeholder.svg"}
+                                                        alt="Preview"
+                                                        className="max-h-48 mx-auto rounded-lg border border-zinc-200 dark:border-zinc-700"
+                                                    />
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setImageFile(null)
+                                                            setImagePreview(null)
+                                                        }}
+                                                        disabled={isGenerating}
+                                                        className={
+                                                            isDark
+                                                                ? "bg-zinc-800 border-zinc-700 text-zinc-100 hover:bg-zinc-700"
+                                                                : "bg-white border-zinc-300 text-zinc-900 hover:bg-zinc-50"
+                                                        }
+                                                    >
+                                                        Remover Imagem
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-4">
+                                                    <div
+                                                        className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center ${
+                                                            isDark ? "bg-zinc-800" : "bg-zinc-200"
+                                                        }`}
+                                                    >
+                                                        <Upload className={`h-8 w-8 ${isDark ? "text-zinc-400" : "text-zinc-500"}`} />
+                                                    </div>
+                                                    <div>
+                                                        <Label
+                                                            htmlFor="image-upload"
+                                                            className={`cursor-pointer text-sm font-medium ${
+                                                                isDark
+                                                                    ? "text-violet-400 hover:text-violet-300"
+                                                                    : "text-violet-600 hover:text-violet-700"
+                                                            }`}
+                                                        >
+                                                            Clique para fazer upload
+                                                        </Label>
+                                                        <Input
+                                                            id="image-upload"
+                                                            type="file"
+                                                            accept="image/*"
+                                                            onChange={handleImageUpload}
+                                                            className="hidden"
+                                                            disabled={isGenerating}
+                                                        />
+                                                        <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                                                            PNG, JPG ou JPEG até 10MB
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label
+                                            htmlFor="context"
+                                            className={`text-sm font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}
+                                        >
+                                            Contexto Adicional (Opcional)
+                                        </Label>
+                                        <Textarea
+                                            id="context"
+                                            value={additionalContext}
+                                            onChange={(e) => setAdditionalContext(e.target.value)}
+                                            placeholder="Adicione detalhes sobre o workflow da imagem..."
+                                            className={`min-h-[80px] resize-none ${
+                                                isDark
+                                                    ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-violet-500"
+                                                    : "bg-white border-zinc-300 text-zinc-900 placeholder:text-zinc-400 focus:border-violet-500"
+                                            }`}
+                                            disabled={isGenerating}
+                                        />
+                                    </div>
+                                </TabsContent>
+                            </Tabs>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="model" className={`text-sm font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
+                                    Modelo GPT
+                                </Label>
+                                <Select value={model} onValueChange={setModel} disabled={isGenerating}>
+                                    <SelectTrigger
+                                        id="model"
+                                        className={`h-10 ${
+                                            isDark ? "bg-zinc-900 border-zinc-700 text-zinc-100" : "bg-white border-zinc-300 text-zinc-900"
+                                        }`}
+                                    >
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="gpt-4o">GPT-4o (Recomendado)</SelectItem>
+                                        <SelectItem value="gpt-4o-mini">GPT-4o Mini (Rápido)</SelectItem>
+                                        <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                                        <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (Econômico)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                                    Modelos mais avançados geram workflows mais precisos
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="size" className={`text-sm font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
+                                    Tamanho do Workflow
+                                </Label>
+                                <Select value={size} onValueChange={setSize} disabled={isGenerating}>
+                                    <SelectTrigger
+                                        id="size"
+                                        className={`h-10 ${
+                                            isDark ? "bg-zinc-900 border-zinc-700 text-zinc-100" : "bg-white border-zinc-300 text-zinc-900"
+                                        }`}
+                                    >
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="small">Pequeno (3-5 nós)</SelectItem>
+                                        <SelectItem value="medium">Médio (6-10 nós)</SelectItem>
+                                        <SelectItem value="large">Grande (11-20 nós)</SelectItem>
+                                        <SelectItem value="custom">Personalizado</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{getSizeDescription(size)}</p>
+
+                                {size === "custom" && (
+                                    <div className="mt-3 space-y-2">
+                                        <Label
+                                            htmlFor="customNodeCount"
+                                            className={`text-sm font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}
+                                        >
+                                            Quantidade Exata de Nós (3-30)
+                                        </Label>
+                                        <Input
+                                            id="customNodeCount"
+                                            type="number"
+                                            min={3}
+                                            max={30}
+                                            value={customNodeCount}
+                                            onChange={(e) => {
+                                                const value = Number.parseInt(e.target.value)
+                                                if (!isNaN(value) && value >= 3 && value <= 30) {
+                                                    setCustomNodeCount(value)
+                                                }
+                                            }}
+                                            className={`h-10 ${
+                                                isDark
+                                                    ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500"
+                                                    : "bg-white border-zinc-300 text-zinc-900 placeholder:text-zinc-400"
+                                            }`}
+                                            disabled={isGenerating}
+                                        />
+                                        <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                                            A IA gerará EXATAMENTE {customNodeCount} nós para seu workflow personalizado
+                                        </p>
+                                    </div>
                                 )}
-                            </Button>
+                            </div>
                         </div>
-                    </>
+                    )}
+                </div>
+
+                {!generatedWorkflow && (
+                    <div
+                        className={`px-6 py-4 border-t flex justify-end gap-3 ${isDark ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-zinc-50"}`}
+                    >
+                        <Button
+                            variant="outline"
+                            onClick={() => onOpenChange(false)}
+                            disabled={isGenerating}
+                            className={`h-10 px-4 ${
+                                isDark
+                                    ? "bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800"
+                                    : "bg-white border-zinc-300 text-zinc-900 hover:bg-zinc-50"
+                            }`}
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            onClick={handleGenerate}
+                            disabled={isGenerating}
+                            className={`h-10 px-6 font-medium ${
+                                isDark
+                                    ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white"
+                                    : "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white"
+                            }`}
+                        >
+                            {isGenerating ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Construindo...
+                                </>
+                            ) : (
+                                <>
+                                    <Sparkles className="h-4 w-4 mr-2" />
+                                    Gerar Workflow
+                                </>
+                            )}
+                        </Button>
+                    </div>
                 )}
             </DialogContent>
         </Dialog>

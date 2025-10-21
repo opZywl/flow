@@ -2,11 +2,11 @@
 
 import type React from "react"
 
-import {useState, useEffect, useCallback, useRef} from "react"
-import {ThemeProvider, useTheme} from "../ThemeContext"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { ThemeProvider, useTheme } from "../ThemeContext"
 import ColorPanel from "../ColorPanel"
 import WorkflowBuilder from "./workflow-builder"
-import {useRouter} from "next/navigation"
+import { useRouter } from "next/navigation"
 import {
     FiSearch,
     FiSave,
@@ -35,16 +35,16 @@ import {
     FiNavigation,
     FiUpload,
 } from "react-icons/fi"
-import {BotIcon} from "lucide-react"
-import {Input} from "@/components/ui/input"
-import {Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription} from "@/components/ui/dialog"
-import {Avatar} from "@/components/ui/avatar"
-import {motion, AnimatePresence} from "framer-motion"
+import { BotIcon } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Avatar } from "@/components/ui/avatar"
+import { motion, AnimatePresence } from "framer-motion"
 import html2canvas from "html2canvas"
 import IntegrationsMenu from "./integrations/IntegrationsMenu"
 import AIWorkflowDialog from "./ai-workflow-dialog"
 
-const FlowElegantSidebar = ({currentGradient, theme}: { currentGradient: any; theme: string }) => {
+const FlowElegantSidebar = ({ currentGradient, theme }: { currentGradient: any; theme: string }) => {
     return (
         <div className="fixed left-0 top-0 h-full z-50 flex items-center pointer-events-none">
             <div
@@ -90,7 +90,7 @@ const FlowElegantSidebar = ({currentGradient, theme}: { currentGradient: any; th
     )
 }
 
-const FlowStatusIndicator = ({startPosition, mousePosition, componentCount, theme, currentGradient}: any) => {
+const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, theme, currentGradient }: any) => {
     const isDark = theme === "dark"
     const [isExecuted, setIsExecuted] = useState(false)
 
@@ -116,9 +116,9 @@ const FlowStatusIndicator = ({startPosition, mousePosition, componentCount, them
 
     return (
         <motion.div
-            initial={{opacity: 0, scale: 0.95}}
-            animate={{opacity: 1, scale: 1}}
-            className="flex items-center space-x-4 px-4 py-2 rounded-xl text-xs"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex items-center space-x-4 px-4 py-2 rounded-xl text-xs pointer-events-none"
             style={{
                 background: isDark
                     ? `linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04))`
@@ -133,7 +133,7 @@ const FlowStatusIndicator = ({startPosition, mousePosition, componentCount, them
                     animate={{
                         scale: isExecuted ? [1, 1.1, 1] : 1,
                     }}
-                    transition={{duration: 2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut"}}
+                    transition={{ duration: 2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
                 >
                     {isExecuted ? (
                         <FiCheckCircle
@@ -226,9 +226,9 @@ const YenFlowBot = ({
     const [input, setInput] = useState("")
     const [currentNodeId, setCurrentNodeId] = useState<string | null>(null)
     const [isMinimized, setIsMinimized] = useState(false)
-    const [position, setPosition] = useState({x: 0, y: 0})
+    const [position, setPosition] = useState({ x: 0, y: 0 })
     const [isDragging, setIsDragging] = useState(false)
-    const [dragStart, setDragStart] = useState({x: 0, y: 0})
+    const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
     const [savedFlow, setSavedFlow] = useState<{ nodes: any[]; edges: any[] } | null>(null)
     const [isFlowExecuted, setIsFlowExecuted] = useState(false)
     const [waitingForUserInput, setWaitingForUserInput] = useState(false)
@@ -236,7 +236,7 @@ const YenFlowBot = ({
     const [currentOptionsMessage, setCurrentOptionsMessage] = useState("")
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
-    const {theme, currentGradient} = useTheme()
+    const { theme, currentGradient } = useTheme()
 
     useEffect(() => {
         if (isOpen) {
@@ -306,7 +306,7 @@ const YenFlowBot = ({
 
     useEffect(() => {
         if (messagesEndRef.current) {
-            messagesEndRef.current.scrollIntoView({behavior: "smooth", block: "end"})
+            messagesEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" })
         }
     }, [messages])
 
@@ -551,43 +551,39 @@ const YenFlowBot = ({
     return (
         <AnimatePresence>
             <motion.div
-                initial={{opacity: 0, y: 20, height: "auto"}}
+                initial={{ opacity: 0, y: 20, height: "auto" }}
                 animate={{
                     opacity: 1,
                     y: 0,
                     height: isMinimized ? "60px" : "500px",
                 }}
-                exit={{opacity: 0, y: 20}}
-                transition={{duration: 0.3}}
+                exit={{ opacity: 0, y: 20 }}
+                transition={{ duration: 0.3 }}
                 className="fixed w-full max-w-sm rounded-xl shadow-2xl overflow-hidden z-50"
                 style={{
                     ...chatStyle,
                     background: isDark
-                        ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, rgba(20,20,20,0.96) 25%, rgba(40,40,40,0.94) 50%, rgba(20,20,20,0.96) 75%, rgba(0,0,0,0.95) 100%)`
-                        : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.96) 25%, rgba(241,245,249,0.0.94) 50%, rgba(248,250,252,0.96) 75%, rgba(255,255,255,0.95) 100%)`,
-                    backdropFilter: "blur(25px)",
-                    border: isDark ? `2px solid rgba(60,60,60,0.5)` : `2px solid rgba(203,213,225,0.4)`,
+                        ? `linear-gradient(135deg, rgba(9,9,11,0.98) 0%, rgba(24,24,27,0.98) 100%)`
+                        : `linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(250,250,250,0.98) 100%)`,
+                    backdropFilter: "blur(20px)",
+                    border: isDark ? `1px solid rgba(139,92,246,0.3)` : `1px solid rgba(192,132,252,0.3)`,
                     boxShadow: isDark
-                        ? `0 25px 50px -12px rgba(0, 0, 0, 0.8),
-             0 0 0 1px rgba(60,60,60,0.3),
-             0 0 40px rgba(0,0,0,0.4),
-             inset 0 1px 0 rgba(255, 255, 255, 0.1)`
-                        : `0 25px 50px -12px rgba(0, 0, 0, 0.3),
-             0 0 0 1px rgba(203,213,225,0.3),
-             0 0 40px rgba(0,0,0,0.25),
+                        ? `0 20px 40px -12px rgba(0, 0, 0, 0.5),
+             0 0 0 1px rgba(139,92,246,0.2),
+             inset 0 1px 0 rgba(255, 255, 255, 0.05)`
+                        : `0 20px 40px -12px rgba(0, 0, 0, 0.15),
+             0 0 0 1px rgba(192,132,252,0.2),
              inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
                 }}
             >
                 <div
-                    className="absolute inset-0 opacity-20 rounded-lg"
+                    className="absolute inset-0 opacity-10 rounded-xl"
                     style={{
                         backgroundImage: isDark
-                            ? `radial-gradient(circle at 20% 30%, rgba(60,60,60,0.6) 0%, transparent 40%),
-               radial-gradient(circle at 80% 70%, rgba(40,40,40,0.6) 0%, transparent 40%),
-               radial-gradient(circle at 50% 50%, rgba(80,80,80,0.4) 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 30%, rgba(203,213,225,0.4) 0%, transparent 40%),
-               radial-gradient(circle at 80% 70%, rgba(226,232,240,0.4) 0%, transparent 40%),
-               radial-gradient(circle at 50% 50%, rgba(241,245,249,0.3) 0%, transparent 60%)`,
+                            ? `radial-gradient(circle at 20% 30%, rgba(139,92,246,0.3) 0%, transparent 50%),
+               radial-gradient(circle at 80% 70%, rgba(217,70,239,0.2) 0%, transparent 50%)`
+                            : `radial-gradient(circle at 20% 30%, rgba(192,132,252,0.2) 0%, transparent 50%),
+               radial-gradient(circle at 80% 70%, rgba(232,121,249,0.15) 0%, transparent 50%)`,
                     }}
                 />
 
@@ -595,10 +591,10 @@ const YenFlowBot = ({
                     className="relative z-10 p-3 flex items-center justify-between border-b drag-handle"
                     style={{
                         background: isDark
-                            ? `linear-gradient(135deg, rgba(40,40,40,0.4), rgba(60,60,60,0.4))`
-                            : `linear-gradient(135deg, rgba(241,245,249,0.3), rgba(226,232,240,0.3))`,
-                        borderColor: isDark ? `rgba(60, 60, 60, 0.4)` : `rgba(203, 213, 225, 0.3)`,
-                        boxShadow: isDark ? `0 4px 15px rgba(0,0,0,0.3)` : `0 4px 15px rgba(0,0,0,0.1)`,
+                            ? `linear-gradient(135deg, rgba(139,92,246,0.15), rgba(217,70,239,0.1))`
+                            : `linear-gradient(135deg, rgba(192,132,252,0.1), rgba(232,121,249,0.08))`,
+                        borderColor: isDark ? `rgba(139,92,246,0.2)` : `rgba(192,132,252,0.2)`,
+                        boxShadow: "none",
                     }}
                 >
                     <div className="flex items-center space-x-3">
@@ -606,21 +602,22 @@ const YenFlowBot = ({
                             className="h-10 w-10"
                             style={{
                                 background: isDark
-                                    ? `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`
-                                    : `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`,
-                                boxShadow: `0 0 15px ${currentGradient.glow}50`,
+                                    ? `linear-gradient(135deg, ${currentGradient.primary}50, ${currentGradient.secondary}50)`
+                                    : `linear-gradient(135deg, ${currentGradient.primary}60, ${currentGradient.secondary}60)`,
+                                boxShadow: isDark ? `0 0 20px ${currentGradient.glow}40` : `0 0 20px ${currentGradient.glow}30`,
+                                border: isDark ? `1px solid ${currentGradient.glow}60` : `1px solid ${currentGradient.glow}50`,
                             }}
                         >
                             <div className="flex items-center justify-center h-full w-full">
-                                <BotIcon className="h-6 w-6" style={{color: isDark ? "#ffffff" : "#111827"}}/>
+                                <BotIcon className="h-6 w-6" style={{ color: isDark ? "#ffffff" : currentGradient.primary }} />
                             </div>
                         </Avatar>
                         <div>
                             <h3
                                 className="text-base font-bold"
                                 style={{
-                                    color: isDark ? "#f9fafb" : "#111827",
-                                    textShadow: isDark ? `0 0 10px ${currentGradient.glow}60` : `0 0 5px ${currentGradient.primary}40`,
+                                    color: isDark ? "#f4f4f5" : "#18181b",
+                                    textShadow: "none",
                                 }}
                             >
                                 ¥$
@@ -628,8 +625,8 @@ const YenFlowBot = ({
                             <p
                                 className="text-xs"
                                 style={{
-                                    color: isDark ? "#d1d5db" : "#6b7280",
-                                    textShadow: isDark ? `0 0 5px ${currentGradient.glow}30` : "none",
+                                    color: isDark ? "#a1a1aa" : "#71717a",
+                                    textShadow: "none",
                                 }}
                             >
                                 Assistente by Lucas Lima
@@ -639,42 +636,42 @@ const YenFlowBot = ({
                     <div className="flex items-center space-x-1">
                         {isMinimized ? (
                             <motion.button
-                                whileHover={{scale: 1.05}}
-                                whileTap={{scale: 0.95}}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
                                 onClick={() => setIsMinimized(false)}
-                                className="h-8 w-8 text-gray-400 hover:text-gray-200 rounded-full flex items-center justify-center"
+                                className="h-8 w-8 rounded-full flex items-center justify-center"
                                 style={{
                                     color: isDark ? currentGradient.glow : currentGradient.primary,
                                     filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
                                 }}
                             >
-                                <FiMaximize2 className="h-5 w-5"/>
+                                <FiMaximize2 className="h-5 w-5" />
                             </motion.button>
                         ) : (
                             <motion.button
-                                whileHover={{scale: 1.05}}
-                                whileTap={{scale: 0.95}}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
                                 onClick={() => setIsMinimized(true)}
-                                className="h-8 w-8 text-gray-400 hover:text-gray-200 rounded-full flex items-center justify-center"
+                                className="h-8 w-8 rounded-full flex items-center justify-center"
                                 style={{
                                     color: isDark ? currentGradient.glow : currentGradient.primary,
                                     filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
                                 }}
                             >
-                                <FiMinimize2 className="h-5 w-5"/>
+                                <FiMinimize2 className="h-5 w-5" />
                             </motion.button>
                         )}
                         <motion.button
-                            whileHover={{scale: 1.05}}
-                            whileTap={{scale: 0.95}}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
                             onClick={onClose}
-                            className="h-8 w-8 text-gray-400 hover:text-gray-200 rounded-full flex items-center justify-center"
+                            className="h-8 w-8 rounded-full flex items-center justify-center"
                             style={{
                                 color: isDark ? currentGradient.glow : currentGradient.primary,
                                 filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
                             }}
                         >
-                            <FiX className="h-5 w-5"/>
+                            <FiX className="h-5 w-5" />
                         </motion.button>
                     </div>
                 </div>
@@ -685,8 +682,9 @@ const YenFlowBot = ({
                             className="p-4 h-[360px] overflow-y-auto relative z-10"
                             style={{
                                 background: isDark
-                                    ? `radial-gradient(circle at 50% 50%, rgba(0,0,0,0.8) 0%, rgba(20,20,20,0.1) 50%, rgba(0,0,0,0.8) 100%)`
-                                    : `radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9) 0%, rgba(241,245,249,0.05) 50%, rgba(255,255,255,0.9) 100%)`,
+                                    ? `linear-gradient(135deg, rgba(0,0,0,0.6) 0%, ${currentGradient.primary}08 50%, rgba(0,0,0,0.6) 100%)`
+                                    : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.95) 100%)`,
+                                backdropFilter: "blur(10px)",
                             }}
                         >
                             {messages.map((message) => (
@@ -695,30 +693,32 @@ const YenFlowBot = ({
                                     className={`mb-4 ${message.role === "user" ? "flex justify-end" : "flex justify-start"}`}
                                 >
                                     <motion.div
-                                        initial={{opacity: 0, y: 10}}
-                                        animate={{opacity: 1, y: 0}}
-                                        transition={{duration: 0.2}}
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.2 }}
                                         className={`max-w-[80%] p-4 rounded-xl whitespace-pre-line relative overflow-hidden`}
                                         style={{
                                             background:
                                                 message.role === "user"
                                                     ? `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`
                                                     : isDark
-                                                        ? `linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))`
-                                                        : `linear-gradient(135deg, rgba(0,0,0,0.05), rgba(0,0,0,0.02))`,
-                                            color: message.role === "user" ? "#ffffff" : isDark ? "#f9fafb" : "#111827",
+                                                        ? `linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)`
+                                                        : `linear-gradient(135deg, rgba(0,0,0,0.04) 0%, rgba(0,0,0,0.02) 100%)`,
+                                            color: message.role === "user" ? "#ffffff" : isDark ? "#f9fafb" : "#181818",
                                             border:
                                                 message.role === "user"
                                                     ? `1px solid ${currentGradient.glow}60`
                                                     : isDark
-                                                        ? `1px solid rgba(60,60,60,0.2)`
-                                                        : `1px solid rgba(203,213,225,0.2)`,
+                                                        ? `1px solid rgba(255,255,255,0.1)`
+                                                        : `1px solid rgba(0,0,0,0.08)`,
                                             boxShadow:
                                                 message.role === "user"
                                                     ? `0 4px 15px ${currentGradient.glow}40, 0 0 20px ${currentGradient.glow}20`
                                                     : isDark
-                                                        ? `0 2px 10px rgba(0,0,0,0.3), 0 0 10px rgba(0,0,0,0.1)`
-                                                        : `0 2px 10px rgba(0,0,0,0.1), 0 0 5px rgba(0,0,0,0.05)`,
+                                                        ? `0 2px 8px rgba(0,0,0,0.2)`
+                                                        : `0 2px 8px rgba(0,0,0,0.08)`,
+                                            backdropFilter: "blur(10px)",
+                                            fontWeight: message.role === "user" ? "500" : "400",
                                         }}
                                         whileHover={{
                                             scale: 1.02,
@@ -726,15 +726,17 @@ const YenFlowBot = ({
                                                 message.role === "user"
                                                     ? `0 6px 20px ${currentGradient.glow}50, 0 0 30px ${currentGradient.glow}30`
                                                     : isDark
-                                                        ? `0 4px 15px rgba(0,0,0,0.4), 0 0 15px rgba(0,0,0,0.2)`
-                                                        : `0 4px 15px rgba(0,0,0,0.2), 0 0 10px rgba(0,0,0,0.1)`,
+                                                        ? `0 4px 12px rgba(0,0,0,0.3)`
+                                                        : `0 4px 12px rgba(0,0,0,0.12)`,
                                         }}
                                     >
-                                        <p className="text-sm">{message.content}</p>
+                                        <p className={`text-sm leading-relaxed ${message.role === "user" ? "font-semibold" : ""}`}>
+                                            {message.content}
+                                        </p>
                                     </motion.div>
                                 </div>
                             ))}
-                            <div ref={messagesEndRef}/>
+                            <div ref={messagesEndRef} />
                         </div>
 
                         <form
@@ -745,9 +747,10 @@ const YenFlowBot = ({
                             className="p-3 border-t relative z-10"
                             style={{
                                 background: isDark
-                                    ? `linear-gradient(135deg, rgba(0,0,0,0.9), rgba(20,20,20,0.1))`
-                                    : `linear-gradient(135deg, rgba(255,255,255,0.9), rgba(241,245,249,0.05))`,
-                                borderColor: isDark ? `rgba(60, 60, 60, 0.3)` : `rgba(203, 213, 225, 0.2)`,
+                                    ? `linear-gradient(135deg, rgba(0,0,0,0.6) 0%, ${currentGradient.primary}08 50%, rgba(0,0,0,0.6) 100%)`
+                                    : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.95) 100%)`,
+                                borderColor: isDark ? `${currentGradient.glow}20` : `${currentGradient.primary}15`,
+                                backdropFilter: "blur(10px)",
                             }}
                         >
                             <div className="flex items-center space-x-2">
@@ -759,13 +762,12 @@ const YenFlowBot = ({
                                     className="flex-1 rounded-full px-4 py-3 text-sm transition-all duration-300"
                                     style={{
                                         background: isDark
-                                            ? `linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))`
-                                            : `linear-gradient(135deg, rgba(255,255,255,0.95), rgba(248,250,252,0.95))`,
-                                        border: isDark ? `1px solid rgba(60,60,60,0.3)` : `1px solid rgba(203,213,225,0.3)`,
+                                            ? `linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`
+                                            : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)`,
+                                        border: isDark ? `1px solid rgba(255,255,255,0.1)` : `1px solid rgba(0,0,0,0.08)`,
                                         color: isDark ? "#f9fafb" : "#111827",
-                                        boxShadow: isDark
-                                            ? `0 0 0 1px rgba(60,60,60,0.1), 0 0 10px rgba(0,0,0,0.15)`
-                                            : `0 0 0 1px rgba(203,213,225,0.15), 0 0 5px rgba(0,0,0,0.08)`,
+                                        boxShadow: isDark ? `0 2px 8px rgba(0,0,0,0.2)` : `0 2px 8px rgba(0,0,0,0.08)`,
+                                        backdropFilter: "blur(10px)",
                                     }}
                                 />
                                 <motion.button
@@ -781,9 +783,9 @@ const YenFlowBot = ({
                                         scale: 1.05,
                                         boxShadow: `0 6px 20px ${currentGradient.glow}50, 0 0 30px ${currentGradient.glow}30`,
                                     }}
-                                    whileTap={{scale: 0.95}}
+                                    whileTap={{ scale: 0.95 }}
                                 >
-                                    <FiSend className="h-5 w-5" style={{color: isDark ? "#ffffff" : "#111827"}}/>
+                                    <FiSend className="h-5 w-5 text-white" />
                                 </motion.button>
                             </div>
                         </form>
@@ -794,8 +796,8 @@ const YenFlowBot = ({
     )
 }
 
-const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBackground, theme}: any) => {
-    const {currentGradient} = useTheme()
+const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBackground, theme }: any) => {
+    const { currentGradient } = useTheme()
     const isDark = theme === "dark"
     const primaryColor = currentGradient?.primary || "#000000"
     const secondaryColor = currentGradient?.secondary || "#000000"
@@ -840,7 +842,7 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
 
                     <DialogHeader
                         className="relative z-10 p-5 border-b"
-                        style={{borderColor: isDark ? `${glowColor}30` : `${primaryColor}20`}}
+                        style={{ borderColor: isDark ? `${glowColor}30` : `${primaryColor}20` }}
                     >
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-4">
@@ -885,8 +887,8 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
                                 </div>
                             </div>
                             <motion.button
-                                whileHover={{scale: 1.05}}
-                                whileTap={{scale: 0.95}}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
                                 onClick={onClose}
                                 className="p-2 rounded-xl transition-colors"
                                 style={{
@@ -894,15 +896,15 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
                                     color: isDark ? "#d1d5db" : "#6b7280",
                                 }}
                             >
-                                <FiX className="w-5 h-5"/>
+                                <FiX className="w-5 h-5" />
                             </motion.button>
                         </div>
                     </DialogHeader>
 
                     <div className="relative z-10 p-5 space-y-4">
                         <motion.button
-                            whileHover={{scale: 1.02, x: 4}}
-                            whileTap={{scale: 0.98}}
+                            whileHover={{ scale: 1.02, x: 4 }}
+                            whileTap={{ scale: 0.98 }}
                             onClick={onChangeBackground}
                             className="w-full flex items-center gap-4 p-4 rounded-xl transition-all duration-200"
                             style={{
@@ -919,7 +921,7 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
                                     background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
                                 }}
                             >
-                                <FiFolder className="w-6 h-6" style={{color: isDark ? "#d1d5db" : "#6b7280"}}/>
+                                <FiFolder className="w-6 h-6" style={{ color: isDark ? "#d1d5db" : "#6b7280" }} />
                             </div>
                             <div className="flex-1 text-left">
                                 <div
@@ -938,14 +940,14 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
                                         fontFamily: "system-ui, -apple-system, sans-serif",
                                     }}
                                 >
-                                    Escolher nova imagem de fundo para o fluxo
+                                    Escolher nova imagem de fundo do fluxo
                                 </div>
                             </div>
                         </motion.button>
 
                         <motion.button
-                            whileHover={{scale: 1.02, x: 4}}
-                            whileTap={{scale: 0.98}}
+                            whileHover={{ scale: 1.02, x: 4 }}
+                            whileTap={{ scale: 0.98 }}
                             onClick={onResetBackground}
                             className="w-full flex items-center gap-4 p-4 rounded-xl transition-all duration-200"
                             style={{
@@ -960,7 +962,7 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
                                     background: "rgba(239, 68, 68, 0.2)",
                                 }}
                             >
-                                <FiTrash2 className="w-6 h-6 text-red-400"/>
+                                <FiTrash2 className="w-6 h-6 text-red-400" />
                             </div>
                             <div className="flex-1 text-left">
                                 <div
@@ -985,8 +987,8 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
                         </motion.button>
 
                         <motion.button
-                            whileHover={{scale: 1.02, x: 4}}
-                            whileTap={{scale: 0.98}}
+                            whileHover={{ scale: 1.02, x: 4 }}
+                            whileTap={{ scale: 0.98 }}
                             onClick={onSaveImage}
                             className="w-full flex items-center gap-4 p-4 rounded-xl transition-all duration-200"
                             style={{
@@ -1001,7 +1003,7 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
                                     background: "rgba(34, 197, 94, 0.2)",
                                 }}
                             >
-                                <FiCamera className="w-6 h-6 text-green-400"/>
+                                <FiCamera className="w-6 h-6 text-green-400" />
                             </div>
                             <div className="flex-1 text-left">
                                 <div
@@ -1033,8 +1035,8 @@ const ImageMenu = ({isOpen, onClose, onChangeBackground, onSaveImage, onResetBac
                         }}
                     >
                         <motion.button
-                            whileHover={{scale: 1.02}}
-                            whileTap={{scale: 0.98}}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
                             onClick={onClose}
                             className="px-6 py-2 text-sm font-medium rounded-lg transition-colors"
                             style={{
@@ -1072,7 +1074,7 @@ const FlowHeaderWithDialogs = ({
                                    workflowContainerRef,
                                }: any) => {
     const router = useRouter()
-    const {theme, toggleTheme, currentGradient, glowAnimation, glowEnabled, setShowColorPanel} = useTheme()
+    const { theme, toggleTheme, currentGradient, glowAnimation, glowEnabled, setShowColorPanel } = useTheme()
     const [searchValue, setSearchValue] = useState("")
     const [showResetDialog, setShowResetDialog] = useState(false)
     const [showExecuteDialog, setShowExecuteDialog] = useState(false)
@@ -1080,8 +1082,7 @@ const FlowHeaderWithDialogs = ({
     const [showIntegrationsMenu, setShowIntegrationsMenu] = useState(false)
     const [isWorkflowSaved, setIsWorkflowSaved] = useState(false)
     const [isSearchFocused, setIsSearchFocused] = useState(false)
-    // Removed unused showAIDialog state from here as it's now managed in FlowLayout
-    // const [showAIDialog, setShowAIDialog] = useState(false)
+    // </CHANGE>
 
     const primaryColor = currentGradient?.primary || "#000000"
     const secondaryColor = currentGradient?.secondary || "#000000"
@@ -1265,23 +1266,15 @@ const FlowHeaderWithDialogs = ({
         setIsExecuted(executedFlow === "true")
     }, [])
 
-    // Função para criar estilos de botão com glow animation - CORRIGIDA
-    const getButtonStyle = (baseStyle: any) => {
-        if (!glowEnabled) return baseStyle
-
-        const glowStyles: React.CSSProperties = {
-            ...baseStyle,
-            border: `1px solid var(--glow-color)`,
-            boxShadow: `0 0 var(--glow-blur) var(--glow-spread) var(--glow-color)`,
-            transition: "all 0.3s ease",
+    const getPillButtonStyle = (isActive = false, customBg?: string) => {
+        return {
+            background: customBg || (isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)"),
+            border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"}`,
+            color: customBg ? "#ffffff" : isDark ? "#e5e7eb" : "#374151",
+            transition: "all 0.2s ease",
         }
-
-        if (glowAnimation) {
-            glowStyles.animation = "glow-pulse 2s ease-in-out infinite alternate"
-        }
-
-        return glowStyles
     }
+    // </CHANGE>
 
     return (
         <>
@@ -1308,94 +1301,80 @@ const FlowHeaderWithDialogs = ({
             `}</style>
 
             <motion.header
-                initial={{opacity: 0, y: -10}}
-                animate={{opacity: 1, y: 0}}
-                transition={{duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94]}}
-                className="relative z-50 border-b"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                className="relative z-50"
                 style={{
-                    background: isDark
-                        ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${primaryColor}15 50%, rgba(0,0,0,0.95) 100%)`
-                        : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${primaryColor}10 50%, rgba(255,255,255,0.95) 100%)`,
+                    background: isDark ? "rgba(0, 0, 0, 0.6)" : "rgba(255, 255, 255, 0.6)",
                     backdropFilter: "blur(20px)",
-                    borderBottom: `2px solid ${glowColor}`,
-                    boxShadow: isDark
-                        ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 40px ${glowColor}30`
-                        : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 40px ${primaryColor}20`,
+                    borderBottom: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)"}`,
                     minHeight: "60px",
                     maxHeight: "60px",
                 }}
             >
-                <div
-                    className="absolute inset-0 opacity-20"
-                    style={{
-                        backgroundImage: isDark
-                            ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%),
-         radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
-         radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
-                            : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%),
-         radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
-         radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
-                    }}
-                />
-
                 <div className="max-w-full mx-auto px-4 py-2 relative z-10">
                     <div className="flex items-center justify-between h-11">
-                        {/* Seção Esquerda - Sidebar + Zoom */}
-                        <div className="flex items-center space-x-4">
+                        <div className="flex items-center gap-2">
                             <motion.button
-                                whileHover={{scale: 1.02}}
-                                whileTap={{scale: 0.98}}
+                                whileHover={{
+                                    scale: 1.05,
+                                    backgroundColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
+                                }}
+                                whileTap={{ scale: 0.95 }}
                                 onClick={onToggleSidebar}
-                                className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
-                                style={getButtonStyle({
-                                    background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                    color: isDark ? "#a1a1aa" : "#71717a",
-                                })}
+                                className="px-3 py-1.5 rounded-full text-sm font-medium"
+                                style={getPillButtonStyle()}
                                 title="Toggle Sidebar"
                             >
-                                <FiSidebar className="w-3.5 h-3.5"/>
+                                <FiSidebar className="w-4 h-4" />
                             </motion.button>
 
                             <div
-                                className="flex items-center rounded-lg p-0.5 space-x-0.5"
-                                style={getButtonStyle({
+                                className="flex items-center gap-1 px-1 py-1 rounded-full"
+                                style={{
                                     background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                })}
+                                    border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
+                                }}
                             >
                                 {[
-                                    {icon: FiZoomOut, action: onZoomOut, title: "Zoom Out"},
-                                    {icon: FiZoomIn, action: onZoomIn, title: "Zoom In"},
-                                    {icon: FiMaximize, action: onFitView, title: "Fit View"},
-                                ].map(({icon: Icon, action, title}, index) => (
+                                    { icon: FiZoomOut, action: onZoomOut, title: "Zoom Out" },
+                                    { icon: FiZoomIn, action: onZoomIn, title: "Zoom In" },
+                                    { icon: FiMaximize, action: onFitView, title: "Fit View" },
+                                ].map(({ icon: Icon, action, title }, index) => (
                                     <motion.button
                                         key={index}
-                                        whileHover={{scale: 1.05}}
-                                        whileTap={{scale: 0.95}}
+                                        whileHover={{
+                                            scale: 1.1,
+                                            backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                        }}
+                                        whileTap={{ scale: 0.9 }}
                                         onClick={action}
-                                        className="flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150"
+                                        className="p-1.5 rounded-full transition-colors"
                                         style={{
-                                            color: isDark ? "#a1a1aa" : "#71717a",
+                                            color: isDark ? "#9ca3af" : "#6b7280",
                                         }}
                                         title={title}
                                     >
-                                        <Icon className="w-3.5 h-3.5"/>
+                                        <Icon className="w-4 h-4" />
                                     </motion.button>
                                 ))}
                             </div>
                         </div>
+                        {/* </CHANGE> */}
 
-                        {/* Seção Central - Search + Status */}
+                        {/* Center Section - Search + Status */}
                         <div className="flex items-center space-x-4">
                             <motion.form
                                 onSubmit={handleSearch}
                                 className="relative"
-                                animate={{width: isSearchFocused ? 280 : 240}}
-                                transition={{duration: 0.2, ease: "easeOut"}}
+                                animate={{ width: isSearchFocused ? 280 : 240 }}
+                                transition={{ duration: 0.2, ease: "easeOut" }}
                             >
                                 <div className="relative">
                                     <FiSearch
-                                        className="absolute left-3 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5"
-                                        style={{color: isDark ? "#71717a" : "#a1a1aa"}}
+                                        className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4"
+                                        style={{ color: isDark ? "#6b7280" : "#9ca3af" }}
                                     />
                                     <Input
                                         type="text"
@@ -1404,13 +1383,12 @@ const FlowHeaderWithDialogs = ({
                                         onChange={(e) => setSearchValue(e.target.value)}
                                         onFocus={() => setIsSearchFocused(true)}
                                         onBlur={() => setIsSearchFocused(false)}
-                                        className="w-full h-8 pl-9 pr-3 text-sm rounded-lg border-0 transition-all duration-200 focus:outline-none focus:ring-2"
-                                        style={getButtonStyle({
-                                            background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                            color: isDark ? "#ffffff" : "#000000",
-                                            focusRingColor: primaryColor,
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        })}
+                                        className="w-full h-9 pl-10 pr-3 text-sm rounded-full border transition-all duration-200 focus:outline-none focus:ring-2"
+                                        style={{
+                                            background: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+                                            borderColor: isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)",
+                                            color: isDark ? "#e5e7eb" : "#374151",
+                                        }}
                                     />
                                 </div>
                             </motion.form>
@@ -1424,172 +1402,169 @@ const FlowHeaderWithDialogs = ({
                             />
                         </div>
 
-                        {/* Seção Direita - Actions */}
-                        <div className="flex items-center space-x-2">
-                            <div className="flex items-center space-x-1.5">
-                                <motion.button
-                                    whileHover={{scale: 1.02}}
-                                    whileTap={{scale: 0.98}}
-                                    onClick={onOpenAIDialog}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: "linear-gradient(135deg, #a855f7, #ec4899)",
-                                        color: "#ffffff",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    })}
-                                    title="Criar Workflow com IA"
-                                >
-                                    <FiPlayCircle className="w-3.5 h-3.5"/>
-                                    <span className="hidden lg:inline text-xs">Criar com IA</span>
-                                </motion.button>
+                        <div className="flex items-center gap-2">
+                            <motion.button
+                                whileHover={{ scale: 1.05, boxShadow: "0 0 20px rgba(168, 85, 247, 0.4)" }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={onOpenAIDialog}
+                                className="px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-2"
+                                style={getPillButtonStyle(false, "linear-gradient(135deg, #a855f7, #ec4899)")}
+                                title="Criar Workflow com IA"
+                            >
+                                <FiPlayCircle className="w-4 h-4" />
+                                <span className="hidden lg:inline">Criar com IA</span>
+                            </motion.button>
 
-                                <motion.button
-                                    whileHover={{scale: 1.02}}
-                                    whileTap={{scale: 0.98}}
-                                    onClick={handleSave}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        color: isDark ? "#ffffff" : "#000000",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    })}
-                                    title="Save"
-                                >
-                                    <FiSave className="w-3.5 h-3.5"/>
-                                    <span className="hidden sm:inline text-xs">Save</span>
-                                </motion.button>
-
-                                <motion.button
-                                    whileHover={{scale: 1.02}}
-                                    whileTap={{scale: 0.98}}
-                                    onClick={onOpenBot}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: "linear-gradient(135deg, #06b6d4, #0891b2)",
-                                        color: "#ffffff",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    })}
-                                    title="Open Bot"
-                                >
-                                    <BotIcon className="w-3.5 h-3.5"/>
-                                    <span className="hidden lg:inline text-xs">Bot</span>
-                                </motion.button>
-
-                                <motion.button
-                                    whileHover={{scale: 1.02}}
-                                    whileTap={{scale: 0.98}}
-                                    onClick={onLoad}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        color: isDark ? "#ffffff" : "#000000",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    })}
-                                    title="Load"
-                                >
-                                    <FiUpload className="w-3.5 h-3.5"/>
-                                    <span className="hidden sm:inline text-xs">Load</span>
-                                </motion.button>
-
-                                <motion.button
-                                    whileHover={{scale: 1.02}}
-                                    whileTap={{scale: 0.98}}
-                                    onClick={onDownload}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        color: isDark ? "#ffffff" : "#000000",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    })}
-                                    title="Export"
-                                >
-                                    <FiDownload className="w-3.5 h-3.5"/>
-                                    <span className="hidden sm:inline text-xs">Export</span>
-                                </motion.button>
-
-                                <motion.button
-                                    whileHover={{scale: 1.02}}
-                                    whileTap={{scale: 0.98}}
-                                    onClick={handleExecute}
-                                    disabled={!isWorkflowSaved}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: isWorkflowSaved
-                                            ? isDark
-                                                ? "#ffffff"
-                                                : "#000000"
-                                            : isDark
-                                                ? "rgba(255, 255, 255, 0.3)"
-                                                : "rgba(0, 0, 0, 0.3)",
-                                        color: isWorkflowSaved ? (isDark ? "#000000" : "#ffffff") : isDark ? "#666666" : "#999999",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                        cursor: isWorkflowSaved ? "pointer" : "not-allowed",
-                                    })}
-                                    title="Execute"
-                                >
-                                    <FiPlayCircle className="w-3.5 h-3.5"/>
-                                    <span className="hidden sm:inline text-xs">Execute</span>
-                                </motion.button>
-                            </div>
-
-                            <div
-                                className="w-px h-6"
-                                style={{
-                                    background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
+                            <motion.button
+                                whileHover={{
+                                    scale: 1.05,
+                                    backgroundColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
                                 }}
-                            />
+                                whileTap={{ scale: 0.95 }}
+                                onClick={handleSave}
+                                className="px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-2"
+                                style={getPillButtonStyle()}
+                                title="Save"
+                            >
+                                <FiSave className="w-4 h-4" />
+                                <span className="hidden sm:inline">Save</span>
+                            </motion.button>
 
-                            <div className="flex items-center space-x-1">
+                            <motion.button
+                                whileHover={{ scale: 1.05, boxShadow: "0 0 20px rgba(6, 182, 212, 0.4)" }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={onOpenBot}
+                                className="px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-2"
+                                style={getPillButtonStyle(false, "linear-gradient(135deg, #06b6d4, #0891b2)")}
+                                title="Open Bot"
+                            >
+                                <BotIcon className="w-4 h-4" />
+                                <span className="hidden lg:inline">Bot</span>
+                            </motion.button>
+
+                            <motion.button
+                                whileHover={{
+                                    scale: 1.05,
+                                    backgroundColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
+                                }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={onLoad}
+                                className="px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-2"
+                                style={getPillButtonStyle()}
+                                title="Load"
+                            >
+                                <FiUpload className="w-4 h-4" />
+                                <span className="hidden sm:inline">Load</span>
+                            </motion.button>
+
+                            <motion.button
+                                whileHover={{
+                                    scale: 1.05,
+                                    backgroundColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
+                                }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={onDownload}
+                                className="px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-2"
+                                style={getPillButtonStyle()}
+                                title="Export"
+                            >
+                                <FiDownload className="w-4 h-4" />
+                                <span className="hidden sm:inline">Export</span>
+                            </motion.button>
+
+                            <motion.button
+                                whileHover={{ scale: isWorkflowSaved ? 1.05 : 1, opacity: isWorkflowSaved ? 1 : 0.5 }}
+                                whileTap={{ scale: isWorkflowSaved ? 0.95 : 1 }}
+                                onClick={handleExecute}
+                                disabled={!isWorkflowSaved}
+                                className="px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-2"
+                                style={getPillButtonStyle(false, isWorkflowSaved ? (isDark ? "#ffffff" : "#000000") : undefined)}
+                                title="Execute"
+                            >
+                                <FiPlayCircle className="w-4 h-4" />
+                                <span className="hidden sm:inline">Execute</span>
+                            </motion.button>
+
+                            {/* Utility buttons */}
+                            <div
+                                className="flex items-center gap-1 px-1 py-1 rounded-full ml-2"
+                                style={{
+                                    background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
+                                    border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
+                                }}
+                            >
                                 <motion.button
-                                    whileHover={{scale: 1.05}}
-                                    whileTap={{scale: 0.95}}
+                                    whileHover={{
+                                        scale: 1.1,
+                                        backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                    }}
+                                    whileTap={{ scale: 0.9 }}
                                     onClick={() => setShowIntegrationsMenu(true)}
-                                    className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: "linear-gradient(135deg, #8B5CF6, #7C3AED)",
-                                        color: "#ffffff",
-                                    })}
+                                    className="p-1.5 rounded-full transition-colors"
+                                    style={{ color: isDark ? "#9ca3af" : "#6b7280" }}
                                     title="Integrações"
                                 >
-                                    <FiLayers className="w-3.5 h-3.5"/>
+                                    <FiLayers className="w-4 h-4" />
                                 </motion.button>
 
-                                {[
-                                    {icon: FiImage, action: () => setShowImageMenu(true), title: "Image Options"},
-                                    {icon: FiSettings, action: onOpenColorPanel, title: "Settings"},
-                                    {icon: isDark ? FiSun : FiMoon, action: toggleTheme, title: "Toggle Theme"},
-                                ].map(({icon: Icon, action, title}, index) => (
-                                    <motion.button
-                                        key={index}
-                                        whileHover={{scale: 1.05}}
-                                        whileTap={{scale: 0.95}}
-                                        onClick={action}
-                                        className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
-                                        style={getButtonStyle({
-                                            background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                            color: isDark ? "#a1a1aa" : "#71717a",
-                                        })}
-                                        title={title}
-                                    >
-                                        <Icon className="w-3.5 h-3.5"/>
-                                    </motion.button>
-                                ))}
+                                <motion.button
+                                    whileHover={{
+                                        scale: 1.1,
+                                        backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                    }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => setShowImageMenu(true)}
+                                    className="p-1.5 rounded-full transition-colors"
+                                    style={{ color: isDark ? "#9ca3af" : "#6b7280" }}
+                                    title="Imagem"
+                                >
+                                    <FiImage className="w-4 h-4" />
+                                </motion.button>
 
                                 <motion.button
-                                    whileHover={{scale: 1.05}}
-                                    whileTap={{scale: 0.95}}
-                                    onClick={handleReset}
-                                    className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200"
-                                    style={getButtonStyle({
-                                        background: "rgba(239, 68, 68, 0.1)",
-                                        color: "#ef4444",
-                                    })}
-                                    title="Reset Flow"
+                                    whileHover={{
+                                        scale: 1.1,
+                                        backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                    }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={onOpenColorPanel}
+                                    className="p-1.5 rounded-full transition-colors"
+                                    style={{ color: isDark ? "#9ca3af" : "#6b7280" }}
+                                    title="Cores"
                                 >
-                                    <FiRefreshCw className="w-3.5 h-3.5"/>
+                                    <FiSettings className="w-4 h-4" />
+                                </motion.button>
+
+                                <motion.button
+                                    whileHover={{
+                                        scale: 1.1,
+                                        backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                    }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={toggleTheme}
+                                    className="p-1.5 rounded-full transition-colors"
+                                    style={{ color: isDark ? "#9ca3af" : "#6b7280" }}
+                                    title="Toggle Theme"
+                                >
+                                    {isDark ? <FiSun className="w-4 h-4" /> : <FiMoon className="w-4 h-4" />}
+                                </motion.button>
+
+                                <motion.button
+                                    whileHover={{
+                                        scale: 1.1,
+                                        backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                                    }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={handleReset}
+                                    className="p-1.5 rounded-full transition-colors"
+                                    style={{ color: isDark ? "#9ca3af" : "#6b7280" }}
+                                    title="Reset"
+                                >
+                                    <FiRefreshCw className="w-4 h-4" />
                                 </motion.button>
                             </div>
                         </div>
+                        {/* </CHANGE> */}
                     </div>
                 </div>
             </motion.header>
@@ -1694,7 +1669,7 @@ const FlowHeaderWithDialogs = ({
                                     border: "1px solid rgba(239, 68, 68, 0.2)",
                                 }}
                             >
-                                <FiX className="w-5 h-5 text-red-400"/>
+                                <FiX className="w-5 h-5 text-red-400" />
                                 <p
                                     className="text-sm font-medium"
                                     style={{
@@ -1709,8 +1684,8 @@ const FlowHeaderWithDialogs = ({
 
                         <div className="relative z-10 flex justify-end gap-3 p-6 pt-0">
                             <motion.button
-                                whileHover={{scale: 1.02}}
-                                whileTap={{scale: 0.98}}
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
                                 onClick={() => setShowResetDialog(false)}
                                 className="px-6 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
                                 style={{
@@ -1723,8 +1698,8 @@ const FlowHeaderWithDialogs = ({
                                 Cancelar
                             </motion.button>
                             <motion.button
-                                whileHover={{scale: 1.02}}
-                                whileTap={{scale: 0.98}}
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
                                 onClick={confirmReset}
                                 className="px-6 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 flex items-center gap-2"
                                 style={{
@@ -1735,7 +1710,7 @@ const FlowHeaderWithDialogs = ({
                                     fontFamily: "system-ui, -apple-system, sans-serif",
                                 }}
                             >
-                                <FiTrash2 className="w-4 h-4"/>
+                                <FiTrash2 className="w-4 h-4" />
                                 Resetar
                             </motion.button>
                         </div>
@@ -1784,7 +1759,7 @@ const FlowHeaderWithDialogs = ({
                                     className="p-4 rounded-2xl"
                                     style={{
                                         background: `linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(16, 185, 129, 0.2))`,
-                                        boxShadow: "0 12px 25px rgba(34, 197, 94, 0.4), 0 0 30px rgba(34, 197, 94, 0.2)",
+                                        boxShadow: "0 8px 20px rgba(34, 197, 94, 0.4), 0 0 30px rgba(34, 197, 94, 0.2)",
                                         border: "1px solid rgba(34, 197, 94, 0.3)",
                                     }}
                                 >
@@ -1836,7 +1811,7 @@ const FlowHeaderWithDialogs = ({
                                         boxShadow: "0 4px 12px rgba(34, 197, 94, 0.3)",
                                     }}
                                 >
-                                    <FiCheckCircle className="w-6 h-6 text-green-400"/>
+                                    <FiCheckCircle className="w-6 h-6 text-green-400" />
                                 </div>
                                 <div>
                                     <p
@@ -1863,8 +1838,8 @@ const FlowHeaderWithDialogs = ({
 
                         <div className="relative z-10 flex justify-end gap-3 p-6 pt-0">
                             <motion.button
-                                whileHover={{scale: 1.02}}
-                                whileTap={{scale: 0.98}}
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
                                 onClick={() => setShowExecuteDialog(false)}
                                 className="px-8 py-3 text-sm font-semibold rounded-xl transition-all duration-200"
                                 style={{
@@ -1875,7 +1850,7 @@ const FlowHeaderWithDialogs = ({
                                     fontFamily: "system-ui, -apple-system, sans-serif",
                                 }}
                             >
-                                <FiCheckCircle className="w-4 h-4"/>
+                                <FiCheckCircle className="w-4 h-4" />
                                 Perfeito!
                             </motion.button>
                         </div>
@@ -1887,11 +1862,12 @@ const FlowHeaderWithDialogs = ({
 }
 
 const FlowLayout = () => {
-    const {theme, showColorPanel, setShowColorPanel, currentGradient} = useTheme()
+    const { theme, showColorPanel, setShowColorPanel, currentGradient } = useTheme()
     const [mounted, setMounted] = useState(false)
+    // </CHANGE>
     const [workflowActions, setWorkflowActions] = useState<any>(null)
-    const [startPosition, setStartPosition] = useState({x: 250, y: 100})
-    const [mousePosition, setMousePosition] = useState({x: 0, y: 0})
+    const [startPosition, setStartPosition] = useState({ x: 250, y: 100 })
+    const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
     const [componentCount, setComponentCount] = useState(1)
     const [showSidebar, setShowSidebar] = useState(true)
     const [showBot, setShowBot] = useState(false)
@@ -1899,14 +1875,6 @@ const FlowLayout = () => {
     const [flowEdges, setFlowEdges] = useState<any[]>([])
     const [showAIDialog, setShowAIDialog] = useState(false)
     const workflowContainerRef = useRef<HTMLDivElement>(null)
-
-    useEffect(() => {
-        setMounted(true)
-        const savedImage = localStorage.getItem("flow-background-image")
-        if (savedImage) {
-            document.documentElement.style.setProperty("--flow-background-image", `url(${savedImage})`)
-        }
-    }, [])
 
     const toggleSidebar = useCallback(() => {
         setShowSidebar(!showSidebar)
@@ -1926,7 +1894,6 @@ const FlowLayout = () => {
 
     const handleGenerateWorkflow = useCallback(
         (workflow: any) => {
-            // </CHANGE> START
             console.log("Recebendo workflow gerado pela IA...")
             console.log("Estrutura recebida:", {
                 nodes: workflow.nodes?.length || 0,
@@ -1935,27 +1902,108 @@ const FlowLayout = () => {
             })
 
             if (workflowActions?.loadWorkflow) {
-                // O WorkflowBuilder espera o formato direto, não encapsulado
                 workflowActions.loadWorkflow(workflow)
             } else {
                 console.error("workflowActions.loadWorkflow não está disponível")
             }
-            // </CHANGE> END
         },
         [workflowActions],
     )
 
+    useEffect(() => {
+        setMounted(true)
+        const savedImage = localStorage.getItem("flow-background-image")
+        if (savedImage) {
+            document.documentElement.style.setProperty("--flow-background-image", `url(${savedImage})`)
+        }
+    }, [])
+    // </CHANGE>
+
     if (!mounted) {
         return (
-            <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-                <div className="text-lg">Carregando Construtor de Fluxo...</div>
+            <div
+                className="flex flex-col items-center justify-center h-screen relative overflow-hidden"
+                style={{
+                    background: "linear-gradient(135deg, #1e293b 0%, #0f172a 50%, #020617 100%)",
+                }}
+            >
+                <div className="absolute inset-0 overflow-hidden">
+                    <motion.div
+                        animate={{
+                            scale: [1, 1.2, 1],
+                            opacity: [0.3, 0.5, 0.3],
+                        }}
+                        transition={{
+                            duration: 4,
+                            repeat: Number.POSITIVE_INFINITY,
+                            ease: "easeInOut",
+                        }}
+                        className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full blur-3xl"
+                        style={{
+                            background: "radial-gradient(circle, rgba(168, 85, 247, 0.4) 0%, transparent 70%)",
+                        }}
+                    />
+                    <motion.div
+                        animate={{
+                            scale: [1.2, 1, 1.2],
+                            opacity: [0.3, 0.5, 0.3],
+                        }}
+                        transition={{
+                            duration: 4,
+                            repeat: Number.POSITIVE_INFINITY,
+                            ease: "easeInOut",
+                            delay: 0.5,
+                        }}
+                        className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full blur-3xl"
+                        style={{
+                            background: "radial-gradient(circle, rgba(236, 72, 153, 0.4) 0%, transparent 70%)",
+                        }}
+                    />
+                </div>
+
+                <div className="relative z-10 flex flex-col items-center space-y-8">
+                    <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{
+                            duration: 2,
+                            repeat: Number.POSITIVE_INFINITY,
+                            ease: "linear",
+                        }}
+                        className="w-16 h-16 rounded-full border-4 border-transparent"
+                        style={{
+                            borderTopColor: "#a855f7",
+                            borderRightColor: "#ec4899",
+                            boxShadow: "0 0 30px rgba(168, 85, 247, 0.5)",
+                        }}
+                    />
+
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="text-center space-y-2"
+                    >
+                        <h2 className="text-2xl font-bold text-white">Workflow Builder</h2>
+                        <motion.p
+                            animate={{ opacity: [0.5, 1, 0.5] }}
+                            transition={{
+                                duration: 2,
+                                repeat: Number.POSITIVE_INFINITY,
+                                ease: "easeInOut",
+                            }}
+                            className="text-sm text-gray-400"
+                        >
+                            Preparando seu ambiente...
+                        </motion.p>
+                    </motion.div>
+                </div>
             </div>
         )
     }
 
     return (
         <div className={`flex flex-col h-screen flow-background ${theme === "dark" ? "bg-black" : "bg-gray-50"}`}>
-            <FlowElegantSidebar currentGradient={currentGradient} theme={theme}/>
+            <FlowElegantSidebar currentGradient={currentGradient} theme={theme} />
 
             <FlowHeaderWithDialogs
                 onZoomIn={workflowActions?.zoomIn}
@@ -1991,7 +2039,7 @@ const FlowLayout = () => {
                 />
             </main>
 
-            <YenFlowBot isOpen={showBot} onClose={closeBot}/>
+            <YenFlowBot isOpen={showBot} onClose={closeBot} />
 
             <AIWorkflowDialog
                 open={showAIDialog}
@@ -1999,7 +2047,7 @@ const FlowLayout = () => {
                 onWorkflowGenerated={handleGenerateWorkflow}
             />
 
-            {showColorPanel && <ColorPanel/>}
+            {showColorPanel && <ColorPanel />}
         </div>
     )
 }
@@ -2007,7 +2055,7 @@ const FlowLayout = () => {
 const Flow = () => {
     return (
         <ThemeProvider>
-            <FlowLayout/>
+            <FlowLayout />
         </ThemeProvider>
     )
 }

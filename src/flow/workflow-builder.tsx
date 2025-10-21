@@ -19,6 +19,7 @@ import ReactFlow, {
     type NodeTypes,
     type EdgeTypes,
     type Node,
+    type BackgroundVariant,
 } from "reactflow"
 import "reactflow/dist/style.css"
 import { toast } from "@/components/ui/use-toast"
@@ -579,10 +580,8 @@ function WorkflowBuilderInner({
     )
 
     const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-        if (node.id === "start-node") {
-            return
-        }
-        setSelectedNode(node)
+        // Config panel disabled - users can edit nodes inline
+        return
     }, [])
 
     const onPaneClick = useCallback(() => {
@@ -1085,21 +1084,8 @@ function WorkflowBuilderInner({
     ])
 
     const isDark = theme === "dark"
-
-    const getBackgroundProps = () => {
-        return {
-            color: isDark ? currentGradient.glow : "#4a5568",
-            gap: 20,
-            size: isDark ? 3 : 2,
-            variant: "dots" as const,
-            style: {
-                filter: isDark
-                    ? `drop-shadow(0 0 6px ${currentGradient.glow}) drop-shadow(0 0 12px ${currentGradient.glow}80) drop-shadow(0 0 18px ${currentGradient.glow}40)`
-                    : "none",
-                opacity: isDark ? 0.8 : 1,
-            },
-        }
-    }
+    const primaryColor = isDark ? currentGradient.glow : "#4a5568"
+    const glowColor = isDark ? currentGradient.glow : "#4a5568"
 
     const getMiniMapProps = () => {
         return {
@@ -1172,7 +1158,16 @@ function WorkflowBuilderInner({
                         className={isDark ? "dark" : ""}
                         proOptions={{ hideAttribution: true }}
                     >
-                        <Background {...getBackgroundProps()} />
+                        <Background
+                            variant={"dots" as BackgroundVariant}
+                            color={primaryColor}
+                            gap={16}
+                            size={1}
+                            style={{
+                                filter: `drop-shadow(0 0 10px ${glowColor}40)`,
+                                opacity: 0.3,
+                            }}
+                        />
                         <Controls showZoom={false} showFitView={false} showInteractive={false} />
                         <MiniMap {...getMiniMapProps()} />
                     </ReactFlow>
