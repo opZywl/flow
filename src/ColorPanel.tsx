@@ -334,6 +334,49 @@ const ColorPanel: React.FC = () => {
                         {t("colorPanel.predefinedThemes")}
                     </h4>
 
+                    <button
+                        onClick={() =>
+                            setGradientTheme({
+                                name: "Dark Pure",
+                                primary: "linear-gradient(135deg, #000000 0%, #1a1a1a 100%)",
+                                secondary: "linear-gradient(135deg, #000000CC 0%, #1a1a1aCC 100%)",
+                                accent: "linear-gradient(135deg, #000000 0%, #1a1a1a 50%, #2a2a2a 100%)",
+                                glow: "#00000099",
+                            })
+                        }
+                        className={`w-full p-3 rounded-lg transition-all duration-300 transform hover:scale-[1.02] group relative overflow-hidden panel-glow ${
+                            currentGradient?.name === "Dark Pure"
+                                ? `ring-2 ring-blue-500 ring-offset-2 ${theme === "dark" ? "ring-offset-gray-900" : "ring-offset-white"}`
+                                : ""
+                        }`}
+                        style={{
+                            background: theme === "dark" ? "#2a2a2a" : "#f8fafc",
+                            border: theme === "dark" ? "1px solid #3a3a3a" : "1px solid #e2e8f0",
+                        }}
+                    >
+                        <div className="relative z-10 flex items-center space-x-3">
+                            <div className="flex space-x-1">
+                                <div className="w-6 h-6 rounded-full shadow-lg panel-glow" style={{ background: "#000000" }} />
+                                <div className="w-6 h-6 rounded-full shadow-lg panel-glow" style={{ background: "#1a1a1a" }} />
+                                <div className="w-6 h-6 rounded-full shadow-lg panel-glow" style={{ background: "#2a2a2a" }} />
+                            </div>
+
+                            <div className="flex-1 text-left">
+                                <div className={`font-medium ${theme === "dark" ? "text-white" : "text-gray-900"} glow-title`}>
+                                    Dark Pure
+                                </div>
+                                <div className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"} fade-text`}>
+                                    {currentGradient?.name === "Dark Pure" ? t("common.active") : t("colorPanel.clickToApply")}
+                                </div>
+                            </div>
+
+                            <div
+                                className="w-16 h-8 rounded-lg shadow-lg panel-glow"
+                                style={{ background: "linear-gradient(135deg, #000000 0%, #2a2a2a 100%)" }}
+                            />
+                        </div>
+                    </button>
+
                     {safeGradientThemes.map((gradient, index) => {
                         const isActive = currentGradient?.name === gradient.name
                         const ringOffsetClass = theme === "dark" ? "ring-offset-gray-900" : "ring-offset-white"
