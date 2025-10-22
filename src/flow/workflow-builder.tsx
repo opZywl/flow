@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useCallback, useRef, useEffect } from "react"
-import { FiSave, FiLayers } from "react-icons/fi"
+import { FiSave, FiLayers, FiMaximize, FiMinimize } from "react-icons/fi"
 import { motion } from "framer-motion"
 
 import ReactFlow, {
@@ -342,6 +342,7 @@ function WorkflowBuilderInner({
     const [showErrorDialog, setShowErrorDialog] = useState(false)
     const [errorMessage, setErrorMessage] = useState("")
     const [disconnectedNodes, setDisconnectedNodes] = useState<string[]>([])
+    const [isMinimapFullscreen, setIsMinimapFullscreen] = useState(false)
     const { zoomIn, zoomOut, fitView, setCenter } = useReactFlow()
 
     // Garantir persistência do localStorage
@@ -1046,7 +1047,7 @@ function WorkflowBuilderInner({
         }
     }, [nodes, edges, nodeCounters, validateConnectivity])
 
-    // Auto-salvar a cada mudança
+    // Auto-salvar a cada<bos> mudança
     useEffect(() => {
         if (nodes.length > 0) {
             const workflow = { nodes, edges, nodeCounters }
@@ -1107,12 +1108,13 @@ function WorkflowBuilderInner({
                     return "#9CA3AF"
                 }
             },
-            maskColor: isDark ? "rgba(0, 0, 0, 0.6)" : "rgba(255, 255, 255, 0.8)",
+            maskColor: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(255, 255, 255, 0.85)",
             style: {
-                backgroundColor: isDark ? "#111827" : "#F9FAFB",
-                border: isDark ? `1px solid ${currentGradient.glow}40` : "1px solid #E5E7EB",
-                borderRadius: "8px",
+                backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
+                border: isDark ? `2px solid ${currentGradient.glow}50` : "2px solid #d1d5db",
+                borderRadius: "12px",
             },
+            position: "bottom-right" as const,
         }
     }
 
@@ -1124,6 +1126,8 @@ function WorkflowBuilderInner({
                 <div
                     className="w-64 p-4 transition-all duration-300"
                     style={{
+                        marginTop: "60px", // Add margin to prevent overlap with header
+                        height: "calc(100vh - 60px)", // Adjust height to account for header
                         background: isDark
                             ? `linear-gradient(135deg, rgba(0,0,0,0.4) 0%, ${currentGradient.primary}10 50%, rgba(0,0,0,0.4) 100%)`
                             : `linear-gradient(135deg, rgba(255,255,255,0.4) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.4) 100%)`,
@@ -1136,7 +1140,7 @@ function WorkflowBuilderInner({
             )}
 
             <div className="flex-1 flex flex-col">
-                <div className="flex-1" ref={reactFlowWrapper}>
+                <div className="flex-1 relative" ref={reactFlowWrapper}>
                     <ReactFlow
                         nodes={nodes}
                         edges={edges}
