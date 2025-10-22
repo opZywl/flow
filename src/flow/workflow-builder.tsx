@@ -912,6 +912,9 @@ function WorkflowBuilderInner({
     )
 
     const executeWorkflow = useCallback(() => {
+        console.log("executeWorkflow called")
+        console.log("nodes.length:", nodes.length)
+
         if (nodes.length <= 1) {
             toast({
                 title: "Nada para executar",
@@ -921,30 +924,46 @@ function WorkflowBuilderInner({
             return false
         }
 
+        console.log("Validating connectivity...")
         const validation = validateConnectivity()
+        console.log("Validation result:", validation)
+
         if (!validation.isValid) {
             setDisconnectedNodes(validation.disconnected)
             setShowValidationDialog(true)
-            return false // Return false to indicate execution failed
+            return false
         }
 
+        console.log("Saving workflow to localStorage...")
         // PRIMEIRO: Salvar o estado atual no localStorage com chave persistente
         const workflow = { nodes, edges, nodeCounters }
         const workflowString = JSON.stringify(workflow)
         localStorage.setItem(WORKFLOW_KEY, workflowString)
+        console.log("Workflow saved:", workflowString.substring(0, 100) + "...")
 
         // DEPOIS: Marcar como executado com chave persistente
         localStorage.setItem(EXECUTED_KEY, "true")
+        console.log("Execution flag set to true")
 
         toast({
             title: "✅ Fluxo executado com sucesso!",
-            description: "Fluxo atual salvo e executado - bot atualizado!",
+            description: "Abra o Bot para testar seu fluxo agora!",
+            duration: 5000,
         })
 
+        console.log("Dispatching storage event...")
         window.dispatchEvent(new Event("storage"))
+        console.log("Execute workflow completed successfully")
 
-        return true // Return true to indicate successful execution
-    }, [nodes, edges, nodeCounters, validateConnectivity])
+        if (onOpenBot) {
+            console.log("Opening bot automatically...")
+            setTimeout(() => {
+                onOpenBot()
+            }, 500)
+        }
+
+        return true
+    }, [nodes, edges, nodeCounters, validateConnectivity, onOpenBot])
 
     const resetWorkflow = useCallback(() => {
         const emptyWorkflow = createEmptyWorkflow()
@@ -1301,7 +1320,7 @@ function WorkflowBuilderInner({
                         style={{
                             background: isDark
                                 ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${currentGradient.primary}15 50%, rgba(0,0,0,0.95) 100%)`
-                                : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}10 50%, rgba(255,255,255,0.95) 100%)`,
+                                : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.95) 100%)`,
                             border: isDark ? `1px solid ${currentGradient.glow}40` : `1px solid ${currentGradient.primary}30`,
                             boxShadow: isDark
                                 ? `0 25px 50px -12px rgba(0,0,0,0.8), 0 0 40px ${currentGradient.glow}30`
