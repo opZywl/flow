@@ -342,6 +342,7 @@ const ColorPanel: React.FC = () => {
                                 secondary: "linear-gradient(135deg, #000000CC 0%, #1a1a1aCC 100%)",
                                 accent: "linear-gradient(135deg, #000000 0%, #1a1a1a 50%, #2a2a2a 100%)",
                                 glow: "#00000099",
+                                headerBg: "#000000", // Added headerBg for pure black header
                             })
                         }
                         className={`w-full p-3 rounded-lg transition-all duration-300 transform hover:scale-[1.02] group relative overflow-hidden panel-glow ${
@@ -373,6 +374,50 @@ const ColorPanel: React.FC = () => {
                             <div
                                 className="w-16 h-8 rounded-lg shadow-lg panel-glow"
                                 style={{ background: "linear-gradient(135deg, #000000 0%, #2a2a2a 100%)" }}
+                            />
+                        </div>
+                    </button>
+
+                    <button
+                        onClick={() =>
+                            setGradientTheme({
+                                name: "Dark Blue",
+                                primary: "linear-gradient(135deg, #1e293b 0%, #334155 100%)",
+                                secondary: "linear-gradient(135deg, #1e293bCC 0%, #334155CC 100%)",
+                                accent: "linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%)",
+                                glow: "#334155",
+                                headerBg: "#1e293b", // Added headerBg for dark blue header
+                            })
+                        }
+                        className={`w-full p-3 rounded-lg transition-all duration-300 transform hover:scale-[1.02] group relative overflow-hidden panel-glow ${
+                            currentGradient?.name === "Dark Blue"
+                                ? `ring-2 ring-blue-500 ring-offset-2 ${theme === "dark" ? "ring-offset-gray-900" : "ring-offset-white"}`
+                                : ""
+                        }`}
+                        style={{
+                            background: theme === "dark" ? "#2a2a2a" : "#f8fafc",
+                            border: theme === "dark" ? "1px solid #3a3a3a" : "1px solid #e2e8f0",
+                        }}
+                    >
+                        <div className="relative z-10 flex items-center space-x-3">
+                            <div className="flex space-x-1">
+                                <div className="w-6 h-6 rounded-full shadow-lg panel-glow" style={{ background: "#1e293b" }} />
+                                <div className="w-6 h-6 rounded-full shadow-lg panel-glow" style={{ background: "#334155" }} />
+                                <div className="w-6 h-6 rounded-full shadow-lg panel-glow" style={{ background: "#475569" }} />
+                            </div>
+
+                            <div className="flex-1 text-left">
+                                <div className={`font-medium ${theme === "dark" ? "text-white" : "text-gray-900"} glow-title`}>
+                                    Dark Blue
+                                </div>
+                                <div className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"} fade-text`}>
+                                    {currentGradient?.name === "Dark Blue" ? t("common.active") : t("colorPanel.clickToApply")}
+                                </div>
+                            </div>
+
+                            <div
+                                className="w-16 h-8 rounded-lg shadow-lg panel-glow"
+                                style={{ background: "linear-gradient(135deg, #1e293b 0%, #475569 100%)" }}
                             />
                         </div>
                     </button>
