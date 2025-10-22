@@ -364,10 +364,10 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                         </div>
                         <div className="flex-1">
                             <DialogTitle className={`text-2xl font-semibold mb-1 ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
-                                Criar Workflow com IA
+                                Criar Fluxograma com IA
                             </DialogTitle>
                             <DialogDescription className={`text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-                                Descreva o workflow que deseja criar ou faça upload de uma imagem de referência
+                                Descreva o fluxograma que deseja criar ou faça upload de uma imagem de referência
                             </DialogDescription>
                         </div>
                     </div>
@@ -775,7 +775,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                             ) : (
                                 <>
                                     <Sparkles className="h-4 w-4 mr-2" />
-                                    Gerar Workflow
+                                    Iniciar
                                 </>
                             )}
                         </Button>
