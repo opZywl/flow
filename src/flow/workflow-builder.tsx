@@ -57,12 +57,36 @@ const MINIMAP_CLASS = "!m-3 overflow-hidden rounded-xl border border-flow-border
 const DEFAULT_NODE_SIZE: Size = { width: 280, height: 160 }
 const NO_INVALID_NODES: ReadonlySet<string> = new Set()
 const ID_SEPARATOR = "\u0000"
+const CANVAS_HINTS: ReadonlyArray<readonly [string, string]> = [
+  ['[id^="react-flow__node-desc-"]', "Pressione Enter ou Espaço para selecionar o componente. Depois, use as setas para movê-lo, Delete para removê-lo e Esc para cancelar."],
+  ['[id^="react-flow__edge-desc-"]', "Pressione Enter ou Espaço para selecionar a conexão. Depois, use Delete para removê-la ou Esc para cancelar."],
+]
+const MOVE_DIRECTIONS: Record<string, string> = { up: "para cima", down: "para baixo", left: "para a esquerda", right: "para a direita" }
+const MOVE_MESSAGE = /^Moved selected node (\w+)\. New position, x: (-?\d+), y: (-?\d+)$/
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
 const formatPoint = (point?: XYPosition | null) => (point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "—")
 const isTypingTarget = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
 const minimapColor = (node: Node<AtendimentoData>) => getComponentColor(node.data.type)
+const minimapClass = (node: Node<AtendimentoData>) => (node.data.type === START_TYPE ? "fill-flow-success" : "")
+
+function translateCanvasAnnouncements(root: HTMLElement) {
+  for (const [selector, text] of CANVAS_HINTS) {
+    const texts = Array.from(root.querySelector(selector)?.childNodes ?? []).filter((child) => child.nodeType === child.TEXT_NODE)
+    texts.forEach((child, index) => {
+      child.nodeValue = index === 0 ? text : ""
+    })
+  }
+  const live = root.querySelector('[id^="react-flow__aria-live-"]')
+  if (!live) return () => {}
+  const observer = new MutationObserver(() => {
+    const match = MOVE_MESSAGE.exec(live.textContent ?? "")
+    if (match) live.textContent = `Componente movido ${MOVE_DIRECTIONS[match[1]] ?? ""}. Nova posição: x ${match[2]}, y ${match[3]}.`
+  })
+  observer.observe(live, { childList: true, characterData: true, subtree: true })
+  return () => observer.disconnect()
+}
 
 function ToolButton({ label, icon: Icon, pressed, title, className, ...props }: ToolButtonProps) {
   return (
@@ -498,8 +522,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setSelectedNodes([node.id])
     setSelectedEdges([])
     const size = sizes[node.id] || DEFAULT_NODE_SIZE
-    void setCenter(node.position.x + size.width / 2, node.position.y + size.height / 2, { zoom: Math.max(getViewport().zoom, 0.9), duration: 300 })
-    syncViewport(350)
+    const zoom = Math.max(getViewport().zoom, 0.9)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      void setCenter(node.position.x + size.width / 2, node.position.y + size.height / 2, { zoom, duration: 300 })
+      syncViewport(350)
+    }))
   }, [getViewport, setCenter, sizes, syncViewport])
 
   const selectIssue = useCallback((node: AtendimentoNode) => {
@@ -618,6 +645,21 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
+  useEffect(() => {
+    const releaseCanvasKeys = (event: FocusEvent) => {
+      if (!isTypingTarget(event.target)) return
+      window.dispatchEvent(new Event("blur"))
+      window.dispatchEvent(new Event("focus"))
+    }
+    document.addEventListener("focusin", releaseCanvasKeys)
+    return () => document.removeEventListener("focusin", releaseCanvasKeys)
+  }, [])
+
+  useEffect(() => {
+    const root = canvas.current
+    return root ? translateCanvasAnnouncements(root) : undefined
   }, [])
 
   const addComponent = useCallback((type: string, position?: XYPosition) => {
@@ -1004,6 +1046,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
                       zoomable
                       ariaLabel="Minimapa"
                       nodeColor={minimapColor}
+                      nodeClassName={minimapClass}
                       nodeBorderRadius={16}
                       className={MINIMAP_CLASS}
                     />
@@ -1070,7 +1113,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
           </DialogHeader>
           <DialogFooter className="gap-2 sm:space-x-0">
             <button type="button" className={ui.button} onClick={() => setConfirmReset(false)}>Cancelar</button>
-            <button type="button" className={cn(ui.primaryButton, "bg-flow-danger focus-visible:ring-flow-danger/40")} onClick={confirmNewFlow}>Criar novo fluxo</button>
+            <button type="button" className={cn(ui.primaryButton, "bg-flow-danger text-flow-surface focus-visible:ring-flow-danger/40")} onClick={confirmNewFlow}>Criar novo fluxo</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -29,9 +29,9 @@
   --flow-fg: 9 9 11;
   --flow-muted: 113 113 122;
   --flow-muted-strong: 39 39 42;
-  --flow-success: 22 163 74;
-  --flow-warning: 217 119 6;
-  --flow-danger: 220 38 38;
+  --flow-success: 21 117 57;
+  --flow-warning: 166 75 11;
+  --flow-danger: 197 31 31;
 }
 
 @layer base {

@@ -6,7 +6,7 @@ import { START_TYPE, getComponentColor, getComponentLabel, getDefinition, newTim
 import { isObject, nextOptionDigit, optionIndices } from "@/lib/atendimento/format"
 import type { AtendimentoNode, FieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
-import { componentIcon } from "./nodes/atendimento-node"
+import { categoryTint, componentIcon } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
 const technicalLabels: Record<string, string> = {
@@ -519,8 +519,8 @@ export default function NodeConfigPanel({ node, updateData, removeOption, onClos
       <header className="flex items-center justify-between gap-3 border-b border-flow-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span
-            className={cn("inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", isStart ? "bg-flow-success text-white" : "bg-flow-soft")}
-            style={isStart ? undefined : { color }}
+            className={cn("inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", isStart && "bg-flow-success text-white")}
+            style={isStart ? undefined : { color: categoryTint(color), backgroundColor: `color-mix(in srgb, ${color} 14%, transparent)` }}
           >
             <Icon className="h-4 w-4" aria-hidden />
           </span>

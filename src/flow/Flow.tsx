@@ -13,7 +13,7 @@ import { emptyPreview, replyPreview, startPreview, type PreviewState } from "@/l
 import type { AtendimentoFlow } from "@/lib/atendimento/types"
 import { useTheme } from "../ThemeContext"
 import WorkflowBuilder, { type WorkflowActions } from "./workflow-builder"
-import { componentIcon, nodeSummary } from "./nodes/atendimento-node"
+import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
 const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
@@ -163,7 +163,7 @@ function searchItems(raw: string | null): SearchItem[] {
       id: node.id,
       label,
       detail: summary || getCategory(type)?.label || type,
-      color: getComponentColor(type),
+      color: type === START_TYPE ? "rgb(var(--flow-success))" : getComponentColor(type),
       icon: componentIcon(type),
       text: normalizeText(`${node.id} ${label} ${type} ${summary}`),
     }
@@ -342,7 +342,7 @@ function HeaderSearch({ raw, onSearch }: { raw: string | null; onSearch: (query:
                     onClick={() => choose(item)}
                     className={cn("flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors", selected && "bg-flow-accent/10")}
                   >
-                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-soft" style={{ color: item.color }}>
+                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-soft" style={{ color: categoryTint(item.color) }}>
                       <Icon className="h-4 w-4" aria-hidden />
                     </span>
                     <span className="min-w-0 flex-1">

@@ -29,6 +29,8 @@ const icons: Record<string, LucideIcon> = {
 
 export const componentIcon = (type: string): LucideIcon => icons[type] || FileQuestion
 
+export const categoryTint = (color: string) => `color-mix(in srgb, ${color} 75%, rgb(var(--flow-fg)))`
+
 function timeRuleLines(rules: unknown): string[] {
   if (!Array.isArray(rules)) return []
   return rules.filter(isObject).map((rule) => {
@@ -108,7 +110,7 @@ export const AtendimentoNode = memo(function AtendimentoNode({ id, data, selecte
     const start = type === START_TYPE
     const color = start ? SUCCESS_COLOR : getComponentColor(type)
     const cardStyle: CSSProperties = { borderLeftColor: color }
-    const iconStyle: CSSProperties | undefined = start ? undefined : { color }
+    const iconStyle: CSSProperties | undefined = start ? undefined : { color: categoryTint(color) }
     return {
       start,
       known: Boolean(definition),

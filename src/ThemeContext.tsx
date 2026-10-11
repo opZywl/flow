@@ -11,7 +11,7 @@ type GradientTheme = {
     secondary: string
     accent: string
     glow: string
-    headerBg?: string // Added optional headerBg property for custom header backgrounds
+    headerBg?: string
 }
 
 const gradientThemes: GradientTheme[] = [
@@ -94,6 +94,21 @@ interface HomeThemeContextType {
 
 const HomeThemeContext = createContext<HomeThemeContextType | undefined>(undefined)
 
+const CUSTOM_GRADIENT_KEY = "home-gradient-custom"
+const GRADIENT_FIELDS = ["primary", "secondary", "accent", "glow"] as const
+
+function readCustomGradient(name: string): GradientTheme | undefined {
+    try {
+        const saved: unknown = JSON.parse(localStorage.getItem(CUSTOM_GRADIENT_KEY) || "null")
+        if (!saved || typeof saved !== "object") return undefined
+        const gradient = saved as Record<string, unknown>
+        if (gradient.name !== name || !GRADIENT_FIELDS.every((field) => typeof gradient[field] === "string")) return undefined
+        return { name, primary: String(gradient.primary), secondary: String(gradient.secondary), accent: String(gradient.accent), glow: String(gradient.glow) }
+    } catch {
+        return undefined
+    }
+}
+
 export const useTheme = (): HomeThemeContextType => {
     const context = useContext(HomeThemeContext)
     if (!context) {
@@ -108,7 +123,7 @@ interface ThemeProviderProps {
 
 export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     const [theme, setTheme] = useState<HomeTheme>("dark")
-    const [currentGradient, setCurrentGradient] = useState<GradientTheme>(gradientThemes[0]) // Blue Purple theme
+    const [currentGradient, setCurrentGradient] = useState<GradientTheme>(gradientThemes[0])
     const [showColorPanel, setShowColorPanel] = useState(false)
     const [showSearch, setShowSearch] = useState(false)
     const [searchQuery, setSearchQuery] = useState("")
@@ -126,7 +141,6 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
     const [showIntegrationsModal, setShowIntegrationsModal] = useState(false)
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
-    // Extract colors from gradient theme
     const extractColorsFromGradient = useCallback((gradient: GradientTheme) => {
         const primaryMatch = gradient.primary.match(/#[0-9a-fA-F]{6}/g)
         if (primaryMatch && primaryMatch.length >= 2) {
@@ -141,7 +155,6 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
         }
     }, [])
 
-    // Apply CSS variables immediately
     const applyCSSVariables = useCallback((gradient: GradientTheme) => {
         const root = document.documentElement
         root.style.setProperty("--gradient-primary", gradient.primary)
@@ -152,12 +165,10 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
         if (gradient.headerBg) {
             root.style.setProperty("--header-bg", gradient.headerBg)
         } else {
-            // Extract first color from primary gradient as fallback
             const match = gradient.primary.match(/#[0-9a-fA-F]{6}/)
             root.style.setProperty("--header-bg", match ? match[0] : "#1e293b")
         }
 
-        // Chat specific variables
         root.style.setProperty("--chat-gradient-primary", gradient.primary)
         root.style.setProperty("--chat-gradient-secondary", gradient.secondary)
         root.style.setProperty("--chat-gradient-accent", gradient.accent)
@@ -165,7 +176,6 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
         root.style.setProperty("--chat-glow-color-light", gradient.glow.replace("0.6", "0.3"))
         root.style.setProperty("--chat-glow-color-strong", gradient.glow.replace("0.6", "0.8"))
 
-        // Additional glow variations
         root.style.setProperty("--glow-color-light", gradient.glow.replace("0.6", "0.3"))
         root.style.setProperty("--glow-color-strong", gradient.glow.replace("0.6", "0.8"))
 
@@ -176,11 +186,9 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
         setFadeColor2(colors.color2)
     }, [extractColorsFromGradient])
 
-    // Apply glow and fade settings
     const applyGlowFadeSettings = useCallback(() => {
         const root = document.documentElement
 
-        // Aplicar configurações de glow
         if (glowEnabled) {
             root.style.setProperty("--glow-intensity", `${glowIntensity / 100}`)
             root.style.setProperty("--glow-thickness", `${glowThickness}px`)
@@ -206,7 +214,6 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
             root.style.setProperty("--glow-animation", "none")
         }
 
-        // Aplicar configurações de fade
         if (fadeEnabled) {
             root.style.setProperty("--fade-color-1", fadeColor1)
             root.style.setProperty("--fade-color-2", fadeColor2)
@@ -233,16 +240,14 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
             }
 
             if (savedGradient) {
-                const gradient = gradientThemes.find((g) => g.name === savedGradient)
+                const gradient = gradientThemes.find((g) => g.name === savedGradient) ?? readCustomGradient(savedGradient)
                 if (gradient) {
                     setCurrentGradient(gradient)
                     applyCSSVariables(gradient)
                 } else {
-                    // Se não encontrar o tema salvo, usa o azul por padrão
                     applyCSSVariables(gradientThemes[0])
                 }
             } else {
-                // Se não há tema salvo, aplica o azul imediatamente
                 applyCSSVariables(gradientThemes[0])
             }
 
@@ -266,9 +271,7 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
                 setFadeColor2(settings.fadeColor2 ?? "#8b5cf6")
                 setFadeSpeed(settings.fadeSpeed ?? 3)
             }
-        } catch (error) {
-            console.log("Error loading theme from localStorage:", error)
-            // Em caso de erro, sempre aplica o tema azul
+        } catch {
             applyCSSVariables(gradientThemes[0])
         }
         setIsLoaded(true)
@@ -279,15 +282,15 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
             try {
                 localStorage.setItem("home-theme", theme)
                 localStorage.setItem("home-gradient", currentGradient.name)
+                if (gradientThemes.some((gradient) => gradient.name === currentGradient.name)) localStorage.removeItem(CUSTOM_GRADIENT_KEY)
+                else localStorage.setItem(CUSTOM_GRADIENT_KEY, JSON.stringify(currentGradient))
                 applyCSSVariables(currentGradient)
 
                 const root = document.documentElement
                 root.classList.remove("home-theme-dark", "home-theme-light")
                 root.classList.add(`home-theme-${theme}`)
                 root.classList.toggle("dark", theme === "dark")
-            } catch (error) {
-                console.log("Error saving theme to localStorage:", error)
-            }
+            } catch {}
         }
     }, [theme, currentGradient, isLoaded, applyCSSVariables])
 
@@ -359,8 +362,8 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
 
     if (!isLoaded) {
         return (
-            <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-                <div className="text-lg">Loading...</div>
+            <div className="h-dvh bg-flow-bg">
+                <span role="status" className="sr-only">Carregando</span>
             </div>
         )
     }
