@@ -135,6 +135,10 @@ Cada push roda checagem de tipos, lint, testes unitários, build de produção e
 testes de navegador, além da análise do CodeQL. A produção sobe na Vercel a
 partir do `main`.
 
+## Autor
+
+O WorkFlow é criado e mantido por **Zywl** ([GitHub](https://github.com/opZywl) · [lucas-lima.xyz](https://lucas-lima.xyz)).
+
 ## Problemas
 
 Achou um bug ou sentiu falta de algo? Me avise abrindo uma
@@ -143,6 +147,8 @@ dados de clientes, tokens ou URLs internas; falhas de segurança vão por um
 [aviso privado](https://github.com/opZywl/flow/security/advisories/new).
 
 ## Licença
+
+Copyright (C) 2026 Zywl.
 
 Este projeto está sob a [GNU General Public License v3.0](LICENSE). A licença
 cobre o código-fonte deste repositório. As dependências mantêm as próprias

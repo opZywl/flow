@@ -138,6 +138,10 @@ scripts/            checks for exported files
 Every push runs type checking, lint, unit tests, the production build and the
 browser tests, plus a CodeQL scan. Production deploys on Vercel from `main`.
 
+## Author
+
+WorkFlow is created and maintained by **Zywl** ([GitHub](https://github.com/opZywl) · [lucas-lima.xyz](https://lucas-lima.xyz)).
+
 ## Issues
 
 If you notice a bug or a missing feature, let me know by opening an
@@ -146,6 +150,8 @@ customer data, tokens or internal URLs; security reports go through a
 [private advisory](https://github.com/opZywl/flow/security/advisories/new).
 
 ## License
+
+Copyright (C) 2026 Zywl.
 
 This project is subject to the [GNU General Public License v3.0](LICENSE). The
 license covers the source code in this repository. Dependencies keep their own

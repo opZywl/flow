@@ -11,6 +11,9 @@ const inter = Inter({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "WorkFlow",
   description: "Editor de fluxos de atendimento compatível com o JSON de Atendimento.",
+  authors: [{ name: "Zywl", url: "https://github.com/opZywl" }],
+  creator: "Zywl",
+  publisher: "Zywl",
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

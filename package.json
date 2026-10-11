@@ -2,6 +2,20 @@
   "name": "flow",
   "version": "0.1.0",
   "private": true,
+  "description": "Editor visual de fluxos de atendimento que exporta no formato JSON da plataforma.",
+  "author": {
+    "name": "Zywl",
+    "url": "https://github.com/opZywl"
+  },
+  "license": "GPL-3.0-only",
+  "homepage": "https://flow-yzy.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/opZywl/flow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/opZywl/flow/issues"
+  },
   "engines": {
     "node": ">=20.9.0"
   },
