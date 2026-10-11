@@ -54,6 +54,7 @@ const library = categories
       .filter((entry) => entry.category === category.id && entry.nativeType !== START_TYPE)
       .map((entry) => ({
         entry,
+        type: entry.defaults ? entry.nativeType : undefined,
         display: keepCompoundWords(entry.label),
         text: normalize([entry.label, category.label, entry.nativeType ?? ""].join(" ")),
       })),
@@ -137,11 +138,11 @@ function NodeLibrary({ onAdd }: { onAdd: (type: string) => void }) {
     else searchRef.current?.focus()
   }
 
-  const choose = (event: MouseEvent<HTMLButtonElement>, entry: ComponentDefinition) => {
-    if (entry.nativeType) {
+  const choose = (event: MouseEvent<HTMLButtonElement>, entry: ComponentDefinition, type?: string) => {
+    if (type) {
       originRef.current = null
       setPending(null)
-      onAdd(entry.nativeType)
+      onAdd(type)
       return
     }
     originRef.current = event.currentTarget
@@ -248,8 +249,7 @@ function NodeLibrary({ onAdd }: { onAdd: (type: string) => void }) {
                     {group.category.label}
                   </h3>
                   <ul aria-labelledby={headingId} className="grid grid-cols-2 gap-1.5">
-                    {group.items.map(({ entry, display }) => {
-                      const type = entry.nativeType
+                    {group.items.map(({ entry, type, display }) => {
                       if (type) {
                         const Icon = componentIcon(type)
                         return (
@@ -260,7 +260,7 @@ function NodeLibrary({ onAdd }: { onAdd: (type: string) => void }) {
                               title={entry.label}
                               draggable
                               onDragStart={(event) => startDrag(event, type)}
-                              onClick={(event) => choose(event, entry)}
+                              onClick={(event) => choose(event, entry, type)}
                               className={cn(tile, tileReady)}
                               style={{ backgroundColor: group.tone }}
                             >
