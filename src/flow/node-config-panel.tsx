@@ -2,12 +2,15 @@
 
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react"
 import { AlertTriangle, ChevronRight, Copy, Plus, Trash2, X } from "lucide-react"
-import { START_TYPE, getComponentColor, getComponentLabel, getDefinition, newTimeRule, weekDayOptions } from "@/lib/atendimento/catalog"
+import { START_TYPE, getComponentColor, getComponentLabel, getDefinition, mirrorKeys, newTimeRule, weekDayOptions } from "@/lib/atendimento/catalog"
 import { isObject, nextOptionDigit, optionIndices } from "@/lib/atendimento/format"
 import type { AtendimentoNode, FieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
 import { categoryTint, componentIcon } from "./nodes/atendimento-node"
 import { ui } from "./ui"
+
+const VIRTUAL_KINDS: ReadonlySet<string> = new Set(["menuOptions", "conditionPairs", "menuNode"])
+const LIST_KINDS: ReadonlySet<string> = new Set(["objectList", "weightedPaths"])
 
 const technicalLabels: Record<string, string> = {
   message: "Mensagem adicional",
@@ -340,7 +343,7 @@ export default function NodeConfigPanel({ node, updateData, removeOption, onClos
     const next: JsonObject = { ...payload }
     if (value === undefined) delete next[key]
     else next[key] = value
-    if (spec?.mirror) next[spec.mirror] = value ?? ""
+    if (spec) for (const mirror of mirrorKeys(spec)) next[mirror] = value ?? ""
     write(next)
   }
   const addOption = () => {
@@ -354,6 +357,25 @@ export default function NodeConfigPanel({ node, updateData, removeOption, onClos
     const hintId = spec.hint ? hintOf(id) : undefined
     if (spec.kind === "timeRules") {
       return <TimeRulesEditor key={spec.key} label={spec.label} value={value} onChange={(rules) => set(spec.key, rules)} />
+    }
+    if (VIRTUAL_KINDS.has(spec.kind)) return null
+    if (LIST_KINDS.has(spec.kind)) {
+      if (!(spec.key in payload) && !(definition?.defaults && spec.key in definition.defaults())) return null
+      return <JsonEditor key={spec.key} label={spec.label} hint={spec.hint} value={value ?? []} onApply={(next) => set(spec.key, next)} onDraft={(dirty) => track(spec.key, dirty)} />
+    }
+    if (spec.kind === "number") {
+      return (
+        <Field key={spec.key} id={id} label={spec.label} hint={spec.hint}>
+          <input
+            id={id}
+            type="number"
+            aria-describedby={hintId}
+            className={ui.input}
+            value={typeof value === "number" ? value : ""}
+            onChange={(event) => set(spec.key, event.target.value === "" ? 0 : Number(event.target.value), spec)}
+          />
+        </Field>
+      )
     }
     if (spec.kind === "json") {
       return <JsonEditor key={spec.key} label={spec.label} hint={spec.hint} value={value ?? []} onApply={(next) => set(spec.key, next)} onDraft={(dirty) => track(spec.key, dirty)} />

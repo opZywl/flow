@@ -1,26 +1,806 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const path = require('node:path')
 const {
-  importFlow, exportFlow, newFlow, newNode, validateFlow, outputHandles, outputLabel, removeMenuOption, createEdge, edgeId,
+  importFlow, exportFlow, newFlow, newNode, validateFlow, outputHandles, outputLabel, removeMenuOption, removeCondition, removeOutput, insertOutput, createEdge, edgeId,
   nextNodeId, maxNumericId, duplicateNode, stampExport, exportFileName, behaviorSignature, nextOptionDigit, cleanDocument,
 } = require('../lib/atendimento/format.ts')
 const {
-  supportedComponents, pendingComponents, componentCatalog, getTemplate, getDefinition, getComponentLabel, getComponentColor, getCategory, START_ID,
+  supportedComponents, pendingComponents, componentCatalog, categories, getTemplate, getDefinition, getComponentLabel, getComponentColor, getCategory, getNodeType,
+  expectedFieldTypes, outputTone, START_ID, START_TYPE,
 } = require('../lib/atendimento/catalog.ts')
 const fieldTypes = require('../lib/atendimento/field-types.json')
+const templates = require('../lib/atendimento/templates.json')
+
+const DATE = new Date('2026-01-15T12:00:00.000Z')
+const API_URL = 'https://example.com/api'
+const INVALID_URL = 'Informe uma URL válida, iniciada por http:// ou https://.'
+const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging', 'deletable']
+const START_KEYS = ['id', 'type', 'position', 'data', 'deletable', 'measured', 'selected', 'dragging']
+const EDGE_KEYS = ['type', 'source', 'sourceHandle', 'target', 'id']
+const TYPE_NAMES = { string: 'texto', number: 'número', boolean: 'verdadeiro ou falso', object: 'objeto', array: 'lista', null: 'nulo' }
+const WRONG_VALUES = [['texto', 'string'], [7, 'number'], [true, 'boolean'], [[], 'array'], [{}, 'object'], [null, 'null']]
+const EMPTY_VALUES = { string: '', array: [], boolean: false }
+const MULTI_TYPES = { 'departamentos.userManager': ['null', 'string', 'object'], 'whatsappCall.ttlMinutes': ['string', 'number'], 'webchatHandoff.ttlHours': ['number', 'string'] }
+
+const SPEC = {
+  trigger_message: {
+    defaults: { title: 'Iniciar Fluxo', buttons: 'false' },
+    outputs: ['Próximo'],
+    measured: [260, 86],
+    html: false,
+  },
+  envio_mensagem: {
+    defaults: { message: '', buttons: 'false', 'df-channel': '', 'opt-1': '1', 'text-1': '', 'description-1': '', title: '' },
+    outputs: ['Opção 1'],
+    measured: [260, 176],
+    html: true,
+    configure: { title: 'Escolha uma opção', 'text-1': 'Primeira opção' },
+    pending: [['error', 'Preencha a mensagem do menu.'], ['error', 'Opção 1: informe o título.']],
+    blank: { title: ['error', 'Preencha a mensagem do menu.'], 'text-1': ['error', 'Opção 1: informe o título.'], 'opt-1': ['error', 'Opção 1: informe o número.'] },
+  },
+  envio_pergunta: {
+    defaults: { envio_pergunta: '', template: '' },
+    outputs: ['Próximo'],
+    measured: [260, 130],
+    html: true,
+    configure: { template: 'Olá, #NAME' },
+    pending: [['error', 'Preencha a mensagem.']],
+    blank: { template: ['error', 'Preencha a mensagem.'] },
+  },
+  departamentos: {
+    defaults: { departamentos: '', 'df-channel': '', id: '', departamento: '' },
+    configured: ['departamentos', 'df-channel', 'id', 'departamento', 'name', 'enabled', 'userManager'],
+    outputs: [],
+    measured: [330, 129],
+    html: true,
+    configure: { id: 'dep-1', departamento: 'dep-1', name: 'Equipe A' },
+    pending: [['warning', 'Informe o ID do departamento.'], ['warning', 'Informe o nome do departamento.']],
+    blank: { departamento: ['warning', 'Informe o ID do departamento.'], name: ['warning', 'Informe o nome do departamento.'] },
+  },
+  tags: {
+    defaults: { id: '', tags: '', message: '', selectedTag: '' },
+    outputs: ['Próximo'],
+    measured: [260, 129],
+    html: true,
+    configure: { id: 'tag-1', tags: 'Cliente novo', selectedTag: 'tag-1' },
+    pending: [['warning', 'Informe o ID da tag.'], ['warning', 'Informe o nome da tag.']],
+    blank: { selectedTag: ['warning', 'Informe o ID da tag.'], tags: ['warning', 'Informe o nome da tag.'] },
+  },
+  flow: {
+    defaults: { id: '' },
+    configured: ['id', 'targetFlow', 'flowName', 'flowDescription'],
+    outputs: [],
+    measured: [260, 129],
+    html: true,
+    configure: { id: 'fluxo-1', targetFlow: 'fluxo-1', flowName: 'Fluxo B' },
+    pending: [['warning', 'Informe o ID do fluxo de destino.'], ['warning', 'Informe o nome do fluxo de destino.']],
+    blank: { targetFlow: ['warning', 'Informe o ID do fluxo de destino.'], flowName: ['warning', 'Informe o nome do fluxo de destino.'] },
+  },
+  finalizar: {
+    defaults: { message: '', 'df-channel': '' },
+    outputs: [],
+    measured: [260, 86],
+    html: true,
+  },
+  timeConditions: {
+    defaults: { timeConditions: '', timeRules: [{ id: '', weekDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], startTime: '08:00', endTime: '17:59' }] },
+    outputs: ['Fora do horário', 'Dentro do horário'],
+    measured: [262, 86],
+    html: true,
+    blank: { timeRules: ['error', 'Cadastre ao menos uma regra de horário.'] },
+  },
+  solicitar_dados: {
+    defaults: { channel: 'other', url_api: '' },
+    configured: ['channel', 'url_api', 'curl', 'method', 'body_value', 'text', 'error', 'parsed_body', 'parameterExplanations', 'tentativas', 'isApiValidated', 'validated_signature', 'headers', 'response_map'],
+    outputs: ['Falha', 'Sucesso'],
+    measured: [260, 138],
+    html: true,
+    configure: { url_api: API_URL, text: 'Informe o número do pedido', error: 'Pedido não encontrado', isApiValidated: true },
+    pending: [['warning', 'Informe a URL da API.'], ['warning', 'Preencha a mensagem de solicitação.']],
+    blank: { url_api: ['warning', 'Informe a URL da API.'], text: ['warning', 'Preencha a mensagem de solicitação.'] },
+  },
+  protocolo: {
+    defaults: { url_api: '', opt: 'Automático', text: 'Seu protocolo é: {protocol}' },
+    outputs: ['Próximo'],
+    measured: [260, 174],
+    html: true,
+  },
+  consulta_api: {
+    defaults: { url_api: '', method: 'POST', text: '' },
+    configured: ['url_api', 'method', 'text', 'curl', 'body_value', 'parsed_body', 'parameterExplanations', 'headers', 'api_test_values', 'isApiValidated', 'validated_signature', 'response_map'],
+    outputs: ['Falha', 'Sucesso'],
+    measured: [260, 138],
+    html: true,
+    configure: { url_api: API_URL, isApiValidated: true },
+    pending: [['warning', 'Informe a URL da API.']],
+    blank: { url_api: ['warning', 'Informe a URL da API.'] },
+  },
+  waitForAnswer: {
+    defaults: { mask: '', customfields: '' },
+    configured: ['mask', 'customfields', 'customFields', 'logToActivity', 'autoSaveContact'],
+    outputs: ['Próximo'],
+    measured: [285, 129],
+    html: true,
+    configure: { customFields: 'name' },
+  },
+  envio_arquivo: {
+    defaults: { imagem: '', url: '', caption: '', filename: '', mime_type: '', voice_note: false },
+    outputs: ['Próximo'],
+    measured: [260, 129],
+    html: true,
+    configure: { url: 'https://example.com/arquivo.pdf', filename: 'arquivo.pdf', mime_type: 'application/pdf' },
+    pending: [['warning', 'Informe a URL do arquivo.']],
+    blank: { url: ['warning', 'Informe a URL do arquivo.'], mime_type: ['warning', 'Informe o tipo do arquivo (MIME).'] },
+  },
+  envio_imagem: {
+    defaults: { imagem: '', url: '', caption: '', filename: '' },
+    outputs: ['Próximo'],
+    measured: [260, 129],
+    html: true,
+    configure: { imagem: 'https://example.com/imagem.png', url: 'https://example.com/imagem.png', filename: 'imagem.png' },
+    pending: [['warning', 'Informe a URL da imagem.']],
+  },
+  templateMessage: {
+    defaults: { templateMessage: '', 'df-channel': '', id: '', templateName: '', templateParams: [] },
+    outputs: ['Próximo'],
+    measured: [261, 138],
+    html: true,
+    configure: { templateMessage: 'modelo-1', id: 'modelo-1', templateName: 'boas_vindas' },
+    pending: [['warning', 'Informe o ID do template.'], ['warning', 'Informe o nome do template.']],
+    blank: { templateMessage: ['warning', 'Informe o ID do template.'], templateName: ['warning', 'Informe o nome do template.'] },
+  },
+  templateInteractive: {
+    defaults: { id: '', templateMessage: '', buttons: 'true', templateName: '', templateParams: [] },
+    outputs: ['Próximo'],
+    measured: [260, 130],
+    html: false,
+    configure: { id: 'modelo-2', templateMessage: 'modelo-2', templateName: 'modelo_interativo' },
+    pending: [['warning', 'Informe o ID do template.'], ['warning', 'Informe o nome do template.']],
+    blank: { templateMessage: ['warning', 'Informe o ID do template.'], templateName: ['warning', 'Informe o nome do template.'] },
+  },
+  whatsappFlow: {
+    defaults: { formId: '', formName: '', metaFlowId: '', firstScreen: '', formFields: [], sendMode: 'interactive', templateName: '', header: '', body: '', footer: '', cta: '', varPrefix: '', outputVar: 'whatsappFlowResponse', crmMap: [], successMessage: '', reminderMessage: '', maxReminders: 1, errorMessage: '' },
+    outputs: ['Respondido', 'Não respondido'],
+    measured: [524, 158],
+    html: false,
+    configure: { formId: 'form-1', formName: 'Formulário de teste', body: 'Preencha o formulário', cta: 'Abrir formulário' },
+    pending: [['warning', 'Informe o ID do formulário ou o ID do Flow na Meta.']],
+    blank: {
+      formId: ['warning', 'Informe o ID do formulário ou o ID do Flow na Meta.'],
+      body: ['warning', 'Preencha o corpo da mensagem.'],
+      cta: ['warning', 'Informe o texto do botão.'],
+      outputVar: ['warning', 'Informe a variável da resposta.'],
+    },
+  },
+  pixCharge: {
+    defaults: { id: '', templateMessage: '', buttons: 'true', templateName: '', templateParams: [] },
+    outputs: ['Próximo'],
+    measured: [260, 130],
+    html: false,
+    configure: { id: 'modelo-3', templateMessage: 'modelo-3', templateName: 'cobranca' },
+    pending: [['warning', 'Informe o ID do template.'], ['warning', 'Informe o nome do template.']],
+    blank: { templateMessage: ['warning', 'Informe o ID do template.'], templateName: ['warning', 'Informe o nome do template.'] },
+  },
+  whatsappCall: {
+    defaults: { mode: 'button', text: '', displayText: '', ttlMinutes: '', respectHours: true, departmentId: '', outsideHoursMessage: '', errorMessage: '' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [528, 158],
+    html: false,
+    configure: { text: 'Toque no botão para ligar', displayText: 'Falar por voz' },
+    pending: [['warning', 'Informe o texto do botão de ligação.']],
+    blank: { displayText: ['warning', 'Informe o texto do botão de ligação.'] },
+  },
+  transferir: {
+    defaults: { 'df-channel': '', id: '', agente: '', agenteName: '' },
+    outputs: [],
+    measured: [274, 138],
+    html: true,
+    configure: { id: 'agente-1', agente: 'agente-1', agenteName: 'Agente A' },
+    pending: [['warning', 'Informe o ID do agente.'], ['warning', 'Informe o nome do agente.']],
+    blank: { agente: ['warning', 'Informe o ID do agente.'], agenteName: ['warning', 'Informe o nome do agente.'] },
+  },
+  backToAgent: {
+    defaults: { backToAgent: '', department: '', 'df-channel': '', id: '', departmentName: '', availableDepartments: [] },
+    outputs: [],
+    measured: [317, 138],
+    html: true,
+    configure: { department: 'dep-1', id: 'dep-1', departmentName: 'Equipe A' },
+    pending: [['warning', 'Informe o ID do departamento.'], ['warning', 'Informe o nome do departamento.']],
+    blank: { department: ['warning', 'Informe o ID do departamento.'], departmentName: ['warning', 'Informe o nome do departamento.'] },
+  },
+  apptService: {
+    defaults: { outputVar: 'appt_serviceId', headerMessage: '', emptyMessage: '', autoSelectSingle: true, selectedIds: [] },
+    outputs: ['Serviço escolhido', 'Nenhum disponível'],
+    measured: [403, 158],
+    html: false,
+    configure: { headerMessage: 'Lista de serviços de teste', emptyMessage: 'Sem serviços no teste' },
+    pending: [['warning', 'Preencha a mensagem da lista.'], ['warning', 'Preencha a mensagem sem serviços.']],
+    blank: {
+      outputVar: ['warning', 'Informe a variável de saída.'],
+      headerMessage: ['warning', 'Preencha a mensagem da lista.'],
+      emptyMessage: ['warning', 'Preencha a mensagem sem serviços.'],
+    },
+  },
+  apptIdentify: {
+    defaults: { contactVar: 'appt_contactId' },
+    outputs: ['Identificado', 'Não identificado'],
+    measured: [508, 140],
+    html: false,
+    blank: { contactVar: ['warning', 'Informe a variável do cliente.'] },
+  },
+  apptLocation: {
+    defaults: { outputVar: 'appt_locationId', headerMessage: '', emptyMessage: '', autoSelectSingle: true, selectedIds: [] },
+    outputs: ['Local escolhido', 'Nenhum disponível'],
+    measured: [394, 158],
+    html: false,
+    configure: { headerMessage: 'Lista de locais de teste', emptyMessage: 'Sem locais no teste' },
+    pending: [['warning', 'Preencha a mensagem da lista.'], ['warning', 'Preencha a mensagem sem locais.']],
+    blank: {
+      outputVar: ['warning', 'Informe a variável de saída.'],
+      headerMessage: ['warning', 'Preencha a mensagem da lista.'],
+      emptyMessage: ['warning', 'Preencha a mensagem sem locais.'],
+    },
+  },
+  apptProvider: {
+    defaults: { outputVar: 'appt_providerId', headerMessage: '', emptyMessage: '', autoSelectSingle: true, selectedIds: [] },
+    outputs: ['Profissional escolhido', 'Nenhum disponível'],
+    measured: [433, 158],
+    html: false,
+    configure: { headerMessage: 'Lista de profissionais de teste', emptyMessage: 'Sem profissionais no teste' },
+    pending: [['warning', 'Preencha a mensagem da lista.'], ['warning', 'Preencha a mensagem sem profissionais.']],
+    blank: {
+      outputVar: ['warning', 'Informe a variável de saída.'],
+      headerMessage: ['warning', 'Preencha a mensagem da lista.'],
+      emptyMessage: ['warning', 'Preencha a mensagem sem profissionais.'],
+    },
+  },
+  apptSlot: {
+    defaults: { outputVar: 'appt_slotStart', headerMessage: '', emptyMessage: '', autoSelectSingle: true },
+    outputs: ['Horário escolhido', 'Nenhum disponível'],
+    measured: [394, 158],
+    html: false,
+    configure: { headerMessage: 'Lista de horários de teste', emptyMessage: 'Sem horários no teste' },
+    pending: [['warning', 'Preencha a mensagem da lista.'], ['warning', 'Preencha a mensagem sem horários.']],
+    blank: {
+      outputVar: ['warning', 'Informe a variável de saída.'],
+      headerMessage: ['warning', 'Preencha a mensagem da lista.'],
+      emptyMessage: ['warning', 'Preencha a mensagem sem horários.'],
+    },
+  },
+  apptCustomerIntake: {
+    defaults: { askName: true, askEmail: false, askNotes: false, introMessage: '', successMessage: '' },
+    outputs: ['Dados registrados', 'Dados não registrados'],
+    measured: [457, 140],
+    html: false,
+    blank: { askName: ['warning', 'Selecione ao menos um dado para pedir ao cliente.'] },
+  },
+  apptBook: {
+    defaults: { outputVar: 'appt_appointmentId', successMessage: '', errorMessage: '', conflictMessage: '' },
+    outputs: ['Agendado', 'Não agendado'],
+    measured: [441, 158],
+    html: false,
+    configure: { successMessage: 'Horário reservado no teste', errorMessage: 'Não foi possível agendar', conflictMessage: 'Esse horário acabou de ser ocupado' },
+    pending: [['warning', 'Preencha a mensagem de confirmação.'], ['warning', 'Preencha a mensagem de horário ocupado.'], ['warning', 'Preencha a mensagem de erro.']],
+    blank: {
+      outputVar: ['warning', 'Informe a variável de saída.'],
+      successMessage: ['warning', 'Preencha a mensagem de confirmação.'],
+      conflictMessage: ['warning', 'Preencha a mensagem de horário ocupado.'],
+      errorMessage: ['warning', 'Preencha a mensagem de erro.'],
+    },
+  },
+  ticketLookup: {
+    defaults: { lookupScope: 'both', outputVar: 'ticketId', headerMessage: '', emptyMessage: '' },
+    outputs: ['Chamado escolhido', 'Nenhum chamado'],
+    measured: [412, 158],
+    html: false,
+    configure: { headerMessage: 'Seus chamados', emptyMessage: 'Nenhum chamado encontrado' },
+    pending: [['warning', 'Preencha a mensagem da lista.'], ['warning', 'Preencha a mensagem sem chamados.']],
+    blank: {
+      lookupScope: ['warning', 'Selecione o escopo da consulta.'],
+      outputVar: ['warning', 'Informe a variável de saída.'],
+      headerMessage: ['warning', 'Preencha a mensagem da lista.'],
+      emptyMessage: ['warning', 'Preencha a mensagem sem chamados.'],
+    },
+  },
+  ticketCreate: {
+    defaults: { formId: '', introMessage: '', successMessage: '', errorMessage: '', subjectFieldKey: 'subject', fallbackQuestion: '', defaultPriority: 'medium', defaultType: 'question', outputVar: 'ticketId' },
+    outputs: ['Chamado aberto', 'Não aberto'],
+    measured: [592, 174],
+    html: false,
+    configure: { fallbackQuestion: 'Descreva o problema', successMessage: 'Chamado {{ticketNumber}} aberto', errorMessage: 'Falha ao abrir no teste' },
+    pending: [['warning', 'Informe o formulário ou a pergunta alternativa.'], ['warning', 'Preencha a mensagem de chamado aberto.'], ['warning', 'Preencha a mensagem de erro.']],
+    blank: {
+      fallbackQuestion: ['warning', 'Informe o formulário ou a pergunta alternativa.'],
+      defaultPriority: ['warning', 'Selecione a prioridade padrão.'],
+      defaultType: ['warning', 'Selecione o tipo padrão.'],
+      successMessage: ['warning', 'Preencha a mensagem de chamado aberto.'],
+      errorMessage: ['warning', 'Preencha a mensagem de erro.'],
+      outputVar: ['warning', 'Informe a variável de saída.'],
+    },
+  },
+  ticketDetail: {
+    defaults: { inputVar: 'ticketId', notFoundMessage: '', actionPrompt: '', commentPrompt: '', csatCommentPrompt: '', enableComment: true, enableReopen: true, enableClose: true, enableCsat: true },
+    outputs: ['Encontrado', 'Não encontrado'],
+    measured: [416, 158],
+    html: false,
+    configure: { notFoundMessage: 'Chamado não encontrado', actionPrompt: 'Escolha uma ação', commentPrompt: 'Escreva o comentário' },
+    pending: [['warning', 'Preencha a mensagem de chamado não encontrado.'], ['warning', 'Preencha a pergunta das ações.'], ['warning', 'Preencha o pedido de comentário.']],
+    blank: {
+      inputVar: ['warning', 'Informe a variável com o ID do chamado.'],
+      notFoundMessage: ['warning', 'Preencha a mensagem de chamado não encontrado.'],
+      actionPrompt: ['warning', 'Preencha a pergunta das ações.'],
+      commentPrompt: ['warning', 'Preencha o pedido de comentário.'],
+    },
+  },
+  crmIdentify: {
+    defaults: { contactVar: 'crmContactName', leadVar: 'crmContactId' },
+    outputs: ['Identificado', 'Não identificado'],
+    measured: [431, 158],
+    html: false,
+    blank: { contactVar: ['warning', 'Informe a variável do contato.'] },
+  },
+  crmContact: {
+    defaults: { introMessage: '', successMessage: '', errorMessage: '', outputVar: 'crmContactId' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [428, 158],
+    html: false,
+    blank: { outputVar: ['warning', 'Informe a variável que recebe o ID do contato.'] },
+  },
+  crmLead: {
+    defaults: { introMessage: '', qualifyPrompt: '', successMessage: '', errorMessage: '', outputVar: 'crmLeadId' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [361, 158],
+    html: false,
+    blank: { outputVar: ['warning', 'Informe a variável que recebe o ID do lead.'] },
+  },
+  crmLeadUpdate: {
+    defaults: { inputVar: 'crmLeadId', setStatus: '', addTags: '', setValue: '', doneMessage: '' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [366, 158],
+    html: false,
+    configure: { setStatus: 'qualificado' },
+    pending: [['warning', 'Defina ao menos uma alteração: status, tags ou valor.']],
+    blank: { inputVar: ['warning', 'Informe a variável com o ID do lead.'], setStatus: ['warning', 'Defina ao menos uma alteração: status, tags ou valor.'] },
+  },
+  crmActivity: {
+    defaults: { activityType: 'task', title: '', description: '', dueInDays: 1, leadVar: 'crmLeadId', contactVar: 'crmContactId', doneMessage: '' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [397, 158],
+    html: false,
+    configure: { title: 'Retornar o contato' },
+    pending: [['warning', 'Informe o título da atividade.']],
+    blank: { title: ['warning', 'Informe o título da atividade.'], activityType: ['warning', 'Selecione o tipo de atividade.'] },
+  },
+  sequenceEnroll: {
+    defaults: { sequenceId: '', sequenceName: '', createContact: true },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [434, 140],
+    html: false,
+    configure: { sequenceId: 'lista-1', sequenceName: 'Lista A' },
+    pending: [['warning', 'Informe o ID da lista.']],
+    blank: { sequenceId: ['warning', 'Informe o ID da lista.'], sequenceName: ['warning', 'Informe o nome da lista.'] },
+  },
+  sequenceUnenroll: {
+    defaults: { sequenceId: '', sequenceName: '', allSequences: false },
+    outputs: ['Próximo'],
+    measured: [275, 122],
+    html: false,
+    configure: { sequenceId: 'lista-1', sequenceName: 'Lista A' },
+    pending: [['warning', 'Informe o ID da lista ou marque Remover de todas as listas.']],
+    blank: { sequenceId: ['warning', 'Informe o ID da lista ou marque Remover de todas as listas.'] },
+  },
+  webchatHandoff: {
+    defaults: { widgetId: '', message: '', ttlHours: 24, targetMode: 'widgetFlow', targetFlowId: '', targetDepartmentId: '', welcomeMessage: '', carryVariables: true, closeSource: true, outputVar: 'webchatLink', errorMessage: '' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [429, 158],
+    html: false,
+    configure: { widgetId: 'widget-1', message: 'Continue pelo link {{link}}' },
+    pending: [['warning', 'Informe o ID do widget do chat.'], ['warning', 'Preencha a mensagem com o link do chat.']],
+    blank: { widgetId: ['warning', 'Informe o ID do widget do chat.'], message: ['warning', 'Preencha a mensagem com o link do chat.'] },
+  },
+  note: {
+    node: 'note',
+    defaults: { text: '', color: 'yellow' },
+    outputs: [],
+    measured: [240, 96],
+    html: false,
+    configure: { text: 'Revisar este trecho' },
+  },
+  voltar: {
+    defaults: { id: '' },
+    configured: ['id', 'targetNodeId', 'availableNodes', 'targetNodeName', 'title', 'description'],
+    outputs: [],
+    measured: [260, 129],
+    html: true,
+    menu: true,
+    configure: { id: '20', targetNodeId: '20', availableNodes: [{ id: '20', value: '20', name: 'Menu principal' }], targetNodeName: 'Menu principal' },
+    pending: [['warning', 'Selecione o menu de destino.']],
+    blank: { targetNodeId: ['warning', 'Selecione o menu de destino.'] },
+  },
+  randomizer: {
+    defaults: { paths: [{ label: 'Caminho A', weight: 50 }, { label: 'Caminho B', weight: 50 }], variable: '', sticky: true },
+    outputs: ['Caminho A', 'Caminho B'],
+    measured: [449, 140],
+    html: false,
+    blank: { paths: ['error', 'Cadastre ao menos dois caminhos.'] },
+  },
+  languageRouter: {
+    defaults: { variable: 'idioma', fallback: 'pt', sticky: true },
+    outputs: ['Português', 'Inglês', 'Espanhol', 'Outro idioma'],
+    measured: [382, 196],
+    html: false,
+    blank: { fallback: ['warning', 'Selecione o idioma padrão.'] },
+  },
+  adCondition: {
+    defaults: { adMatch: 'campaign', adIds: '', adText: '' },
+    outputs: ['Sim', 'Não'],
+    measured: [382, 140],
+    html: false,
+    blank: { adMatch: ['warning', 'Selecione como identificar o anúncio.'] },
+  },
+  waiting_time: {
+    defaults: { waiting_time: '', 'df-waiting_time': '', id: '' },
+    outputs: ['Próximo'],
+    measured: [260, 129],
+    html: true,
+    configure: { waiting_time: '5000', id: '5000' },
+    pending: [['warning', 'Selecione o tempo de espera.']],
+    blank: { waiting_time: ['warning', 'Selecione o tempo de espera.'] },
+  },
+  aiAgentBlock: {
+    defaults: { openai: 'Generative_AI', generative_ai: '', generativeAiName: '', fields: [], exits: [], maxTurns: 15, timeoutMinutes: 0 },
+    outputs: ['Sem conclusão'],
+    measured: [452, 168],
+    html: false,
+    configure: { generative_ai: 'agente-ia-1', generativeAiName: 'Assistente', exits: [{ name: 'Resolvido', when: 'Quando o contato confirmar a solução', requireFields: false }] },
+    pending: [['warning', 'Informe o ID do agente de IA.'], ['warning', 'Cadastre ao menos uma saída para o agente.']],
+    blank: {
+      generative_ai: ['warning', 'Informe o ID do agente de IA.'],
+      generativeAiName: ['warning', 'Informe o nome do agente de IA.'],
+      exits: ['warning', 'Cadastre ao menos uma saída para o agente.'],
+    },
+  },
+  OpenAI: {
+    defaults: { openai: '', 'df-OpenAI': '', aiProvider: 'IA Generativa', aiModel: '' },
+    outputs: [],
+    measured: [260, 102],
+    html: true,
+  },
+  googleSheetsAppend: {
+    defaults: { spreadsheet: '', sheetName: '', columns: [{ header: 'Data', value: '{{DATE_TIME_BRAZIL}}' }, { header: 'Nome', value: '{{nome}}' }, { header: 'Telefone', value: '{{telefone}}' }], resultVar: '' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [502, 140],
+    html: false,
+    configure: { spreadsheet: 'planilha-1', sheetName: 'Contatos' },
+    pending: [['warning', 'Informe a planilha.']],
+    blank: { spreadsheet: ['warning', 'Informe a planilha.'], columns: ['warning', 'Cadastre ao menos uma coluna.'] },
+  },
+  rdStationConversion: {
+    defaults: { conversionIdentifier: 'chatbot-whatsapp', email: '{{email}}', contactName: '{{nome}}', phone: '{{telefone}}', company: '', jobTitle: '', city: '', state: '', tags: '', customFields: [], legalBasis: '', resultVar: '' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [492, 140],
+    html: false,
+    blank: { conversionIdentifier: ['warning', 'Informe o identificador da conversão.'], email: ['warning', 'Informe o e-mail do contato.'] },
+  },
+  hubspotUpsertContact: {
+    defaults: { email: '{{email}}', contactName: '{{nome}}', phone: '{{telefone}}', company: '', jobTitle: '', lifecyclestage: '', properties: [], resultVar: 'hubspot_id' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [499, 140],
+    html: false,
+    blank: { email: ['warning', 'Informe o e-mail do contato.'] },
+  },
+  multiple_condicional_api: {
+    defaults: { 'var-1': '', 'value-1': '' },
+    outputs: ['Condição 1'],
+    measured: [289, 142],
+    html: true,
+    configure: { 'var-1': 'plano', 'value-1': 'premium' },
+    pending: [['warning', 'Condição 1: informe a variável.']],
+    blank: { 'var-1': ['warning', 'Condição 1: informe a variável.'] },
+  },
+  Data_Input_Condicional: {
+    defaults: { field: '', validation: '', conditions: [] },
+    outputs: ['Válido', 'Inválido'],
+    measured: [332, 102],
+    html: false,
+    configure: { field: 'campo_teste' },
+    pending: [['warning', 'Informe o campo avaliado.']],
+    blank: { field: ['warning', 'Informe o campo avaliado.'] },
+  },
+  External_Message_Http: {
+    defaults: { url_api: '', method: 'POST' },
+    outputs: ['Falha', 'Sucesso'],
+    measured: [303, 138],
+    html: true,
+    configure: { url_api: API_URL },
+    pending: [['warning', 'Informe a URL da API.']],
+    blank: { url_api: ['warning', 'Informe a URL da API.'] },
+  },
+  condicional_api: {
+    defaults: { condition: 'Diferente de' },
+    configured: ['condition', 'key', 'value'],
+    outputs: ['Falso', 'Verdadeiro'],
+    measured: [260, 138],
+    html: true,
+    configure: { key: 'status', value: 'ativo' },
+    pending: [['warning', 'Informe a chave a comparar.']],
+    blank: { condition: ['warning', 'Escolha a comparação.'], key: ['warning', 'Informe a chave a comparar.'] },
+  },
+  Send_DataStore: {
+    defaults: { url_api: '', method: 'POST' },
+    outputs: ['Próximo'],
+    measured: [267, 138],
+    html: true,
+    configure: { url_api: API_URL },
+    pending: [['warning', 'Informe a URL da API.']],
+    blank: { url_api: ['warning', 'Informe a URL da API.'] },
+  },
+  Local_DataStore: {
+    defaults: { local_datastore: '' },
+    outputs: ['Falha', 'Sucesso'],
+    measured: [260, 129],
+    html: true,
+    configure: { local_datastore: 'contact' },
+    pending: [['warning', 'Escolha a base de dados.']],
+    blank: { local_datastore: ['warning', 'Escolha a base de dados.'] },
+  },
+  envio_boletos: {
+    defaults: { url_api: '', channel: 'Enviar Todos', text: '', url_list: '', url_send: '', menuOptions: '', menuMessage: '', menuTransfer: '' },
+    outputs: ['Falha', 'Sucesso'],
+    measured: [260, 138],
+    html: true,
+    configure: { url_list: 'https://example.com/boletos', url_send: 'https://example.com/boletos/envio' },
+    pending: [['warning', 'Informe a URL da API que lista os boletos.'], ['warning', 'Informe a URL da API que envia os boletos.']],
+    blank: { url_list: ['warning', 'Informe a URL da API que lista os boletos.'], url_send: ['warning', 'Informe a URL da API que envia os boletos.'] },
+  },
+  api_options_menu: {
+    node: 'apiOptionsMenu',
+    defaults: { buttons: 'true', message: '', apiUrl: '', menuName: 'Menu de Opções', postUrl: '', variableName: 'option', fallbackDepartment: '', endConversation: 'false', datastore: '' },
+    outputs: ['Sucesso', 'Falha'],
+    measured: [315, 130],
+    html: false,
+    configure: { message: 'Escolha uma opção', apiUrl: 'https://example.com/opcoes' },
+    pending: [['warning', 'Informe a URL da API das opções.'], ['warning', 'Preencha a mensagem do menu.']],
+    blank: {
+      apiUrl: ['warning', 'Informe a URL da API das opções.'],
+      message: ['warning', 'Preencha a mensagem do menu.'],
+      variableName: ['warning', 'Informe a variável da opção escolhida.'],
+    },
+  },
+  Consent: {
+    defaults: {},
+    outputs: ['Aceitou', 'Recusou'],
+    measured: [260, 86],
+    html: false,
+  },
+  sendConversion: {
+    defaults: { eventName: 'Lead', customEventName: '', value: '', currency: 'BRL', onlyFromAd: true },
+    outputs: ['Próximo'],
+    measured: [260, 158],
+    html: false,
+    blank: { eventName: ['warning', 'Informe o evento de conversão.'] },
+  },
+  trackEvent: {
+    defaults: { eventName: '', properties: [], numericValue: '', oncePerConversation: true },
+    outputs: ['Próximo'],
+    measured: [260, 158],
+    html: false,
+    configure: { eventName: 'cadastro_concluido' },
+    pending: [['warning', 'Informe o nome do evento.']],
+    blank: { eventName: ['warning', 'Informe o nome do evento.'] },
+  },
+  tabulation: {
+    defaults: { tabulation: '', 'df-channel': '', id: '', tabulacao: '', tabulacaoName: '' },
+    outputs: ['Próximo'],
+    measured: [260, 86],
+    html: true,
+    configure: { tabulation: 'tab-1', id: 'tab-1', tabulacao: 'tab-1', tabulacaoName: 'Venda concluída' },
+    pending: [['warning', 'Informe o ID da tabulação.'], ['warning', 'Informe o nome da tabulação.']],
+    blank: { tabulacao: ['warning', 'Informe o ID da tabulação.'], tabulacaoName: ['warning', 'Informe o nome da tabulação.'] },
+  },
+}
+
+const exit = (name, when = 'Quando fizer sentido') => ({ name, when, requireFields: false })
+const pairs = count => Object.fromEntries(Array.from({ length: count }, (_, index) => [[`var-${index + 1}`, `v${index + 1}`], [`value-${index + 1}`, 'x']]).flat())
+
+const RULES = [
+  ['envio_mensagem', { buttons: 'sim' }, [['error', 'O campo buttons deve ser o texto "true" ou "false".']]],
+  ['envio_mensagem', data => { delete data.buttons; delete data.message; delete data['df-channel'] }, []],
+  ['departamentos', { id: 'outro' }, [['warning', 'O campo id deve ser igual ao ID do departamento.']]],
+  ['departamentos', { userManager: 'responsavel-1' }, []],
+  ['departamentos', { userManager: { id: 'responsavel-1' } }, []],
+  ['departamentos', data => { delete data.name; delete data.enabled; delete data.userManager }, [['warning', 'Informe o nome do departamento.']]],
+  ['tags', { id: 'outra' }, [['warning', 'O campo id deve ser igual ao ID da tag.']]],
+  ['tags', data => { delete data.message }, []],
+  ['flow', { id: 'outro' }, [['warning', 'O campo id deve ser igual ao ID do fluxo de destino.']]],
+  ['solicitar_dados', { url_api: 'ftp://pedidos' }, [['error', INVALID_URL]]],
+  ['solicitar_dados', { method: 'TRACE' }, [['error', 'Método HTTP inválido: use GET, POST, PUT, PATCH ou DELETE.']]],
+  ['solicitar_dados', { channel: 'RG' }, [['warning', 'Tipo de dado desconhecido: use CPF/CNPJ, CPF, CNPJ ou Outro.']]],
+  ['solicitar_dados', { channel: 'CPF/CNPJ', tentativas: '5' }, []],
+  ['solicitar_dados', { tentativas: '9' }, [['warning', 'A quantidade de tentativas deve ser de 1 a 5.']]],
+  ['solicitar_dados', { isApiValidated: false }, [['warning', 'API não validada: valide na plataforma depois de importar.']]],
+  ['solicitar_dados', data => { delete data.method; delete data.tentativas; delete data.isApiValidated }, []],
+  ['protocolo', { opt: 'URL' }, [['error', 'Informe a URL da API de protocolo.']]],
+  ['protocolo', { opt: 'URL', url_api: 'javascript:alert(1)' }, [['error', INVALID_URL]]],
+  ['protocolo', { opt: 'URL', url_api: API_URL }, []],
+  ['consulta_api', { isApiValidated: false }, [['warning', 'API não validada: valide na plataforma depois de importar.']]],
+  ['consulta_api', { url_api: 'consulta' }, [['error', INVALID_URL]]],
+  ['waitForAnswer', data => { delete data.customFields; delete data.logToActivity; delete data.autoSaveContact }, []],
+  ['envio_arquivo', { url: 'ftp://arquivo' }, [['warning', INVALID_URL]]],
+  ['envio_arquivo', { voice_note: true }, [['warning', 'Mensagem de voz exige um arquivo de áudio.']]],
+  ['envio_arquivo', { voice_note: true, mime_type: 'audio/ogg' }, []],
+  ['envio_imagem', { imagem: '', url: '' }, [['warning', 'Informe a URL da imagem.']]],
+  ['envio_imagem', { imagem: '' }, []],
+  ['envio_imagem', { imagem: 'imagem.png' }, [['warning', INVALID_URL]]],
+  ['templateMessage', { id: 'outro' }, [['warning', 'O campo id deve ser igual ao ID do template.']]],
+  ['templateInteractive', { id: 'outro' }, [['warning', 'O campo id deve ser igual ao ID do template.']]],
+  ['pixCharge', { id: 'outro' }, [['warning', 'O campo id deve ser igual ao ID do template.']]],
+  ['whatsappFlow', { maxReminders: 1.5 }, [['error', 'O máximo de lembretes deve ser um número inteiro a partir de 0.']]],
+  ['whatsappFlow', { maxReminders: -1 }, [['error', 'O máximo de lembretes deve ser um número inteiro a partir de 0.']]],
+  ['whatsappFlow', { maxReminders: 0 }, []],
+  ['whatsappFlow', { formId: '', metaFlowId: 'meta-1' }, []],
+  ['whatsappFlow', { sendMode: 'template' }, [['warning', 'Informe o nome do template.']]],
+  ['whatsappFlow', { sendMode: 'template', templateName: 'formulario', body: '', cta: '' }, []],
+  ['whatsappCall', { ttlMinutes: 'abc' }, [['warning', 'A validade do botão deve ser um número inteiro de minutos.']]],
+  ['whatsappCall', { ttlMinutes: '0' }, [['warning', 'A validade do botão deve ser um número inteiro de minutos.']]],
+  ['whatsappCall', { ttlMinutes: '30' }, []],
+  ['whatsappCall', { ttlMinutes: 30 }, []],
+  ['whatsappCall', { mode: 'link', displayText: '' }, []],
+  ['transferir', { id: 'outro' }, [['warning', 'O campo id deve ser igual ao ID do agente.']]],
+  ['backToAgent', { id: 'outro' }, [['warning', 'O campo id deve ser igual ao ID do departamento.']]],
+  ['apptService', { outputVar: 'appt service' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['apptService', { outputVar: '{{appt_serviceId}}' }, [['warning', 'Informe só o nome da variável, sem {{ }}.']]],
+  ['apptService', { outputVar: 'custom:ab12:servico' }, []],
+  ['apptService', { selectedIds: ['servico-1', 2] }, [['warning', 'Cada item de Serviços oferecidos deve ser um ID em texto.']]],
+  ['apptService', { selectedIds: ['servico-1'] }, []],
+  ['apptLocation', { selectedIds: [''] }, [['warning', 'Cada item de Locais oferecidos deve ser um ID em texto.']]],
+  ['apptProvider', { selectedIds: [1] }, [['warning', 'Cada item de Profissionais oferecidos deve ser um ID em texto.']]],
+  ['apptSlot', { outputVar: 'appt slot' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['apptIdentify', { contactVar: 'cliente id' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['apptCustomerIntake', { askName: false, askEmail: true }, []],
+  ['apptBook', { outputVar: '{{agendamento}}' }, [['warning', 'Informe só o nome da variável, sem {{ }}.']]],
+  ['ticketLookup', { outputVar: 'ticket id' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['ticketCreate', { formId: 'form-1', subjectFieldKey: '' }, [['warning', 'Informe o campo de assunto do formulário.']]],
+  ['ticketCreate', { formId: 'form-1', fallbackQuestion: '' }, []],
+  ['ticketDetail', { enableComment: false, enableReopen: false, enableClose: false, enableCsat: false, actionPrompt: '', commentPrompt: '' }, []],
+  ['ticketDetail', { enableComment: false, commentPrompt: '' }, []],
+  ['ticketDetail', { inputVar: '{{ticketId}}' }, [['warning', 'Informe só o nome da variável, sem {{ }}.']]],
+  ['crmIdentify', { leadVar: '' }, []],
+  ['crmIdentify', { leadVar: 'lead id' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['crmContact', { outputVar: 'contato id' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['crmLead', { outputVar: '{{lead}}' }, [['warning', 'Informe só o nome da variável, sem {{ }}.']]],
+  ['crmLeadUpdate', { setStatus: '', addTags: 'prioridade' }, []],
+  ['crmLeadUpdate', { inputVar: 'lead id' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['crmActivity', { leadVar: '', contactVar: '' }, [['warning', 'Informe a variável do lead ou do contato.']]],
+  ['crmActivity', { leadVar: '' }, []],
+  ['crmActivity', { dueInDays: 1.5 }, [['warning', 'O prazo deve ser um número inteiro de dias, a partir de 0.']]],
+  ['crmActivity', { dueInDays: -1 }, [['warning', 'O prazo deve ser um número inteiro de dias, a partir de 0.']]],
+  ['crmActivity', { dueInDays: 0 }, []],
+  ['sequenceUnenroll', { sequenceId: '', allSequences: true }, []],
+  ['webchatHandoff', { message: 'Continue pelo chat' }, [['warning', 'Inclua {{link}} na mensagem para enviar o link do chat.']]],
+  ['webchatHandoff', { ttlHours: 0 }, [['warning', 'A validade do link deve ser um número inteiro de horas.']]],
+  ['webchatHandoff', { ttlHours: '48' }, []],
+  ['webchatHandoff', { outputVar: '1link' }, [['warning', 'Use apenas letras, números e _ no nome da variável.']]],
+  ['webchatHandoff', { outputVar: '' }, []],
+  ['voltar', { id: 'ghost', targetNodeId: 'ghost' }, [['warning', 'O menu de destino não existe mais no fluxo.']]],
+  ['voltar', { id: START_ID, targetNodeId: START_ID }, [['warning', 'O destino deve ser um Menu de Opções.']]],
+  ['voltar', { id: '' }, [['warning', 'O campo id deve ser igual ao menu de destino.']]],
+  ['randomizer', { paths: [{ label: 'A', weight: '50' }, { label: 'B', weight: 50 }] }, [['error', 'Caminho 1: informe um peso numérico.']]],
+  ['randomizer', { paths: [{ label: 'A', weight: -10 }, { label: 'B', weight: 110 }] }, [['error', 'Caminho 1: informe um peso numérico.']]],
+  ['randomizer', { paths: [{ label: 'A', weight: 0 }, { label: 'B', weight: 0 }] }, [['error', 'A soma dos pesos deve ser maior que zero.']]],
+  ['randomizer', { paths: [{ label: 'A', weight: 40 }, { label: 'B', weight: 50 }] }, [['warning', 'Os pesos somam 90; o total esperado é 100.']]],
+  ['randomizer', { paths: [{ label: '', weight: 50 }, { label: 'B', weight: 50 }] }, [['warning', 'Caminho 1: informe o nome.']]],
+  ['randomizer', { paths: [{ label: 'A', weight: 100 }] }, [['error', 'Cadastre ao menos dois caminhos.']]],
+  ['randomizer', { paths: [{ label: 'A', weight: 20 }, { label: 'B', weight: 30 }, { label: 'C', weight: 50 }] }, []],
+  ['randomizer', { variable: 'grupo teste' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['languageRouter', { variable: 'idioma do contato' }, [['warning', 'O nome da variável não pode ter espaços.']]],
+  ['languageRouter', { fallback: 'fr' }, []],
+  ['waiting_time', { waiting_time: '5s', id: '5s' }, [['error', 'Tempo de espera inválido.']]],
+  ['waiting_time', { id: '' }, [['warning', 'O campo id deve ser igual ao tempo de espera.']]],
+  ['aiAgentBlock', { exits: [exit('')] }, [['error', 'Saída 1 do agente: informe o nome.']]],
+  ['aiAgentBlock', { exits: [exit('Resolvido', '')] }, [['warning', 'Saída 1 do agente: descreva quando usar.']]],
+  ['aiAgentBlock', { exits: ['Resolvido'] }, [['error', 'Saída 1 do agente inválida: nome e condição devem ser texto e a exigência de campos, verdadeiro ou falso.']]],
+  ['aiAgentBlock', { exits: [{ ...exit('Resolvido'), requireFields: 'sim' }] }, [['error', 'Saída 1 do agente inválida: nome e condição devem ser texto e a exigência de campos, verdadeiro ou falso.']]],
+  ['aiAgentBlock', { exits: [exit('Resolvido'), exit('resolvido ')] }, [['warning', 'O nome de saída resolvido está repetido.']]],
+  ['aiAgentBlock', { exits: [{ ...exit('Resolvido'), prioridade: 1 }] }, []],
+  ['aiAgentBlock', { maxTurns: 2.5 }, [['warning', 'O máximo de turnos deve ser um número inteiro, a partir de 0.']]],
+  ['aiAgentBlock', { timeoutMinutes: -5 }, [['warning', 'O tempo limite deve ser um número inteiro de minutos, a partir de 0.']]],
+  ['aiAgentBlock', { maxTurns: 0, timeoutMinutes: 30 }, []],
+  ['googleSheetsAppend', { columns: [{ header: '', value: '{{nome}}' }] }, [['warning', 'Coluna 1: informe o nome.']]],
+  ['googleSheetsAppend', { columns: ['Data'] }, [['error', 'Coluna 1 inválida: informe nome e valor.']]],
+  ['googleSheetsAppend', { columns: [{ header: 'Data' }] }, [['error', 'Coluna 1 inválida: informe nome e valor.']]],
+  ['multiple_condicional_api', data => { delete data['value-1'] }, [['warning', 'Campo var-1 sem o valor value-1.']]],
+  ['multiple_condicional_api', { 'value-2': 'x' }, [['warning', 'Campo value-2 sem a variável var-2.']]],
+  ['multiple_condicional_api', { 'var-3': 'plano', 'value-3': 'basico' }, [['warning', 'As condições devem usar chaves consecutivas (var-1, var-2…).']]],
+  ['multiple_condicional_api', data => { delete data['var-1']; delete data['value-1'] }, [['warning', 'Cadastre ao menos uma condição.']]],
+  ['multiple_condicional_api', pairs(20), []],
+  ['multiple_condicional_api', pairs(21), [['warning', 'O limite é de 20 condições.']]],
+  ['External_Message_Http', { url_api: 'ftp://mensagens' }, [['error', INVALID_URL]]],
+  ['External_Message_Http', { method: 'TRACE' }, [['error', 'Método HTTP inválido: use GET, POST, PUT, PATCH ou DELETE.']]],
+  ['External_Message_Http', data => { delete data.method }, []],
+  ['condicional_api', { condition: 'Maior que' }, [['warning', 'Comparação desconhecida: use Igual a ou Diferente de.']]],
+  ['condicional_api', { condition: 'Igual a' }, []],
+  ['Send_DataStore', { url_api: 'datastore' }, [['error', INVALID_URL]]],
+  ['Local_DataStore', { local_datastore: 'outra' }, [['warning', 'Base de dados desconhecida: use Contato ou Datastore.']]],
+  ['Local_DataStore', { local_datastore: 'datastore' }, []],
+  ['envio_boletos', { channel: 'Outro' }, [['warning', 'Modo de envio desconhecido: use Enviar todos, Enviar menu ou Catálogo.']]],
+  ['envio_boletos', { channel: 'Catalog' }, []],
+  ['envio_boletos', { url_list: 'boletos' }, [['error', INVALID_URL]]],
+  ['api_options_menu', { buttons: 'sim' }, [['error', 'O campo buttons deve ser o texto "true" ou "false".']]],
+  ['api_options_menu', { endConversation: 'nao' }, [['error', 'O campo endConversation deve ser o texto "true" ou "false".']]],
+  ['api_options_menu', { postUrl: 'envio-teste' }, [['error', INVALID_URL]]],
+  ['api_options_menu', { postUrl: API_URL, buttons: 'false', endConversation: 'true' }, []],
+  ['sendConversion', { value: 'abc' }, [['warning', 'Informe o valor da conversão como número, por exemplo 99.90.']]],
+  ['sendConversion', { value: '99,90' }, []],
+  ['sendConversion', { currency: 'real' }, [['warning', 'Informe a moeda com 3 letras, por exemplo BRL.']]],
+  ['sendConversion', { currency: 'USD' }, []],
+  ['trackEvent', { numericValue: 'dez' }, [['warning', 'Informe o valor numérico como número.']]],
+  ['trackEvent', { numericValue: '-2.5' }, []],
+  ['tabulation', { tabulation: 'outra' }, [['warning', 'Os campos id e tabulation devem ser iguais ao ID da tabulação.']]],
+  ['tabulation', { id: 'outra' }, [['warning', 'Os campos id e tabulation devem ser iguais ao ID da tabulação.']]],
+]
 
 const clone = value => JSON.parse(JSON.stringify(value))
-const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging', 'deletable']
-const EDGE_KEYS = ['type', 'source', 'sourceHandle', 'target', 'id']
+const valueType = value => value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
 const link = (flow, source, target, handle = 'output-0') => { const edge = createEdge(flow.edges, source, handle, target); flow.edges.push(edge); return edge }
 const messagesOf = (flow, severity) => validateFlow(flow).filter(issue => !severity || issue.severity === severity).map(issue => issue.message)
 const issuesOf = (flow, nodeId) => validateFlow(flow).filter(issue => issue.nodeId === nodeId).map(issue => issue.message)
+const pairsOf = (flow, nodeId) => validateFlow(flow).filter(issue => issue.nodeId === nodeId).map(issue => [issue.severity, issue.message])
+const subjectOf = type => type === START_TYPE ? START_ID : '2'
+const typeError = (key, accepted, actual) => `Campo ${key}: esperado ${accepted.map(type => TYPE_NAMES[type]).join(' ou ')}, recebido ${TYPE_NAMES[actual]}.`
+const blocks = flow => { try { exportFlow(flow); return false } catch { return true } }
+
+function configuredData(type) {
+  const definition = getDefinition(type)
+  return { ...(definition.configured ? definition.configured() : definition.defaults()), ...clone(SPEC[type].configure ?? {}) }
+}
+
+function patched(type, patch) {
+  const data = configuredData(type)
+  if (typeof patch === 'function') patch(data)
+  else Object.assign(data, clone(patch))
+  return data
+}
+
+function blanked(type, key) {
+  const data = configuredData(type)
+  data[key] = clone(EMPTY_VALUES[valueType(data[key])])
+  return data
+}
+
+function finish(flow, id) {
+  flow.nodes.push(newNode('finalizar', { x: 900, y: 0 }, id))
+  return id
+}
+
+function single(type, data) {
+  const flow = newFlow(DATE)
+  if (type === START_TYPE) {
+    if (data) flow.nodes[0].data.data = data
+    link(flow, START_ID, finish(flow, '3'))
+    return flow
+  }
+  const node = newNode(type, { x: 300, y: 0 }, '2')
+  if (data) node.data.data = data
+  flow.nodes.push(node)
+  if (type === 'note') link(flow, START_ID, finish(flow, '90'))
+  else if (SPEC[type].menu) {
+    const menu = newNode('envio_mensagem', { x: 150, y: 0 }, '20')
+    Object.assign(menu.data.data, { title: 'Menu principal', 'text-1': 'Retornar' })
+    flow.nodes.push(menu)
+    link(flow, START_ID, '20')
+    link(flow, '20', '2')
+  } else link(flow, START_ID, '2')
+  outputHandles(node).forEach((handle, index) => link(flow, '2', finish(flow, String(3 + index)), handle))
+  return flow
+}
 
 function basic() {
-  const flow = newFlow(new Date('2026-10-09T18:08:50.962Z'))
+  const flow = newFlow(DATE)
   const message = newNode('envio_pergunta', { x: 400, y: 100 }, '2')
-  message.data.data.template = 'Olá, #NAME!\nInformações: @@@empresa 😊'
+  message.data.data.template = 'Olá, #NAME!\nInformações: @@@pedido 😊'
   flow.nodes.push(message, newNode('finalizar', { x: 800, y: 100 }, '3'))
   link(flow, 'inicio', '2')
   link(flow, '2', '3')
@@ -28,7 +808,7 @@ function basic() {
 }
 
 function menuFlow() {
-  const flow = newFlow(new Date('2026-10-09T18:08:50.962Z'))
+  const flow = newFlow(DATE)
   const menu = newNode('envio_mensagem', { x: 400, y: 100 }, '2')
   menu.data.data = { message: '', buttons: 'false', 'df-channel': '' }
   for (let i = 1; i <= 3; i++) Object.assign(menu.data.data, { [`opt-${i}`]: String(i), [`text-${i}`]: `Opção ${i}`, [`description-${i}`]: `Descrição ${i}` })
@@ -45,6 +825,40 @@ function timeFlow(rules) {
   flow.nodes[1].data.data.timeRules = rules
   flow.nodes.push(newNode('finalizar', { x: 0, y: 0 }, '4'))
   flow.edges = [flow.edges[0], createEdge([], '2', 'output-0', '3'), createEdge([], '2', 'output-1', '4')]
+  return flow
+}
+
+function everything() {
+  const flow = newFlow(DATE)
+  flow.name = 'Todos os componentes'
+  let next = 2
+  let menu
+  let spare = 0
+  const add = type => {
+    const node = newNode(type, { x: next * 320, y: 0 }, String(next++))
+    node.data.data = configuredData(type)
+    flow.nodes.push(node)
+    return node
+  }
+  const terminals = Object.keys(SPEC).filter(type => SPEC[type].outputs.length === 0 && type !== 'note')
+  const terminal = () => {
+    const node = add(terminals[spare++ % terminals.length])
+    if (node.data.type === 'voltar') {
+      const name = menu.data.data.title
+      Object.assign(node.data.data, { id: menu.id, targetNodeId: menu.id, availableNodes: [{ id: menu.id, value: menu.id, name }], targetNodeName: name })
+    }
+    return node
+  }
+  let previous = flow.nodes[0]
+  for (const type of Object.keys(SPEC).filter(type => type !== START_TYPE && SPEC[type].outputs.length > 0)) {
+    const node = add(type)
+    if (type === 'envio_mensagem') menu = node
+    link(flow, previous.id, node.id)
+    for (const handle of outputHandles(node).slice(1)) link(flow, node.id, terminal().id, handle)
+    previous = node
+  }
+  link(flow, previous.id, terminal().id)
+  add('note')
   return flow
 }
 
@@ -65,17 +879,20 @@ function invalidSamples() {
   const starts = basic(); starts.nodes[0].id = 'start-node'; starts.edges[0].source = 'start-node'; starts.nodes.push(newNode('trigger_message', { x: 0, y: 0 }, '9')); samples.push(starts)
   const noStart = basic(); noStart.nodes.shift(); noStart.edges.shift(); samples.push(noStart)
   const orphan = basic(); orphan.nodes.push(newNode('waitForAnswer', { x: 0, y: 0 }, '7')); samples.push(orphan)
+  for (const type of Object.keys(SPEC)) {
+    samples.push(single(type))
+    for (const key of Object.keys(SPEC[type].blank ?? {})) samples.push(single(type, blanked(type, key)))
+  }
+  for (const [type, patch] of RULES) samples.push(single(type, patched(type, patch)))
   return samples
 }
 
-const valueType = value => value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
-
-test('new flow starts with the reference start node shape', () => {
+test('new flow starts with the platform start node shape and key order', () => {
   const flow = newFlow()
   assert.deepEqual(Object.keys(flow), ['name', 'description', 'service_type', 'created_at', 'nodes', 'edges', 'viewport'])
   assert.equal(flow.service_type, 'chat')
   const [start] = flow.nodes
-  assert.deepEqual(Object.keys(start).sort(), [...NODE_KEYS].sort())
+  assert.deepEqual(Object.keys(start), START_KEYS)
   assert.equal(start.id, 'inicio')
   assert.equal(start.type, 'custom')
   assert.equal(start.deletable, false)
@@ -85,31 +902,178 @@ test('new flow starts with the reference start node shape', () => {
   assert.deepEqual(start.measured, { width: 260, height: 86 })
 })
 
-test('every component created in the editor has the reference node shape, html and value types', () => {
-  for (const definition of supportedComponents) {
-    const node = newNode(definition.nativeType, { x: 10, y: 20 }, '7')
-    assert.deepEqual(Object.keys(node), NODE_KEYS, definition.nativeType)
-    assert.equal(node.type, 'custom')
-    assert.deepEqual(Object.keys(node.data), ['type', 'data', 'html'])
-    assert.equal(node.data.html, getTemplate(definition.nativeType))
-    assert.equal(node.deletable, definition.nativeType !== 'trigger_message')
-    assert.ok(Number.isFinite(node.measured.width) && Number.isFinite(node.measured.height))
-    const schema = fieldTypes[definition.nativeType]
-    for (const [key, value] of Object.entries(node.data.data)) {
-      if (schema[key]) assert.ok(schema[key].includes(valueType(value)), `${definition.nativeType}.${key}`)
+test('the catalog has the 62 platform components, all with native type, defaults, icon and category', () => {
+  assert.equal(componentCatalog.length, 62)
+  assert.equal(supportedComponents.length, 62)
+  assert.deepEqual(pendingComponents, [])
+  assert.deepEqual(componentCatalog.map(entry => entry.nativeType).sort(), Object.keys(SPEC).sort())
+  assert.equal(new Set(componentCatalog.map(entry => entry.id)).size, componentCatalog.length)
+  const categoryIds = new Set(categories.map(category => category.id))
+  for (const entry of componentCatalog) {
+    assert.equal(typeof entry.nativeType, 'string', entry.id)
+    assert.ok(entry.nativeType.length > 0, entry.id)
+    assert.equal(typeof entry.defaults, 'function', entry.id)
+    assert.ok(entry.label && entry.icon, entry.id)
+    assert.ok(categoryIds.has(entry.category), entry.id)
+    assert.equal(getDefinition(entry.nativeType), entry)
+  }
+  assert.deepEqual(Object.keys(fieldTypes).sort(), Object.keys(SPEC).sort())
+  assert.ok(Object.keys(templates).every(type => Object.hasOwn(SPEC, type)))
+  assert.throws(() => newNode('invented', { x: 0, y: 0 }, '2'), /^Error: O componente “invented” ainda não tem exemplo no formato de Atendimento\.$/)
+})
+
+test('newNode creates each of the 62 components with the spec keys, order, defaults, html and size', () => {
+  for (const [type, spec] of Object.entries(SPEC)) {
+    const node = newNode(type, { x: 10, y: 20 }, type === START_TYPE ? START_ID : '7')
+    assert.deepEqual(Object.keys(node), type === START_TYPE ? START_KEYS : NODE_KEYS, type)
+    assert.equal(node.type, spec.node ?? 'custom', type)
+    assert.equal(getNodeType(type), spec.node ?? 'custom', type)
+    assert.deepEqual(node.position, { x: 10, y: 20 })
+    assert.deepEqual(Object.keys(node.data), ['type', 'data', 'html'], type)
+    assert.equal(node.data.type, type)
+    assert.deepEqual([node.selected, node.dragging, node.deletable], [false, false, type !== START_TYPE], type)
+    assert.deepEqual(node.measured, { width: spec.measured[0], height: spec.measured[1] }, type)
+    assert.equal(node.data.html, getTemplate(type), type)
+    assert.equal(getTemplate(type) !== '', spec.html, type)
+    const data = clone(node.data.data)
+    if (type === 'timeConditions') {
+      assert.match(data.timeRules[0].id, /^rule-\d{13}$/)
+      data.timeRules[0].id = ''
     }
-    for (const key of ['url_api', 'id', 'departamento', 'selectedTag', 'targetFlow', 'validated_signature']) if (key in node.data.data) assert.equal(node.data.data[key], '')
+    assert.deepEqual(data, spec.defaults, type)
+    assert.equal(JSON.stringify(data), JSON.stringify(spec.defaults), type)
   }
 })
 
-test('defaults follow the values observed in the reference', () => {
-  assert.equal(newNode('solicitar_dados', { x: 0, y: 0 }, '2').data.data.channel, 'CPF/CNPJ')
-  assert.deepEqual(newNode('consulta_api', { x: 0, y: 0 }, '2').data.data.api_test_values, {})
-  const rule = newNode('timeConditions', { x: 0, y: 0 }, '2').data.data.timeRules[0]
-  assert.match(rule.id, /^rule-\d{13}$/)
-  assert.deepEqual(Object.keys(rule), ['id', 'weekDays', 'startTime', 'endTime'])
-  assert.deepEqual(Object.keys(newNode('envio_mensagem', { x: 0, y: 0 }, '2').data.data), ['message', 'buttons', 'df-channel', 'opt-1', 'text-1', 'description-1', 'title'])
-  assert.deepEqual(Object.keys(newNode('waitForAnswer', { x: 0, y: 0 }, '2').data.data), ['mask', 'customfields', 'customFields', 'logToActivity', 'autoSaveContact'])
+test('components that grow when configured keep the platform key order and start as its prefix', () => {
+  for (const [type, spec] of Object.entries(SPEC)) {
+    const definition = getDefinition(type)
+    if (!spec.configured) {
+      assert.equal(definition.configured, undefined, type)
+      continue
+    }
+    const configured = definition.configured()
+    assert.deepEqual(Object.keys(configured), spec.configured, type)
+    assert.deepEqual(spec.configured.slice(0, Object.keys(spec.defaults).length), Object.keys(spec.defaults), type)
+    for (const [key, value] of Object.entries(definition.defaults())) assert.deepEqual(configured[key], value, `${type}.${key}`)
+    assert.notEqual(definition.configured(), configured)
+  }
+})
+
+test('defaults are fresh copies, so editing one component never changes another', () => {
+  for (const type of Object.keys(SPEC)) {
+    const first = newNode(type, { x: 0, y: 0 }, '2')
+    const second = newNode(type, { x: 0, y: 0 }, '3')
+    assert.notEqual(first.data.data, second.data.data, type)
+    assert.notEqual(first.measured, second.measured, type)
+    for (const [key, value] of Object.entries(first.data.data)) if (value && typeof value === 'object') assert.notEqual(value, second.data.data[key], `${type}.${key}`)
+  }
+})
+
+test('every default and configured value matches field-types.json and a wrong kind is an export error', () => {
+  for (const [type, fields] of Object.entries(fieldTypes)) {
+    for (const [key, accepted] of Object.entries(fields)) assert.deepEqual(accepted, MULTI_TYPES[`${type}.${key}`] ?? [accepted[0]], `${type}.${key}`)
+  }
+  for (const type of Object.keys(SPEC)) {
+    for (const data of [newNode(type, { x: 0, y: 0 }, '2').data.data, configuredData(type)]) {
+      for (const [key, value] of Object.entries(data)) {
+        const accepted = expectedFieldTypes(type, key)
+        assert.ok(Array.isArray(accepted), `${type}.${key} sem tipo em field-types.json`)
+        assert.deepEqual(accepted, MULTI_TYPES[`${type}.${key}`] ?? [valueType(value)], `${type}.${key}`)
+      }
+    }
+    for (const key of Object.keys(configuredData(type))) {
+      const accepted = expectedFieldTypes(type, key)
+      const [value, kind] = WRONG_VALUES.find(([, kind]) => !accepted.includes(kind))
+      const flow = single(type, { ...configuredData(type), [key]: value })
+      assert.ok(pairsOf(flow, subjectOf(type)).some(([severity, message]) => severity === 'error' && message === typeError(key, accepted, kind)), `${type}.${key}`)
+      assert.ok(blocks(flow), `${type}.${key}`)
+    }
+  }
+})
+
+test('outputHandles gives each new component the spec number of outputs and labels', () => {
+  for (const [type, spec] of Object.entries(SPEC)) {
+    const node = newNode(type, { x: 0, y: 0 }, '2')
+    const handles = outputHandles(node)
+    assert.deepEqual(handles, spec.outputs.map((_, index) => `output-${index}`), type)
+    assert.deepEqual(handles.map(handle => outputLabel(node, handle)), spec.outputs, type)
+  }
+})
+
+test('dynamic outputs follow menu options, weighted paths, condition pairs and agent exits', () => {
+  const at = (type, data) => { const node = newNode(type, { x: 0, y: 0 }, '2'); Object.assign(node.data.data, data); return node }
+  const labels = node => outputHandles(node).map(handle => outputLabel(node, handle))
+  assert.deepEqual(labels(at('envio_mensagem', { 'text-1': 'A', 'opt-2': '2', 'text-2': '', 'description-2': '', 'opt-3': '3', 'text-3': 'C', 'description-3': '' })), ['A', 'Opção 2', 'C'])
+  assert.deepEqual(labels(at('randomizer', { paths: [{ label: 'Grupo 1', weight: 30 }, { label: '', weight: 30 }, { label: 'Grupo 3', weight: 40 }] })), ['Grupo 1', 'Caminho 2', 'Grupo 3'])
+  assert.deepEqual(labels(at('randomizer', { paths: 'Caminho A' })), [])
+  assert.deepEqual(labels(at('multiple_condicional_api', { 'var-1': 'plano', 'value-1': 'ouro', 'var-2': 'plano', 'value-2': '', 'var-3': '', 'value-3': 'prata' })), ['plano = ouro', 'Condição 2', 'Condição 3'])
+  assert.deepEqual(labels(at('aiAgentBlock', { exits: [{ name: 'Resolvido', when: 'a', requireFields: false }, { name: '', when: 'b', requireFields: false }] })), ['Resolvido', 'Saída 2', 'Sem conclusão'])
+  assert.deepEqual(labels(at('aiAgentBlock', { exits: 'Resolvido' })), ['Sem conclusão'])
+  assert.equal(outputLabel(at('aiAgentBlock', {}), 'output-5'), 'output-5')
+})
+
+test('two-way outputs keep the platform orientation: legacy components put the failure first, new ones the success', () => {
+  const tones = type => outputHandles(newNode(type, { x: 0, y: 0 }, '2')).map((_, index) => outputTone(type, index))
+  for (const type of ['timeConditions', 'solicitar_dados', 'consulta_api', 'condicional_api', 'External_Message_Http', 'Local_DataStore', 'envio_boletos']) {
+    assert.deepEqual(tones(type), ['danger', 'success'], type)
+  }
+  const positiveFirst = [
+    'whatsappFlow', 'whatsappCall', 'webchatHandoff', 'apptService', 'apptIdentify', 'apptLocation', 'apptProvider', 'apptSlot', 'apptCustomerIntake', 'apptBook',
+    'ticketLookup', 'ticketCreate', 'ticketDetail', 'crmIdentify', 'crmContact', 'crmLead', 'crmLeadUpdate', 'crmActivity', 'sequenceEnroll',
+    'googleSheetsAppend', 'rdStationConversion', 'hubspotUpsertContact', 'Data_Input_Condicional', 'api_options_menu',
+  ]
+  for (const type of positiveFirst) assert.deepEqual(tones(type), ['success', 'danger'], type)
+  for (const type of ['adCondition', 'Consent', 'languageRouter', 'randomizer', 'envio_mensagem', 'multiple_condicional_api', 'aiAgentBlock']) {
+    assert.ok(tones(type).every(tone => tone === 'accent'), type)
+  }
+})
+
+test('validateFlow accepts every configured component and points out what a new one still needs', () => {
+  for (const [type, spec] of Object.entries(SPEC)) {
+    const fresh = single(type)
+    const pending = spec.pending ?? []
+    assert.deepEqual(pairsOf(fresh, subjectOf(type)), pending, type)
+    assert.ok(validateFlow(fresh).every(issue => issue.nodeId === subjectOf(type)), type)
+    assert.equal(blocks(fresh), pending.some(([severity]) => severity === 'error'), type)
+    const configured = single(type, configuredData(type))
+    assert.deepEqual(validateFlow(configured), [], type)
+    assert.equal(blocks(configured), false, type)
+  }
+})
+
+test('emptying each required field of a configured component reports exactly that field', () => {
+  let checked = 0
+  for (const [type, spec] of Object.entries(SPEC)) {
+    for (const [key, expected] of Object.entries(spec.blank ?? {})) {
+      assert.deepEqual(pairsOf(single(type, blanked(type, key)), subjectOf(type)), [expected], `${type}.${key}`)
+      checked++
+    }
+  }
+  assert.ok(checked >= 90, `${checked} campos`)
+})
+
+test('component rules report the specific problem with the spec severity', () => {
+  for (const [index, [type, patch, expected]] of RULES.entries()) {
+    assert.deepEqual(pairsOf(single(type, patched(type, patch)), subjectOf(type)), expected, `${index + 1}: ${type}`)
+  }
+})
+
+test('a flow with all 62 configured components validates and exports byte for byte after reimport', () => {
+  const flow = everything()
+  assert.equal(new Set(flow.nodes.map(node => node.data.type)).size, 62)
+  assert.deepEqual(validateFlow(flow), [])
+  const text = exportFlow(flow)
+  assert.deepEqual(JSON.parse(text), flow)
+  const imported = importFlow(text)
+  assert.deepEqual(validateFlow(imported), [])
+  assert.equal(exportFlow(imported), text)
+  for (const node of JSON.parse(text).nodes) {
+    assert.deepEqual(Object.keys(node), node.id === START_ID ? START_KEYS : NODE_KEYS, node.id)
+    assert.equal(node.type, getNodeType(node.data.type), node.id)
+  }
+  for (const edge of JSON.parse(text).edges) assert.deepEqual(Object.keys(edge), EDGE_KEYS)
+  assert.equal(nextNodeId(flow.nodes), String(flow.nodes.length + 1))
 })
 
 test('node ids follow the reference numbering: inicio, then sequential numeric strings', () => {
@@ -142,21 +1106,38 @@ test('import/export is lossless, keeps unknown fields and serializes like the re
   assert.notEqual(flow.nodes[1].data.data.template, 'Editada')
 })
 
-test('export stamps created_at with the export instant and names the file like the reference', () => {
-  const stamped = stampExport(basic(), new Date('2026-10-09T18:08:50.962Z'))
-  assert.equal(stamped.created_at, '2026-10-09T18:08:50.962Z')
-  assert.equal(exportFileName({ name: 'Atendimento 0500', created_at: stamped.created_at }), 'Atendimento 0500-2026-10-09.json')
-  assert.equal(exportFileName({ name: '   ', created_at: stamped.created_at }), 'Atendimento-2026-10-09.json')
+test('import never adds node keys the file does not have and keeps the platform key orders', () => {
+  const flow = basic()
+  for (const key of ['measured', 'selected', 'deletable', 'dragging']) delete flow.nodes[1][key]
+  const { id, type, position, data, measured } = flow.nodes[2]
+  flow.nodes[2] = { id, type, position, data: { type: data.type, html: data.html, data: data.data }, measured, deletable: true, selected: false }
+  flow.edges[1].selected = false
+  const text = exportFlow(importFlow(JSON.stringify(flow)))
+  assert.equal(text, JSON.stringify(flow, null, 2))
+  const exported = JSON.parse(text)
+  assert.deepEqual(Object.keys(exported.nodes[1]), ['id', 'type', 'position', 'data'])
+  assert.deepEqual(Object.keys(exported.nodes[2]), ['id', 'type', 'position', 'data', 'measured', 'deletable', 'selected'])
+  assert.deepEqual(Object.keys(exported.nodes[2].data), ['type', 'html', 'data'])
+  assert.deepEqual(Object.keys(exported.edges[1]), [...EDGE_KEYS, 'selected'])
 })
 
-test('canvas-only state is never exported', () => {
+test('selected and dragging are exported exactly as stored in the document', () => {
   const flow = basic()
   flow.nodes[1].selected = true
   flow.nodes[1].dragging = true
   const exported = JSON.parse(exportFlow(flow))
-  assert.equal(exported.nodes[1].selected, false)
-  assert.equal(exported.nodes[1].dragging, false)
+  assert.equal(exported.nodes[1].selected, true)
+  assert.equal(exported.nodes[1].dragging, true)
+  assert.equal(exported.nodes[2].selected, false)
   assert.deepEqual(Object.keys(cleanDocument(flow).nodes[1]), Object.keys(flow.nodes[1]))
+  assert.notEqual(cleanDocument(flow).nodes[1], flow.nodes[1])
+})
+
+test('export stamps created_at with the export instant and names the file after the flow', () => {
+  const stamped = stampExport(basic(), DATE)
+  assert.equal(stamped.created_at, '2026-01-15T12:00:00.000Z')
+  assert.equal(exportFileName({ name: 'Atendimento de teste', created_at: stamped.created_at }), 'Atendimento de teste-2026-01-15.json')
+  assert.equal(exportFileName({ name: '   ', created_at: stamped.created_at }), 'Atendimento-2026-01-15.json')
 })
 
 test('UTF-8 BOM and emoji are supported; malformed or empty JSON reports a PT-BR message', () => {
@@ -176,28 +1157,6 @@ test('values that cannot become JSON are rejected with a PT-BR message', () => {
   assert.throws(() => importFlow(null), /objeto de fluxo/)
 })
 
-test('imported nodes missing optional reference keys get them; existing values are kept', () => {
-  const flow = basic()
-  delete flow.nodes[1].measured
-  delete flow.nodes[1].selected
-  delete flow.nodes[1].deletable
-  delete flow.nodes[1].dragging
-  const imported = importFlow(flow)
-  assert.deepEqual(imported.nodes[1].measured, { width: 260, height: 130 })
-  assert.equal(imported.nodes[1].selected, false)
-  assert.equal(imported.nodes[1].deletable, true)
-  assert.equal('dragging' in imported.nodes[1], false)
-})
-
-test('catalog has every screenshot entry and distinguishes components without JSON data', () => {
-  assert.equal(supportedComponents.length, 12)
-  assert.equal(componentCatalog.length, 62)
-  assert.equal(pendingComponents.length, 50)
-  assert.equal(new Set(componentCatalog.map(entry => entry.id)).size, componentCatalog.length)
-  assert.ok(pendingComponents.every(entry => !entry.nativeType && !entry.defaults))
-  assert.throws(() => newNode('invented', { x: 0, y: 0 }, '2'), /^Error: O componente “invented” ainda não tem exemplo no formato de Atendimento\.$/)
-})
-
 test('catalog lookups treat names that exist on Object.prototype as unknown types', () => {
   for (const type of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
     assert.equal(getDefinition(type), undefined, type)
@@ -205,29 +1164,16 @@ test('catalog lookups treat names that exist on Object.prototype as unknown type
     assert.equal(getComponentLabel(type), type)
     assert.equal(getCategory(type), undefined, type)
     assert.equal(getComponentColor(type), '#64748b')
+    assert.equal(getNodeType(type), 'custom')
+    assert.equal(expectedFieldTypes(type, 'title'), undefined, type)
+    assert.equal(expectedFieldTypes('envio_pergunta', type), undefined, type)
+    assert.equal(expectedFieldTypes('envio_mensagem', type), undefined, type)
   }
   assert.equal(getCategory('envio_pergunta').label, 'Mensagens')
   assert.equal(getComponentColor('consulta_api'), '#327e98')
   assert.equal(getDefinition('envio_mensagem').label, 'Menu de Opções')
-})
-
-test('all twelve reference component types can be created and exported', () => {
-  for (const definition of supportedComponents.filter(entry => entry.nativeType !== 'trigger_message')) {
-    const flow = newFlow()
-    const node = newNode(definition.nativeType, { x: 300, y: 0 }, '2')
-    if (definition.nativeType === 'envio_pergunta') node.data.data.template = 'Teste'
-    if (definition.nativeType === 'departamentos') Object.assign(node.data.data, { id: 'dep', departamento: 'dep', name: 'Suporte' })
-    if (definition.nativeType === 'tags') Object.assign(node.data.data, { id: 'tag', selectedTag: 'tag', tags: 'Cliente' })
-    if (definition.nativeType === 'flow') Object.assign(node.data.data, { id: 'flx', targetFlow: 'flx', flowName: 'Financeiro' })
-    if (['consulta_api', 'solicitar_dados'].includes(definition.nativeType)) node.data.data.url_api = 'https://example.com/api'
-    if (definition.nativeType === 'solicitar_dados') node.data.data.text = 'Informe o número'
-    flow.nodes.push(node)
-    link(flow, 'inicio', '2')
-    let next = 3
-    for (const handle of outputHandles(node)) { const id = String(next++); flow.nodes.push(newNode('finalizar', { x: 600, y: 0 }, id)); link(flow, '2', id, handle) }
-    assert.doesNotThrow(() => exportFlow(flow), definition.nativeType)
-    assert.deepEqual(validateFlow(flow), [], definition.nativeType)
-  }
+  assert.deepEqual(expectedFieldTypes('envio_mensagem', 'text-11'), ['string'])
+  assert.deepEqual(expectedFieldTypes('multiple_condicional_api', 'value-7'), ['string'])
 })
 
 test('output labels follow the meaning proven by the reference flow', () => {
@@ -259,10 +1205,10 @@ test('known payload field types cannot be corrupted by raw JSON edits and are na
   assert.throws(() => exportFlow(flow), /Campo message: esperado texto, recebido número\./)
   const department = basic()
   department.nodes[2] = newNode('departamentos', { x: 0, y: 0 }, '3')
-  Object.assign(department.nodes[2].data.data, { id: 'd', departamento: 'd', name: 'Suporte', enabled: 'sim', userManager: 'x' })
+  Object.assign(department.nodes[2].data.data, { id: 'd', departamento: 'd', name: 'Equipe A', enabled: 'sim', userManager: 5 })
   const messages = issuesOf(department, '3')
   assert.ok(messages.includes('Campo enabled: esperado verdadeiro ou falso, recebido texto.'))
-  assert.ok(messages.includes('Campo userManager: esperado nulo, recebido texto.'))
+  assert.ok(messages.includes('Campo userManager: esperado nulo ou texto ou objeto, recebido número.'))
   const time = timeFlow({})
   assert.ok(issuesOf(time, '2').includes('Campo timeRules: esperado lista, recebido objeto.'))
 })
@@ -281,6 +1227,7 @@ test('structural errors are rejected on import', () => {
   const position = basic(); position.nodes[0].position.x = Infinity; assert.throws(() => importFlow(position), /posição/)
   const viewport = basic(); viewport.viewport.zoom = 0; assert.throws(() => importFlow(viewport), /viewport inválido/)
   const wrapper = basic(); wrapper.nodes[0].data.data = []; assert.throws(() => importFlow(wrapper), /esperado/)
+  const nodeType = basic(); nodeType.nodes[1].type = ''; assert.throws(() => importFlow(nodeType), /esperado type em texto/)
   const handle = basic(); handle.edges[0].sourceHandle = null; assert.throws(() => importFlow(handle), /sourceHandle/)
   const edgeType = basic(); edgeType.edges[0].type = 'custom'; assert.throws(() => importFlow(edgeType), /deletable/)
   const flag = basic(); flag.nodes[1].selected = 'no'; assert.throws(() => importFlow(flag), /selected deve ser true ou false/)
@@ -291,6 +1238,38 @@ test('structural errors are rejected on import', () => {
   const name = basic(); delete name.name; assert.throws(() => importFlow(name), /Campo obrigatório ausente: name\./)
   const created = basic(); created.created_at = 5; assert.throws(() => importFlow(created), /O campo created_at deve ser texto\./)
   const lists = basic(); delete lists.edges; assert.throws(() => importFlow(lists), /listas nodes e edges/)
+})
+
+test('node types written by the platform are kept, and a different one is a warning', () => {
+  for (const type of ['note', 'api_options_menu']) {
+    const flow = single(type, configuredData(type))
+    assert.equal(importFlow(JSON.stringify(flow)).nodes[1].type, SPEC[type].node)
+    flow.nodes[1].type = 'custom'
+    assert.deepEqual(pairsOf(flow, '2'), [['warning', `Este componente é gravado pela plataforma com type ${SPEC[type].node}.`]], type)
+  }
+  const message = basic()
+  message.nodes[1].type = 'note'
+  assert.deepEqual(pairsOf(message, '2'), [['warning', 'Este componente é gravado pela plataforma com type custom.']])
+})
+
+test('notes cannot be connected in either direction', () => {
+  const flow = basic()
+  flow.nodes.push(newNode('note', { x: 0, y: 0 }, '4'))
+  link(flow, '4', '2')
+  link(flow, '3', '4')
+  assert.deepEqual(validateFlow(flow), [{ severity: 'error', message: 'Notas não podem ser conectadas.', nodeId: '4' }])
+})
+
+test('a component without any connection is a warning that never blocks the export', () => {
+  const flow = basic()
+  const loose = newNode('envio_pergunta', { x: 0, y: 0 }, '4')
+  loose.data.data.template = 'Solta'
+  flow.nodes.push(loose, newNode('finalizar', { x: 0, y: 0 }, '5'), newNode('note', { x: 0, y: 0 }, '6'))
+  assert.deepEqual(validateFlow(flow), [
+    { severity: 'warning', message: 'Componente sem conexões; ele não será executado.', nodeId: '4' },
+    { severity: 'warning', message: 'Componente sem conexões; ele não será executado.', nodeId: '5' },
+  ])
+  assert.doesNotThrow(() => exportFlow(flow))
 })
 
 test('an empty name or service type is a validation error, not an import error', () => {
@@ -325,6 +1304,7 @@ test('connection rules: existing handles, one destination per output, no self lo
   const twoTargets = basic(); twoTargets.edges.push(createEdge(twoTargets.edges, 'inicio', 'output-0', '3')); assert.throws(() => exportFlow(twoTargets), /A saída “Próximo” tem mais de um destino\./)
   const selfLoop = basic(); selfLoop.edges[1].target = '2'; assert.throws(() => exportFlow(selfLoop), /O componente não pode se conectar a ele mesmo\./)
   const toStart = basic(); toStart.edges[1].target = 'inicio'; assert.throws(() => exportFlow(toStart), /Iniciar Fluxo · ID inicio: Este componente não pode receber conexões\./)
+  const terminal = single('departamentos', configuredData('departamentos')); link(terminal, '2', finish(terminal, '9')); assert.throws(() => exportFlow(terminal), /A saída output-0 não existe neste componente\./)
 })
 
 test('identical issues are reported once', () => {
@@ -357,7 +1337,10 @@ test('export errors name the component and its id, one issue per line', () => {
   const flow = basic()
   flow.name = ''
   flow.nodes[1].data.data.template = ''
-  flow.nodes.push(newNode('waitForAnswer', { x: 0, y: 0 }, '4'))
+  const back = newNode('envio_pergunta', { x: 0, y: 0 }, '5')
+  back.data.data.template = 'Fora do caminho'
+  flow.nodes.push(newNode('waitForAnswer', { x: 0, y: 0 }, '4'), back)
+  link(flow, '5', '4')
   let error
   try { exportFlow(flow) } catch (cause) { error = cause }
   assert.ok(error instanceof Error)
@@ -366,6 +1349,7 @@ test('export errors name the component and its id, one issue per line', () => {
     'Enviar Mensagem · ID 2: Preencha a mensagem.',
     'Aguardando Mensagem · ID 4: Componente desconectado do início.',
     'Aguardando Mensagem · ID 4: Conecte a saída “Próximo”.',
+    'Enviar Mensagem · ID 5: Componente desconectado do início.',
   ])
 })
 
@@ -461,7 +1445,7 @@ test('removing a middle option keeps destinations, renumbers digits and edge ids
 })
 
 test('renumbered edges keep unique ids and custom ids', () => {
-  const flow = newFlow(new Date('2026-10-09T18:08:50.962Z'))
+  const flow = newFlow(DATE)
   const menu = newNode('envio_mensagem', { x: 0, y: 0 }, '2')
   Object.assign(menu.data.data, { 'opt-2': '2', 'text-2': 'B', 'description-2': '', 'opt-3': '3', 'text-3': 'C', 'description-3': '' })
   flow.nodes.push(menu, newNode('finalizar', { x: 0, y: 0 }, '3'), newNode('finalizar', { x: 0, y: 0 }, '4'))
@@ -497,6 +1481,43 @@ test('the final menu option cannot be removed and new options get the next free 
   assert.equal(nextOptionDigit({ 'opt-1': '1', 'text-1': 'a', 'opt-2': '3', 'text-2': 'b' }), '4')
   assert.equal(nextOptionDigit({ 'opt-1': '2', 'text-1': 'a' }), '3')
   assert.equal(nextOptionDigit({ 'opt-1': '1', 'text-1': 'a', 'opt-2': '2', 'text-2': 'b' }), '3')
+})
+
+test('removing a condition pair renumbers its keys, outputs and edge ids like menu options', () => {
+  const flow = single('multiple_condicional_api', { 'var-1': 'a', 'value-1': '1', 'var-2': 'b', 'value-2': '2', 'var-3': 'c', 'value-3': '3' })
+  const updated = removeCondition(flow, '2', 2)
+  const data = updated.nodes[1].data.data
+  assert.deepEqual(Object.keys(data), ['var-1', 'value-1', 'var-2', 'value-2'])
+  assert.deepEqual(data, { 'var-1': 'a', 'value-1': '1', 'var-2': 'c', 'value-2': '3' })
+  assert.deepEqual(updated.edges.filter(edge => edge.source === '2').map(edge => [edge.sourceHandle, edge.target, edge.id]), [
+    ['output-0', '3', 'xy-edge__2output-0-3'],
+    ['output-1', '5', 'xy-edge__2output-1-5'],
+  ])
+  assert.deepEqual(outputHandles(updated.nodes[1]).map(handle => outputLabel(updated.nodes[1], handle)), ['a = 1', 'c = 3'])
+  assert.equal(flow.nodes[1].data.data['var-2'], 'b')
+  assert.equal(removeCondition(updated, '2', 9), updated)
+  assert.equal(removeCondition(single('multiple_condicional_api', configuredData('multiple_condicional_api')), '2', 1).nodes[1].data.data['var-1'], 'plano')
+  assert.equal(removeCondition(flow, START_ID, 1), flow)
+})
+
+test('list outputs move their connections when paths or agent exits are removed or inserted', () => {
+  const random = single('randomizer', patched('randomizer', { paths: [{ label: 'A', weight: 50 }, { label: 'B', weight: 10 }, { label: 'C', weight: 50 }] }))
+  const paths = random.nodes[1].data.data.paths
+  const fewer = removeOutput(random, '2', 1, { ...random.nodes[1].data.data, paths: [paths[0], paths[2]] })
+  assert.deepEqual(fewer.edges.filter(edge => edge.source === '2').map(edge => [edge.sourceHandle, edge.target, edge.id]), [
+    ['output-0', '3', 'xy-edge__2output-0-3'],
+    ['output-1', '5', 'xy-edge__2output-1-5'],
+  ])
+  assert.deepEqual(issuesOf(fewer, '2'), [])
+  const agent = single('aiAgentBlock', configuredData('aiAgentBlock'))
+  const exits = [...agent.nodes[1].data.data.exits, { name: 'Transferir', when: 'Quando pedir um atendente', requireFields: false }]
+  const more = insertOutput(agent, '2', 1, { ...agent.nodes[1].data.data, exits })
+  assert.deepEqual(more.edges.filter(edge => edge.source === '2').map(edge => [edge.sourceHandle, edge.target, edge.id]), [
+    ['output-0', '3', 'xy-edge__2output-0-3'],
+    ['output-2', '4', 'xy-edge__2output-2-4'],
+  ])
+  assert.deepEqual(outputHandles(more.nodes[1]).map(handle => outputLabel(more.nodes[1], handle)), ['Resolvido', 'Transferir', 'Sem conclusão'])
+  assert.deepEqual(issuesOf(more, '2'), ['Conecte a saída “Transferir”.'])
 })
 
 test('API rules are validated without executing requests', () => {
@@ -544,14 +1565,15 @@ test('references keep id mirrored and warn when it diverges or the name is missi
 })
 
 test('issue messages are short PT-BR sentences that never cite the reference file', () => {
-  const messages = invalidSamples().flatMap(flow => validateFlow(flow).map(issue => issue.message))
-  assert.ok(messages.length > 40)
+  const messages = [...new Set(invalidSamples().flatMap(flow => validateFlow(flow).map(issue => issue.message)))]
+  assert.ok(messages.length > 150, `${messages.length} mensagens`)
   for (const message of messages) {
     assert.doesNotMatch(message, /JSON de referência|referência/i, message)
     assert.match(message, /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ"“]/, message)
     assert.match(message, /\.$/, message)
     assert.ok(message.length <= 110, message)
     assert.doesNotMatch(message, /esperado (string|boolean|array|number|object|null)|recebido (string|boolean|array|number|object|null|undefined)/, message)
+    assert.doesNotMatch(message, /[!—]/, message)
   }
   assert.ok(messages.includes('Componente desconectado do início.'))
 })
@@ -595,7 +1617,7 @@ test('legacy flows migrate to the reference numbering, edge ids and shapes', () 
     const flow = importFlow(input)
     assert.deepEqual(flow.nodes.map(node => node.id), ['inicio', '2', '3', '4', '5'])
     assert.deepEqual(flow.nodes.map(node => node.data.type), ['trigger_message', 'envio_pergunta', 'envio_mensagem', 'finalizar', 'envio_pergunta'])
-    for (const node of flow.nodes) assert.deepEqual(Object.keys(node), NODE_KEYS)
+    for (const node of flow.nodes) assert.deepEqual(Object.keys(node), node.id === START_ID ? START_KEYS : NODE_KEYS)
     for (const edge of flow.edges) { assert.deepEqual(Object.keys(edge), EDGE_KEYS); assert.equal(edge.id, edgeId(edge.source, edge.sourceHandle, edge.target)) }
     assert.equal(flow.nodes[1].data.data.template, 'Olá')
     assert.equal(flow.nodes[2].data.data['text-2'], 'B')
@@ -668,14 +1690,43 @@ test('unsupported or malformed legacy components fail explicitly instead of sile
   assert.throws(() => importFlow({ nodes: [start] }), /nodes e edges são obrigatórios/)
 })
 
-const reference = process.env.FLOW_REFERENCE
-test('reference file: lossless round trip, zero issues and editor-compatible ids', { skip: !reference || !fs.existsSync(reference) }, () => {
-  const raw = fs.readFileSync(reference, 'utf8')
-  const flow = importFlow(raw)
-  assert.equal(exportFlow(flow), raw)
-  assert.deepEqual(validateFlow(flow), [])
-  assert.equal(nextNodeId(flow.nodes), '60')
-  for (const edge of flow.edges) assert.equal(edge.id, edgeId(edge.source, edge.sourceHandle, edge.target))
-  assert.equal(START_ID, flow.nodes.find(node => node.data.type === 'trigger_message').id)
-  for (const node of flow.nodes) for (const handle of outputHandles(node, flow.edges)) assert.ok(flow.edges.some(edge => edge.source === node.id && edge.sourceHandle === handle), `${node.id} ${handle}`)
-})
+const referenceFiles = (process.env.FLOW_REFERENCE || '').split(path.delimiter).map(file => file.trim()).filter(Boolean)
+if (!referenceFiles.length) {
+  test('reference files: byte-identical round trip and every component known', { skip: `Defina FLOW_REFERENCE com um ou mais arquivos JSON, separados por "${path.delimiter}".` }, () => {})
+}
+for (const [index, file] of referenceFiles.entries()) {
+  test(`reference file ${index + 1}: byte-identical round trip, no blocking issue and every component known`, { skip: !fs.existsSync(file) && `Arquivo ${index + 1} de FLOW_REFERENCE não encontrado.` }, () => {
+    const content = fs.readFileSync(file, 'utf8')
+    const raw = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
+    const flow = importFlow(content)
+    assert.equal(exportFlow(flow), raw)
+    const stamp = new Date((Date.parse(flow.created_at) || 0) + 1000)
+    assert.equal(exportFlow(stampExport(flow, stamp)), raw.replace(/"created_at": "[^"]*"/, `"created_at": "${stamp.toISOString()}"`))
+    const issues = validateFlow(flow)
+    assert.deepEqual(issues.filter(issue => issue.severity === 'error'), [])
+    assert.deepEqual(issues.filter(issue => /^(Tipo preservado|Este componente é gravado)/.test(issue.message)), [])
+    assert.deepEqual(flow.nodes.filter(node => node.data.type === START_TYPE).map(node => node.id), [START_ID])
+    const nodes = new Map(flow.nodes.map(node => [node.id, node]))
+    const linked = new Set(flow.edges.flatMap(edge => [edge.source, edge.target]))
+    const used = new Set(flow.edges.map(edge => `${edge.source}\u0000${edge.sourceHandle}`))
+    for (const node of flow.nodes) {
+      const type = node.data.type
+      assert.ok(getDefinition(type), type)
+      assert.equal(node.type, getNodeType(type), `${type} ${node.id}`)
+      assert.equal(node.data.html, getTemplate(type), `${type} ${node.id}`)
+      for (const [key, value] of Object.entries(node.data.data)) {
+        const accepted = expectedFieldTypes(type, key)
+        if (accepted) assert.ok(accepted.includes(valueType(value)), `${type} ${node.id} ${key}`)
+      }
+      if (type !== 'note' && linked.has(node.id)) for (const handle of outputHandles(node, flow.edges)) assert.ok(used.has(`${node.id}\u0000${handle}`), `${node.id} ${handle}`)
+    }
+    for (const edge of flow.edges) {
+      assert.deepEqual(Object.keys(edge).slice(0, EDGE_KEYS.length), EDGE_KEYS, edge.id)
+      assert.equal(edge.id, edgeId(edge.source, edge.sourceHandle, edge.target))
+      assert.ok(outputHandles(nodes.get(edge.source), flow.edges).includes(edge.sourceHandle), edge.id)
+    }
+    const next = nextNodeId(flow.nodes)
+    assert.match(next, /^\d+$/)
+    assert.equal(nodes.has(next), false)
+  })
+}

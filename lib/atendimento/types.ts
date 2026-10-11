@@ -53,7 +53,33 @@ export interface FieldOption {
   label: string
 }
 
-export type FieldKind = "text" | "textarea" | "select" | "checkbox" | "url" | "json" | "timeRules"
+export type FieldKind =
+  | "text"
+  | "textarea"
+  | "select"
+  | "checkbox"
+  | "url"
+  | "json"
+  | "timeRules"
+  | "number"
+  | "numberText"
+  | "menuOptions"
+  | "menuNode"
+  | "weightedPaths"
+  | "conditionPairs"
+  | "objectList"
+
+export type ItemFieldKind = "text" | "textarea" | "checkbox" | "number"
+
+export interface ItemFieldSpec {
+  key: string
+  label: string
+  kind?: ItemFieldKind
+  placeholder?: string
+  min?: number
+  max?: number
+  step?: number
+}
 
 export interface FieldSpec {
   key: string
@@ -63,7 +89,31 @@ export interface FieldSpec {
   placeholder?: string
   hint?: string
   suggestions?: string[]
-  mirror?: string
+  mirror?: string | string[]
+  min?: number
+  max?: number
+  step?: number
+  pattern?: string
+  itemFields?: ItemFieldSpec[]
+  itemLabel?: string
+  addLabel?: string
+  newItem?: JsonObject
+  drivesOutputs?: boolean
+}
+
+export type NodeKind = "custom" | "note" | "apiOptionsMenu"
+
+export type OutputTone = "success" | "danger" | "accent"
+
+export interface OutputRule {
+  kind: "indexedKeys" | "list"
+  key: string
+  labelKey?: string
+  pairKey?: string
+  fallbackLabel: string
+  trailing?: string[]
+  min?: number
+  max?: number
 }
 
 export interface ComponentDefinition {
@@ -71,12 +121,19 @@ export interface ComponentDefinition {
   label: string
   category: string
   nativeType?: string
+  nodeType?: NodeKind
+  icon?: string
   defaults?: () => JsonObject
+  configured?: () => JsonObject
   outputs?: number
   outputLabels?: string[]
+  outputTones?: OutputTone[]
+  outputRule?: OutputRule
   measured?: Measured
   fields?: FieldSpec[]
   summary?: string[]
+  technicalLabels?: Record<string, string>
+  fieldTypePatterns?: Record<string, string[]>
 }
 
 export interface FlowIssue {

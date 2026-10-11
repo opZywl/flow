@@ -1,7 +1,8 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const { createEdge, importFlow, newFlow, newNode } = require('../lib/atendimento/format.ts')
+const path = require('node:path')
+const { createEdge, importFlow, newFlow, newNode, outputHandles } = require('../lib/atendimento/format.ts')
 const { advancePreview, emptyPreview, renderText, replyPreview, startPreview } = require('../lib/atendimento/simulator.ts')
 
 const link = (flow, source, target, handle = 'output-0') => flow.edges.push(createEdge(flow.edges, source, handle, target))
@@ -12,7 +13,7 @@ const SUNDAY_10H = new Date(2026, 9, 4, 10, 0)
 
 function menuFlow() {
   const flow = newFlow()
-  add(flow, 'envio_mensagem', '2', { 'opt-1': '10', 'text-1': 'Primeira', 'opt-2': '20', 'text-2': 'Segunda' })
+  add(flow, 'envio_mensagem', '2', { 'opt-1': '10', 'text-1': 'Primeira', title: 'Escolha uma opção:', 'opt-2': '20', 'text-2': 'Segunda' })
   message(flow, '3', 'A')
   message(flow, '4', 'B')
   link(flow, '2', '4', 'output-1')
@@ -37,16 +38,16 @@ test('menu routing uses the option position even when edges are shuffled, by dig
 test('waiting for a message stores the answer for @@@ variables and #NAME, case-insensitively', () => {
   const flow = newFlow()
   add(flow, 'waitForAnswer', '2', { customFields: 'name' })
-  add(flow, 'waitForAnswer', '3', { customFields: 'custom:6a97:empresa' })
-  message(flow, '4', 'Olá #NAME, da @@@EMPRESA (@@@6a97:empresa) @@@desconhecida')
+  add(flow, 'waitForAnswer', '3', { customFields: 'custom:ab12:empresa' })
+  message(flow, '4', 'Olá #NAME, da @@@EMPRESA (@@@ab12:empresa) @@@desconhecida')
   link(flow, 'inicio', '2'); link(flow, '2', '3'); link(flow, '3', '4')
   let state = startPreview(flow)
   assert.equal(state.waiting, 'answer')
   state = replyPreview(flow, state, 'Maria')
   assert.equal(state.waiting, 'answer')
-  state = replyPreview(flow, state, 'ERA')
-  assert.equal(state.messages[0], 'Olá Maria, da ERA (ERA) @@@desconhecida')
-  assert.equal(flow.nodes[3].data.data.template, 'Olá #NAME, da @@@EMPRESA (@@@6a97:empresa) @@@desconhecida')
+  state = replyPreview(flow, state, 'ACME')
+  assert.equal(state.messages[0], 'Olá Maria, da ACME (ACME) @@@desconhecida')
+  assert.equal(flow.nodes[3].data.data.template, 'Olá #NAME, da @@@EMPRESA (@@@ab12:empresa) @@@desconhecida')
 })
 
 test('time conditions offer both branches, mark the current one and follow output-0 for outside hours', () => {
@@ -67,23 +68,23 @@ test('time conditions offer both branches, mark the current one and follow outpu
 
 test('API preview never sends a request and fills response_map samples on success', () => {
   const flow = newFlow()
-  add(flow, 'consulta_api', '2', { text: 'Consultando', response_map: [{ path: 'protocol', key: 'protocol', sample: '*113772*', variable: 'protocol' }] })
-  message(flow, '3', 'Não conseguimos abrir')
+  add(flow, 'consulta_api', '2', { text: 'Consultando', response_map: [{ path: 'protocol', key: 'protocol', sample: 'PRT-0001', variable: 'protocol' }] })
+  message(flow, '3', 'Falha ao consultar')
   message(flow, '4', 'Protocolo @@@protocol')
   link(flow, 'inicio', '2'); link(flow, '2', '3', 'output-0'); link(flow, '2', '4', 'output-1')
   const state = startPreview(flow)
   assert.equal(state.waiting, 'branch')
   assert.deepEqual(state.messages, ['Consultando', 'Consulta API: a requisição não é enviada na prévia. Escolha o resultado a testar.\n\n1. Falha\n2. Sucesso'])
   assert.deepEqual(state.options.map(option => [option.text, option.handle]), [['Falha', 'output-0'], ['Sucesso', 'output-1']])
-  assert.equal(replyPreview(flow, state, '1').messages[0], 'Não conseguimos abrir')
-  assert.equal(replyPreview(flow, state, '2').messages[0], 'Protocolo *113772*')
+  assert.equal(replyPreview(flow, state, '1').messages[0], 'Falha ao consultar')
+  assert.equal(replyPreview(flow, state, '2').messages[0], 'Protocolo PRT-0001')
 })
 
 test('request data asks the question, retries with the error message and then follows the failure output', () => {
   const flow = newFlow()
-  add(flow, 'solicitar_dados', '2', { text: 'Digite o ticket', error: 'Ticket não encontrado', tentativas: '2', response_map: [{ path: 'FASE', key: 'FASE', sample: 'Novo', variable: 'FASE' }] })
+  add(flow, 'solicitar_dados', '2', { text: 'Digite o ticket', error: 'Ticket não encontrado', tentativas: '2', response_map: [{ path: 'STATUS', key: 'STATUS', sample: 'Aberto', variable: 'STATUS' }] })
   message(flow, '3', 'Vamos transferir')
-  message(flow, '4', 'Fase: @@@fase, ticket @@@input')
+  message(flow, '4', 'Status: @@@status, ticket @@@input')
   link(flow, 'inicio', '2'); link(flow, '2', '3', 'output-0'); link(flow, '2', '4', 'output-1')
   let state = startPreview(flow)
   assert.deepEqual([state.waiting, state.messages[0]], ['data', 'Digite o ticket'])
@@ -94,7 +95,7 @@ test('request data asks the question, retries with the error message and then fo
   assert.deepEqual([retry.waiting, retry.messages[0], retry.attempts], ['data', 'Ticket não encontrado', 2])
   const second = replyPreview(flow, retry, '456')
   assert.equal(replyPreview(flow, second, '1').messages[0], 'Vamos transferir')
-  assert.equal(replyPreview(flow, state, '2').messages[0], 'Fase: Novo, ticket 123')
+  assert.equal(replyPreview(flow, state, '2').messages[0], 'Status: Aberto, ticket 123')
 })
 
 test('request data without configured texts uses short defaults', () => {
@@ -113,13 +114,13 @@ test('protocol, tags, transfers and finish are simulated without platform calls'
   const flow = newFlow()
   flow.nodes.push(newNode('protocolo', { x: 0, y: 0 }, '2'))
   add(flow, 'tags', '3', { tags: 'VIP' })
-  add(flow, 'departamentos', '4', { name: 'Suporte' })
+  add(flow, 'departamentos', '4', { name: 'Equipe A' })
   link(flow, 'inicio', '2'); link(flow, '2', '3'); link(flow, '3', '4')
   const state = startPreview(flow)
   assert.deepEqual(state.messages, [
     'Seu protocolo é: [protocolo gerado na plataforma]',
     'Tag “VIP” aplicada ao atendimento.',
-    'Transferido para o departamento “Suporte”. A prévia termina aqui.',
+    'Transferido para o departamento “Equipe A”. A prévia termina aqui.',
   ])
   assert.equal(state.waiting, null)
   assert.equal(state.nodeId, null)
@@ -219,15 +220,37 @@ test('preview notes are PT-BR sentences that never cite the reference file', () 
   for (const note of notes) assert.doesNotMatch(note, /JSON de referência|referência|undefined|null/, note)
 })
 
-const reference = process.env.FLOW_REFERENCE
-test('reference flow: greeting, main menu and business-hours branches', { skip: !reference || !fs.existsSync(reference) }, () => {
-  const flow = importFlow(fs.readFileSync(reference, 'utf8'))
-  const state = startPreview(flow, MONDAY_10H)
-  assert.equal(state.waiting, 'menu')
-  assert.match(state.messages.at(-1), /1\. Suporte\n2\. Ativações\n3\. Comercial\n4\. Financeiro/)
-  const support = replyPreview(flow, state, '1', MONDAY_10H)
-  assert.deepEqual(support.options.map(option => option.text), ['Fora do horário', 'Dentro do horário (agora)'])
-  assert.match(replyPreview(flow, support, '1', MONDAY_10H).messages[0], /fora do horário/)
-  assert.match(replyPreview(flow, support, '2', MONDAY_10H).messages[0], /nome da sua empresa/)
-  assert.deepEqual(replyPreview(flow, state, '4', MONDAY_10H).messages, ['Encaminhado para o fluxo “Fluxo Financeiro”. A prévia termina aqui.'])
-})
+const referenceFiles = (process.env.FLOW_REFERENCE || '').split(path.delimiter).map(file => file.trim()).filter(Boolean)
+if (!referenceFiles.length) {
+  test('reference flows: the preview answers every reachable choice', { skip: `Defina FLOW_REFERENCE com um ou mais arquivos JSON, separados por "${path.delimiter}".` }, () => {})
+}
+for (const [index, file] of referenceFiles.entries()) {
+  test(`reference flow ${index + 1}: the preview answers every reachable choice without breaking`, { skip: !fs.existsSync(file) && `Arquivo ${index + 1} de FLOW_REFERENCE não encontrado.` }, () => {
+    const flow = importFlow(fs.readFileSync(file, 'utf8'))
+    const nodes = new Map(flow.nodes.map(node => [node.id, node]))
+    const queue = [startPreview(flow, MONDAY_10H), startPreview(flow, SUNDAY_10H)]
+    const seen = new Set()
+    while (queue.length) {
+      const state = queue.shift()
+      for (const text of state.messages) {
+        assert.equal(typeof text, 'string')
+        assert.doesNotMatch(text, /undefined|\[object Object\]/, text)
+      }
+      if (!state.waiting) continue
+      const key = `${state.nodeId} ${state.waiting} ${state.attempts}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const node = nodes.get(state.nodeId)
+      assert.ok(node, String(state.nodeId))
+      if (state.waiting === 'menu' || state.waiting === 'branch') {
+        const handles = outputHandles(node, flow.edges)
+        assert.ok(state.options.length > 0, node.id)
+        assert.equal(new Set(state.options.map(option => option.digit)).size, state.options.length, node.id)
+        for (const option of state.options) {
+          assert.ok(handles.includes(option.handle), `${node.id} ${option.handle}`)
+          queue.push(replyPreview(flow, state, option.digit, MONDAY_10H))
+        }
+      } else queue.push(replyPreview(flow, state, '12345', MONDAY_10H))
+    }
+  })
+}

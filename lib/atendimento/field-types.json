@@ -7,17 +7,6 @@
       "string"
     ]
   },
-  "protocolo": {
-    "url_api": [
-      "string"
-    ],
-    "opt": [
-      "string"
-    ],
-    "text": [
-      "string"
-    ]
-  },
   "envio_mensagem": {
     "message": [
       "string"
@@ -35,9 +24,6 @@
       "string"
     ],
     "description-1": [
-      "string"
-    ],
-    "title": [
       "string"
     ],
     "opt-2": [
@@ -66,14 +52,90 @@
     ],
     "description-4": [
       "string"
-    ]
-  },
-  "timeConditions": {
-    "timeConditions": [
+    ],
+    "opt-5": [
       "string"
     ],
-    "timeRules": [
-      "array"
+    "text-5": [
+      "string"
+    ],
+    "description-5": [
+      "string"
+    ],
+    "opt-6": [
+      "string"
+    ],
+    "text-6": [
+      "string"
+    ],
+    "description-6": [
+      "string"
+    ],
+    "opt-7": [
+      "string"
+    ],
+    "text-7": [
+      "string"
+    ],
+    "description-7": [
+      "string"
+    ],
+    "opt-8": [
+      "string"
+    ],
+    "text-8": [
+      "string"
+    ],
+    "description-8": [
+      "string"
+    ],
+    "opt-9": [
+      "string"
+    ],
+    "text-9": [
+      "string"
+    ],
+    "description-9": [
+      "string"
+    ],
+    "opt-10": [
+      "string"
+    ],
+    "text-10": [
+      "string"
+    ],
+    "description-10": [
+      "string"
+    ],
+    "title": [
+      "string"
+    ],
+    "eventName": [
+      "string"
+    ],
+    "customEventName": [
+      "string"
+    ],
+    "value": [
+      "string"
+    ],
+    "currency": [
+      "string"
+    ],
+    "onlyFromAd": [
+      "boolean"
+    ],
+    "tabulacao": [
+      "string"
+    ],
+    "tabulation": [
+      "string"
+    ],
+    "tabulacaoName": [
+      "string"
+    ],
+    "id": [
+      "string"
     ]
   },
   "envio_pergunta": {
@@ -81,6 +143,167 @@
       "string"
     ],
     "template": [
+      "string"
+    ]
+  },
+  "departamentos": {
+    "departamentos": [
+      "string"
+    ],
+    "df-channel": [
+      "string"
+    ],
+    "id": [
+      "string"
+    ],
+    "departamento": [
+      "string"
+    ],
+    "name": [
+      "string"
+    ],
+    "enabled": [
+      "boolean"
+    ],
+    "userManager": [
+      "null",
+      "string",
+      "object"
+    ],
+    "eventName": [
+      "string"
+    ],
+    "customEventName": [
+      "string"
+    ],
+    "value": [
+      "string"
+    ],
+    "currency": [
+      "string"
+    ],
+    "onlyFromAd": [
+      "boolean"
+    ],
+    "tabulacao": [
+      "string"
+    ],
+    "tabulation": [
+      "string"
+    ],
+    "tabulacaoName": [
+      "string"
+    ],
+    "opt-1": [
+      "string"
+    ],
+    "text-1": [
+      "string"
+    ],
+    "description-1": [
+      "string"
+    ],
+    "opt-2": [
+      "string"
+    ],
+    "text-2": [
+      "string"
+    ],
+    "description-2": [
+      "string"
+    ],
+    "opt-3": [
+      "string"
+    ],
+    "text-3": [
+      "string"
+    ],
+    "description-3": [
+      "string"
+    ],
+    "opt-4": [
+      "string"
+    ],
+    "text-4": [
+      "string"
+    ],
+    "description-4": [
+      "string"
+    ],
+    "opt-5": [
+      "string"
+    ],
+    "text-5": [
+      "string"
+    ],
+    "description-5": [
+      "string"
+    ],
+    "opt-6": [
+      "string"
+    ],
+    "text-6": [
+      "string"
+    ],
+    "description-6": [
+      "string"
+    ],
+    "opt-7": [
+      "string"
+    ],
+    "text-7": [
+      "string"
+    ],
+    "description-7": [
+      "string"
+    ],
+    "opt-8": [
+      "string"
+    ],
+    "text-8": [
+      "string"
+    ],
+    "description-8": [
+      "string"
+    ],
+    "title": [
+      "string"
+    ],
+    "targetFlow": [
+      "string"
+    ],
+    "flowName": [
+      "string"
+    ],
+    "flowDescription": [
+      "string"
+    ]
+  },
+  "tags": {
+    "id": [
+      "string"
+    ],
+    "tags": [
+      "string"
+    ],
+    "message": [
+      "string"
+    ],
+    "selectedTag": [
+      "string"
+    ]
+  },
+  "flow": {
+    "id": [
+      "string"
+    ],
+    "targetFlow": [
+      "string"
+    ],
+    "flowName": [
+      "string"
+    ],
+    "flowDescription": [
       "string"
     ]
   },
@@ -92,21 +315,12 @@
       "string"
     ]
   },
-  "waitForAnswer": {
-    "mask": [
+  "timeConditions": {
+    "timeConditions": [
       "string"
     ],
-    "customfields": [
-      "string"
-    ],
-    "customFields": [
-      "string"
-    ],
-    "logToActivity": [
-      "boolean"
-    ],
-    "autoSaveContact": [
-      "boolean"
+    "timeRules": [
+      "array"
     ]
   },
   "solicitar_dados": {
@@ -153,27 +367,15 @@
       "array"
     ]
   },
-  "departamentos": {
-    "departamentos": [
+  "protocolo": {
+    "url_api": [
       "string"
     ],
-    "df-channel": [
+    "opt": [
       "string"
     ],
-    "id": [
+    "text": [
       "string"
-    ],
-    "departamento": [
-      "string"
-    ],
-    "name": [
-      "string"
-    ],
-    "enabled": [
-      "boolean"
-    ],
-    "userManager": [
-      "null"
     ]
   },
   "consulta_api": {
@@ -214,28 +416,874 @@
       "array"
     ]
   },
-  "tags": {
+  "waitForAnswer": {
+    "mask": [
+      "string"
+    ],
+    "customfields": [
+      "string"
+    ],
+    "customFields": [
+      "string"
+    ],
+    "logToActivity": [
+      "boolean"
+    ],
+    "autoSaveContact": [
+      "boolean"
+    ]
+  },
+  "envio_arquivo": {
+    "imagem": [
+      "string"
+    ],
+    "url": [
+      "string"
+    ],
+    "caption": [
+      "string"
+    ],
+    "filename": [
+      "string"
+    ],
+    "mime_type": [
+      "string"
+    ],
+    "voice_note": [
+      "boolean"
+    ]
+  },
+  "envio_imagem": {
+    "imagem": [
+      "string"
+    ],
+    "url": [
+      "string"
+    ],
+    "caption": [
+      "string"
+    ],
+    "filename": [
+      "string"
+    ]
+  },
+  "templateMessage": {
+    "templateMessage": [
+      "string"
+    ],
+    "df-channel": [
+      "string"
+    ],
     "id": [
+      "string"
+    ],
+    "templateName": [
+      "string"
+    ],
+    "templateParams": [
+      "array"
+    ]
+  },
+  "templateInteractive": {
+    "id": [
+      "string"
+    ],
+    "templateMessage": [
+      "string"
+    ],
+    "buttons": [
+      "string"
+    ],
+    "templateName": [
+      "string"
+    ],
+    "templateParams": [
+      "array"
+    ]
+  },
+  "whatsappFlow": {
+    "formId": [
+      "string"
+    ],
+    "formName": [
+      "string"
+    ],
+    "metaFlowId": [
+      "string"
+    ],
+    "firstScreen": [
+      "string"
+    ],
+    "formFields": [
+      "array"
+    ],
+    "sendMode": [
+      "string"
+    ],
+    "templateName": [
+      "string"
+    ],
+    "header": [
+      "string"
+    ],
+    "body": [
+      "string"
+    ],
+    "footer": [
+      "string"
+    ],
+    "cta": [
+      "string"
+    ],
+    "varPrefix": [
+      "string"
+    ],
+    "outputVar": [
+      "string"
+    ],
+    "crmMap": [
+      "array"
+    ],
+    "successMessage": [
+      "string"
+    ],
+    "reminderMessage": [
+      "string"
+    ],
+    "maxReminders": [
+      "number"
+    ],
+    "errorMessage": [
+      "string"
+    ]
+  },
+  "pixCharge": {
+    "id": [
+      "string"
+    ],
+    "templateMessage": [
+      "string"
+    ],
+    "buttons": [
+      "string"
+    ],
+    "templateName": [
+      "string"
+    ],
+    "templateParams": [
+      "array"
+    ]
+  },
+  "whatsappCall": {
+    "mode": [
+      "string"
+    ],
+    "text": [
+      "string"
+    ],
+    "displayText": [
+      "string"
+    ],
+    "ttlMinutes": [
+      "string",
+      "number"
+    ],
+    "respectHours": [
+      "boolean"
+    ],
+    "departmentId": [
+      "string"
+    ],
+    "outsideHoursMessage": [
+      "string"
+    ],
+    "errorMessage": [
+      "string"
+    ]
+  },
+  "transferir": {
+    "df-channel": [
+      "string"
+    ],
+    "id": [
+      "string"
+    ],
+    "agente": [
+      "string"
+    ],
+    "agenteName": [
+      "string"
+    ]
+  },
+  "backToAgent": {
+    "backToAgent": [
+      "string"
+    ],
+    "department": [
+      "string"
+    ],
+    "df-channel": [
+      "string"
+    ],
+    "id": [
+      "string"
+    ],
+    "departmentName": [
+      "string"
+    ],
+    "availableDepartments": [
+      "array"
+    ]
+  },
+  "apptService": {
+    "outputVar": [
+      "string"
+    ],
+    "headerMessage": [
+      "string"
+    ],
+    "emptyMessage": [
+      "string"
+    ],
+    "autoSelectSingle": [
+      "boolean"
+    ],
+    "selectedIds": [
+      "array"
+    ]
+  },
+  "apptIdentify": {
+    "contactVar": [
+      "string"
+    ]
+  },
+  "apptLocation": {
+    "outputVar": [
+      "string"
+    ],
+    "headerMessage": [
+      "string"
+    ],
+    "emptyMessage": [
+      "string"
+    ],
+    "autoSelectSingle": [
+      "boolean"
+    ],
+    "selectedIds": [
+      "array"
+    ]
+  },
+  "apptProvider": {
+    "outputVar": [
+      "string"
+    ],
+    "headerMessage": [
+      "string"
+    ],
+    "emptyMessage": [
+      "string"
+    ],
+    "autoSelectSingle": [
+      "boolean"
+    ],
+    "selectedIds": [
+      "array"
+    ]
+  },
+  "apptSlot": {
+    "outputVar": [
+      "string"
+    ],
+    "headerMessage": [
+      "string"
+    ],
+    "emptyMessage": [
+      "string"
+    ],
+    "autoSelectSingle": [
+      "boolean"
+    ]
+  },
+  "apptCustomerIntake": {
+    "askName": [
+      "boolean"
+    ],
+    "askEmail": [
+      "boolean"
+    ],
+    "askNotes": [
+      "boolean"
+    ],
+    "introMessage": [
+      "string"
+    ],
+    "successMessage": [
+      "string"
+    ]
+  },
+  "apptBook": {
+    "outputVar": [
+      "string"
+    ],
+    "successMessage": [
+      "string"
+    ],
+    "errorMessage": [
+      "string"
+    ],
+    "conflictMessage": [
+      "string"
+    ]
+  },
+  "ticketLookup": {
+    "lookupScope": [
+      "string"
+    ],
+    "outputVar": [
+      "string"
+    ],
+    "headerMessage": [
+      "string"
+    ],
+    "emptyMessage": [
+      "string"
+    ]
+  },
+  "ticketCreate": {
+    "formId": [
+      "string"
+    ],
+    "introMessage": [
+      "string"
+    ],
+    "successMessage": [
+      "string"
+    ],
+    "errorMessage": [
+      "string"
+    ],
+    "subjectFieldKey": [
+      "string"
+    ],
+    "fallbackQuestion": [
+      "string"
+    ],
+    "defaultPriority": [
+      "string"
+    ],
+    "defaultType": [
+      "string"
+    ],
+    "outputVar": [
+      "string"
+    ]
+  },
+  "ticketDetail": {
+    "inputVar": [
+      "string"
+    ],
+    "notFoundMessage": [
+      "string"
+    ],
+    "actionPrompt": [
+      "string"
+    ],
+    "commentPrompt": [
+      "string"
+    ],
+    "csatCommentPrompt": [
+      "string"
+    ],
+    "enableComment": [
+      "boolean"
+    ],
+    "enableReopen": [
+      "boolean"
+    ],
+    "enableClose": [
+      "boolean"
+    ],
+    "enableCsat": [
+      "boolean"
+    ]
+  },
+  "crmIdentify": {
+    "contactVar": [
+      "string"
+    ],
+    "leadVar": [
+      "string"
+    ]
+  },
+  "crmContact": {
+    "introMessage": [
+      "string"
+    ],
+    "successMessage": [
+      "string"
+    ],
+    "errorMessage": [
+      "string"
+    ],
+    "outputVar": [
+      "string"
+    ]
+  },
+  "crmLead": {
+    "introMessage": [
+      "string"
+    ],
+    "qualifyPrompt": [
+      "string"
+    ],
+    "successMessage": [
+      "string"
+    ],
+    "errorMessage": [
+      "string"
+    ],
+    "outputVar": [
+      "string"
+    ]
+  },
+  "crmLeadUpdate": {
+    "inputVar": [
+      "string"
+    ],
+    "setStatus": [
+      "string"
+    ],
+    "addTags": [
+      "string"
+    ],
+    "setValue": [
+      "string"
+    ],
+    "doneMessage": [
+      "string"
+    ]
+  },
+  "crmActivity": {
+    "activityType": [
+      "string"
+    ],
+    "title": [
+      "string"
+    ],
+    "description": [
+      "string"
+    ],
+    "dueInDays": [
+      "number"
+    ],
+    "leadVar": [
+      "string"
+    ],
+    "contactVar": [
+      "string"
+    ],
+    "doneMessage": [
+      "string"
+    ]
+  },
+  "sequenceEnroll": {
+    "sequenceId": [
+      "string"
+    ],
+    "sequenceName": [
+      "string"
+    ],
+    "createContact": [
+      "boolean"
+    ]
+  },
+  "sequenceUnenroll": {
+    "sequenceId": [
+      "string"
+    ],
+    "sequenceName": [
+      "string"
+    ],
+    "allSequences": [
+      "boolean"
+    ]
+  },
+  "webchatHandoff": {
+    "widgetId": [
+      "string"
+    ],
+    "message": [
+      "string"
+    ],
+    "ttlHours": [
+      "number",
+      "string"
+    ],
+    "targetMode": [
+      "string"
+    ],
+    "targetFlowId": [
+      "string"
+    ],
+    "targetDepartmentId": [
+      "string"
+    ],
+    "welcomeMessage": [
+      "string"
+    ],
+    "carryVariables": [
+      "boolean"
+    ],
+    "closeSource": [
+      "boolean"
+    ],
+    "outputVar": [
+      "string"
+    ],
+    "errorMessage": [
+      "string"
+    ]
+  },
+  "note": {
+    "text": [
+      "string"
+    ],
+    "color": [
+      "string"
+    ]
+  },
+  "voltar": {
+    "id": [
+      "string"
+    ],
+    "targetNodeId": [
+      "string"
+    ],
+    "availableNodes": [
+      "array"
+    ],
+    "targetNodeName": [
+      "string"
+    ],
+    "title": [
+      "string"
+    ],
+    "description": [
+      "string"
+    ]
+  },
+  "randomizer": {
+    "paths": [
+      "array"
+    ],
+    "variable": [
+      "string"
+    ],
+    "sticky": [
+      "boolean"
+    ]
+  },
+  "languageRouter": {
+    "variable": [
+      "string"
+    ],
+    "fallback": [
+      "string"
+    ],
+    "sticky": [
+      "boolean"
+    ]
+  },
+  "adCondition": {
+    "adMatch": [
+      "string"
+    ],
+    "adIds": [
+      "string"
+    ],
+    "adText": [
+      "string"
+    ]
+  },
+  "waiting_time": {
+    "waiting_time": [
+      "string"
+    ],
+    "df-waiting_time": [
+      "string"
+    ],
+    "id": [
+      "string"
+    ]
+  },
+  "aiAgentBlock": {
+    "openai": [
+      "string"
+    ],
+    "generative_ai": [
+      "string"
+    ],
+    "generativeAiName": [
+      "string"
+    ],
+    "fields": [
+      "array"
+    ],
+    "exits": [
+      "array"
+    ],
+    "maxTurns": [
+      "number"
+    ],
+    "timeoutMinutes": [
+      "number"
+    ]
+  },
+  "OpenAI": {
+    "openai": [
+      "string"
+    ],
+    "df-OpenAI": [
+      "string"
+    ],
+    "aiProvider": [
+      "string"
+    ],
+    "aiModel": [
+      "string"
+    ]
+  },
+  "googleSheetsAppend": {
+    "spreadsheet": [
+      "string"
+    ],
+    "sheetName": [
+      "string"
+    ],
+    "columns": [
+      "array"
+    ],
+    "resultVar": [
+      "string"
+    ]
+  },
+  "rdStationConversion": {
+    "conversionIdentifier": [
+      "string"
+    ],
+    "email": [
+      "string"
+    ],
+    "contactName": [
+      "string"
+    ],
+    "phone": [
+      "string"
+    ],
+    "company": [
+      "string"
+    ],
+    "jobTitle": [
+      "string"
+    ],
+    "city": [
+      "string"
+    ],
+    "state": [
       "string"
     ],
     "tags": [
       "string"
     ],
-    "selectedTag": [
+    "customFields": [
+      "array"
+    ],
+    "legalBasis": [
+      "string"
+    ],
+    "resultVar": [
       "string"
     ]
   },
-  "flow": {
+  "hubspotUpsertContact": {
+    "email": [
+      "string"
+    ],
+    "contactName": [
+      "string"
+    ],
+    "phone": [
+      "string"
+    ],
+    "company": [
+      "string"
+    ],
+    "jobTitle": [
+      "string"
+    ],
+    "lifecyclestage": [
+      "string"
+    ],
+    "properties": [
+      "array"
+    ],
+    "resultVar": [
+      "string"
+    ]
+  },
+  "multiple_condicional_api": {
+    "var-1": [
+      "string"
+    ],
+    "value-1": [
+      "string"
+    ]
+  },
+  "Data_Input_Condicional": {
+    "field": [
+      "string"
+    ],
+    "validation": [
+      "string"
+    ],
+    "conditions": [
+      "array"
+    ]
+  },
+  "External_Message_Http": {
+    "url_api": [
+      "string"
+    ],
+    "method": [
+      "string"
+    ]
+  },
+  "condicional_api": {
+    "condition": [
+      "string"
+    ],
+    "key": [
+      "string"
+    ],
+    "value": [
+      "string"
+    ]
+  },
+  "Send_DataStore": {
+    "url_api": [
+      "string"
+    ],
+    "method": [
+      "string"
+    ]
+  },
+  "Local_DataStore": {
+    "local_datastore": [
+      "string"
+    ]
+  },
+  "envio_boletos": {
+    "url_api": [
+      "string"
+    ],
+    "channel": [
+      "string"
+    ],
+    "text": [
+      "string"
+    ],
+    "url_list": [
+      "string"
+    ],
+    "url_send": [
+      "string"
+    ],
+    "menuOptions": [
+      "string"
+    ],
+    "menuMessage": [
+      "string"
+    ],
+    "menuTransfer": [
+      "string"
+    ]
+  },
+  "api_options_menu": {
+    "buttons": [
+      "string"
+    ],
+    "message": [
+      "string"
+    ],
+    "apiUrl": [
+      "string"
+    ],
+    "menuName": [
+      "string"
+    ],
+    "postUrl": [
+      "string"
+    ],
+    "variableName": [
+      "string"
+    ],
+    "fallbackDepartment": [
+      "string"
+    ],
+    "endConversation": [
+      "string"
+    ],
+    "datastore": [
+      "string"
+    ]
+  },
+  "Consent": {},
+  "sendConversion": {
+    "eventName": [
+      "string"
+    ],
+    "customEventName": [
+      "string"
+    ],
+    "value": [
+      "string"
+    ],
+    "currency": [
+      "string"
+    ],
+    "onlyFromAd": [
+      "boolean"
+    ]
+  },
+  "trackEvent": {
+    "eventName": [
+      "string"
+    ],
+    "properties": [
+      "array"
+    ],
+    "numericValue": [
+      "string"
+    ],
+    "oncePerConversation": [
+      "boolean"
+    ]
+  },
+  "tabulation": {
+    "tabulation": [
+      "string"
+    ],
+    "df-channel": [
+      "string"
+    ],
     "id": [
       "string"
     ],
-    "targetFlow": [
+    "tabulacao": [
       "string"
     ],
-    "flowName": [
-      "string"
-    ],
-    "flowDescription": [
+    "tabulacaoName": [
       "string"
     ]
   }

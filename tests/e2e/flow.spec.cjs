@@ -1,17 +1,18 @@
 require('../../scripts/register-typescript.cjs')
 const { test, expect } = require('@playwright/test')
 const fs = require('node:fs')
+const path = require('node:path')
 const { createEdge, newFlow, newNode } = require('../../lib/atendimento/format.ts')
 
 const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging', 'deletable']
 const EDGE_KEYS = ['type', 'source', 'sourceHandle', 'target', 'id']
 
 function sample() {
-  const flow = newFlow(new Date('2026-10-09T18:08:50.962Z'))
+  const flow = newFlow(new Date('2026-01-15T12:00:00.000Z'))
   flow.name = 'Atendimento de teste'
   flow.nodes[0].position = { x: 30, y: 60 }
   const menu = newNode('envio_mensagem', { x: 350, y: 60 }, '2')
-  Object.assign(menu.data.data, { title: 'Olá! Como podemos ajudar? 😊', 'opt-2': '2', 'text-2': 'Suporte', 'description-2': 'Falar com suporte' })
+  Object.assign(menu.data.data, { title: 'Olá! Como podemos ajudar? 😊', 'text-1': 'Opção 1', 'opt-2': '2', 'text-2': 'Equipe A', 'description-2': 'Falar com a equipe' })
   menu.data.html = '<div onclick="window.__unsafeHtmlExecuted = true">Modelo preservado</div>'
   flow.nodes.push(menu, newNode('finalizar', { x: 680, y: 60 }, '3'), newNode('finalizar', { x: 680, y: 300 }, '4'))
   flow.edges = [createEdge([], '2', 'output-1', '4'), createEdge([], 'inicio', 'output-0', '2'), createEdge([], '2', 'output-0', '3')]
@@ -107,24 +108,26 @@ test('editing a menu updates native fields and removing options preserves the co
   await page.locator('.react-flow__node[data-id="2"]').click()
   await page.getByLabel('Título da opção 1').fill('Atendimento 😊')
   await page.getByRole('button', { name: 'Remover opção 1', exact: true }).click()
-  await expect(page.getByLabel('Título da opção 1')).toHaveValue('Suporte')
+  await expect(page.getByLabel('Título da opção 1')).toHaveValue('Equipe A')
   await expect(page.getByLabel('Número da opção 1')).toHaveValue('1')
   await expect.poll(async () => page.evaluate(() => {
     const flow = JSON.parse(localStorage.getItem('workflow'))
     return flow.edges.find(edge => edge.source === '2' && edge.sourceHandle === 'output-0')
   })).toMatchObject({ target: '4', id: 'xy-edge__2output-0-4' })
-  await page.getByRole('button', { name: 'Exportar JSON', exact: true }).click()
-  await expect(page.getByLabel('Validação do fluxo')).toContainText('desconectado')
+  await page.getByRole('button', { name: 'Fluxo validado', exact: true }).click()
+  await expect(page.getByLabel('Validação do fluxo')).toContainText('Componente sem conexões; ele não será executado.')
 })
 
-test('all 61 palette entries are searchable; components without JSON data cannot create invalid nodes', async ({ page }) => {
+test('all 61 palette entries are searchable and every one creates a component', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Todas', exact: true }).click()
   const library = page.getByLabel('Biblioteca de componentes')
   await expect(library.locator('section button')).toHaveCount(61)
   await page.getByLabel('Pesquisar componentes').fill('enviar imagem')
   await library.getByRole('button', { name: /Enviar Imagem/ }).click()
-  await expect(library.getByRole('status')).toContainText('Envie um JSON')
+  await expect(library.getByRole('status')).not.toContainText('Envie um JSON')
+  await expect(page.locator('.react-flow__node')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Desfazer', exact: true }).click()
   await expect(page.locator('.react-flow__node')).toHaveCount(1)
   await page.getByLabel('Pesquisar componentes').fill('enviar mensagem')
   await library.getByRole('button', { name: 'Enviar Mensagem', exact: true }).click()
@@ -162,18 +165,23 @@ test('malformed imports and unapplied JSON edits do not overwrite the flow', asy
   expect(withoutStamp(await exported(page))).toEqual(withoutStamp(flow))
 })
 
-test('reference file: 49 nodes and 48 edges survive the browser round trip', async ({ page }) => {
-  test.skip(!process.env.FLOW_REFERENCE, 'Defina FLOW_REFERENCE com o caminho do JSON de referência.')
-  await open(page)
-  const reference = JSON.parse(fs.readFileSync(process.env.FLOW_REFERENCE, 'utf8').replace(/^﻿/, ''))
-  await page.getByLabel('Importar arquivo JSON').setInputFiles(process.env.FLOW_REFERENCE)
-  await expect(page.getByLabel('Nome do fluxo')).toHaveValue(reference.name)
-  await expect(page.locator('.react-flow__node')).toHaveCount(49)
-  await expect(page.locator('.react-flow__edge')).toHaveCount(48)
-  await expect(page.getByRole('button', { name: 'Fluxo validado' })).toBeVisible()
-  const json = await exported(page)
-  expect(withoutStamp(json)).toEqual(withoutStamp(reference))
-})
+const referenceFiles = (process.env.FLOW_REFERENCE || '').split(path.delimiter).map(file => file.trim()).filter(Boolean)
+for (const [index, file] of (referenceFiles.length ? referenceFiles : ['']).entries()) {
+  test(`reference file ${index + 1}: every node and edge survives the browser round trip`, async ({ page }) => {
+    test.skip(!file, `Defina FLOW_REFERENCE com um ou mais arquivos JSON, separados por "${path.delimiter}".`)
+    test.skip(!fs.existsSync(file), `Arquivo ${index + 1} de FLOW_REFERENCE não encontrado.`)
+    await open(page)
+    const content = fs.readFileSync(file, 'utf8')
+    const reference = JSON.parse(content.charCodeAt(0) === 0xfeff ? content.slice(1) : content)
+    await page.getByLabel('Importar arquivo JSON').setInputFiles(file)
+    await expect(page.getByLabel('Nome do fluxo')).toHaveValue(reference.name)
+    await expect(page.locator('.react-flow__node')).toHaveCount(reference.nodes.length)
+    await expect(page.locator('.react-flow__edge')).toHaveCount(reference.edges.length)
+    await expect(page.getByRole('button', { name: 'Fluxo validado' })).toBeVisible()
+    const json = await exported(page)
+    expect(withoutStamp(json)).toEqual(withoutStamp(reference))
+  })
+}
 
 test('connections can be created, replaced, deleted and restored with undo', async ({ page }) => {
   await open(page)

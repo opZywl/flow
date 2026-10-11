@@ -1,0 +1,4164 @@
+[
+  {
+    "id": "start",
+    "nativeType": "trigger_message",
+    "nodeType": "custom",
+    "label": "Iniciar Fluxo",
+    "category": "control",
+    "icon": "Play",
+    "defaults": {
+      "title": "Iniciar Fluxo",
+      "buttons": "false"
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "success"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 86
+    },
+    "fields": [],
+    "summary": []
+  },
+  {
+    "id": "menu",
+    "nativeType": "envio_mensagem",
+    "nodeType": "custom",
+    "label": "Menu de Opções",
+    "category": "messages",
+    "icon": "ListOrdered",
+    "defaults": {
+      "message": "",
+      "buttons": "false",
+      "df-channel": "",
+      "opt-1": "1",
+      "text-1": "",
+      "description-1": "",
+      "title": ""
+    },
+    "outputs": 1,
+    "outputLabels": [],
+    "outputTones": [
+      "accent"
+    ],
+    "outputRule": {
+      "kind": "indexedKeys",
+      "key": "text",
+      "fallbackLabel": "Opção {n}",
+      "min": 1,
+      "max": 10
+    },
+    "measured": {
+      "width": 260,
+      "height": 176
+    },
+    "fields": [
+      {
+        "key": "title",
+        "label": "Mensagem do menu",
+        "kind": "textarea",
+        "placeholder": "Mensagem das opções",
+        "hint": "Até 1024 caracteres. Compatível com emojis, formatação de texto e links."
+      },
+      {
+        "key": "buttons",
+        "label": "Exibir como botões",
+        "kind": "select",
+        "options": [
+          {
+            "value": "false",
+            "label": "Não"
+          },
+          {
+            "value": "true",
+            "label": "Sim"
+          }
+        ],
+        "hint": "Até 3 botões. Acima de 3 é gerada uma lista com no máximo 10 opções."
+      },
+      {
+        "key": "options",
+        "label": "Opções e saídas",
+        "kind": "menuOptions",
+        "hint": "Cada opção gera uma saída própria, na mesma ordem da lista.",
+        "min": 1,
+        "max": 10,
+        "pattern": "^(opt|text|description)-\\d+$",
+        "itemLabel": "Opção",
+        "addLabel": "Adicionar opção",
+        "drivesOutputs": true
+      }
+    ],
+    "summary": [
+      "title"
+    ],
+    "fieldTypePatterns": {
+      "^(opt|text|description)-\\d+$": [
+        "string"
+      ]
+    }
+  },
+  {
+    "id": "message",
+    "nativeType": "envio_pergunta",
+    "nodeType": "custom",
+    "label": "Enviar Mensagem",
+    "category": "messages",
+    "icon": "MessageSquare",
+    "defaults": {
+      "envio_pergunta": "",
+      "template": ""
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 130
+    },
+    "fields": [
+      {
+        "key": "template",
+        "label": "Mensagem",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem",
+        "hint": "Use @@@variavel para valores capturados ou retornados por API e #NAME para o nome do contato."
+      }
+    ],
+    "summary": [
+      "template"
+    ],
+    "technicalLabels": {
+      "envio_pergunta": "Campo legado"
+    }
+  },
+  {
+    "id": "department",
+    "nativeType": "departamentos",
+    "nodeType": "custom",
+    "label": "Transferir para Departamento",
+    "category": "routing",
+    "icon": "Users",
+    "defaults": {
+      "departamentos": "",
+      "df-channel": "",
+      "id": "",
+      "departamento": ""
+    },
+    "configured": {
+      "departamentos": "",
+      "df-channel": "",
+      "id": "",
+      "departamento": "",
+      "name": "",
+      "enabled": true,
+      "userManager": null
+    },
+    "outputs": 0,
+    "outputLabels": [],
+    "outputTones": [],
+    "measured": {
+      "width": 330,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "departamento",
+        "label": "ID do departamento",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "mirror": "id"
+      },
+      {
+        "key": "name",
+        "label": "Nome do departamento",
+        "kind": "text"
+      }
+    ],
+    "summary": [
+      "name",
+      "departamento"
+    ],
+    "technicalLabels": {
+      "departamentos": "Campo legado",
+      "enabled": "Departamento ativo"
+    }
+  },
+  {
+    "id": "tag",
+    "nativeType": "tags",
+    "nodeType": "custom",
+    "label": "Aplicar Tag",
+    "category": "routing",
+    "icon": "Tag",
+    "defaults": {
+      "id": "",
+      "tags": "",
+      "message": "",
+      "selectedTag": ""
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "selectedTag",
+        "label": "ID da tag",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "mirror": "id"
+      },
+      {
+        "key": "tags",
+        "label": "Nome da tag",
+        "kind": "text"
+      },
+      {
+        "key": "message",
+        "label": "Mensagem",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Opcional."
+      }
+    ],
+    "summary": [
+      "tags",
+      "selectedTag"
+    ]
+  },
+  {
+    "id": "flow",
+    "nativeType": "flow",
+    "nodeType": "custom",
+    "label": "Transferir para Fluxo",
+    "category": "control",
+    "icon": "Workflow",
+    "defaults": {
+      "id": ""
+    },
+    "configured": {
+      "id": "",
+      "targetFlow": "",
+      "flowName": "",
+      "flowDescription": ""
+    },
+    "outputs": 0,
+    "outputLabels": [],
+    "outputTones": [],
+    "measured": {
+      "width": 260,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "targetFlow",
+        "label": "ID do fluxo de destino",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "mirror": "id"
+      },
+      {
+        "key": "flowName",
+        "label": "Nome do fluxo de destino",
+        "kind": "text"
+      },
+      {
+        "key": "flowDescription",
+        "label": "Descrição do fluxo de destino",
+        "kind": "textarea"
+      }
+    ],
+    "summary": [
+      "flowName",
+      "targetFlow"
+    ]
+  },
+  {
+    "id": "finish",
+    "nativeType": "finalizar",
+    "nodeType": "custom",
+    "label": "Encerrar Conversa",
+    "category": "control",
+    "icon": "Power",
+    "defaults": {
+      "message": "",
+      "df-channel": ""
+    },
+    "outputs": 0,
+    "outputLabels": [],
+    "outputTones": [],
+    "measured": {
+      "width": 260,
+      "height": 86
+    },
+    "fields": [],
+    "summary": []
+  },
+  {
+    "id": "time",
+    "nativeType": "timeConditions",
+    "nodeType": "custom",
+    "label": "Condições de Tempo",
+    "category": "conditions",
+    "icon": "Clock",
+    "defaults": {
+      "timeConditions": "",
+      "timeRules": [
+        {
+          "id": "",
+          "weekDays": [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday"
+          ],
+          "startTime": "08:00",
+          "endTime": "17:59"
+        }
+      ]
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Fora do horário",
+      "Dentro do horário"
+    ],
+    "outputTones": [
+      "danger",
+      "success"
+    ],
+    "measured": {
+      "width": 262,
+      "height": 86
+    },
+    "fields": [
+      {
+        "key": "timeRules",
+        "label": "Horários de atendimento",
+        "kind": "timeRules"
+      }
+    ],
+    "summary": [],
+    "technicalLabels": {
+      "timeConditions": "Campo legado"
+    }
+  },
+  {
+    "id": "request-data",
+    "nativeType": "solicitar_dados",
+    "nodeType": "custom",
+    "label": "Solicitar Dados",
+    "category": "apis",
+    "icon": "IdCard",
+    "defaults": {
+      "channel": "other",
+      "url_api": ""
+    },
+    "configured": {
+      "channel": "other",
+      "url_api": "",
+      "curl": "",
+      "method": "POST",
+      "body_value": "",
+      "text": "",
+      "error": "",
+      "parsed_body": {},
+      "parameterExplanations": {},
+      "tentativas": "3",
+      "isApiValidated": false,
+      "validated_signature": "",
+      "headers": [],
+      "response_map": []
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Falha",
+      "Sucesso"
+    ],
+    "outputTones": [
+      "danger",
+      "success"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "text",
+        "label": "Mensagem de solicitação",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Use @@@variavel para valores capturados ou retornados por API e #NAME para o nome do contato."
+      },
+      {
+        "key": "error",
+        "label": "Mensagem de erro",
+        "kind": "textarea",
+        "placeholder": "Mensagem de erro..."
+      },
+      {
+        "key": "channel",
+        "label": "Tipo de dado",
+        "kind": "select",
+        "options": [
+          {
+            "value": "CPF/CNPJ",
+            "label": "CPF/CNPJ"
+          },
+          {
+            "value": "CPF",
+            "label": "CPF"
+          },
+          {
+            "value": "CNPJ",
+            "label": "CNPJ"
+          },
+          {
+            "value": "other",
+            "label": "Outro"
+          }
+        ]
+      },
+      {
+        "key": "tentativas",
+        "label": "Quantidade de tentativas",
+        "kind": "select",
+        "options": [
+          {
+            "value": "1",
+            "label": "1"
+          },
+          {
+            "value": "2",
+            "label": "2"
+          },
+          {
+            "value": "3",
+            "label": "3"
+          },
+          {
+            "value": "4",
+            "label": "4"
+          },
+          {
+            "value": "5",
+            "label": "5"
+          }
+        ]
+      },
+      {
+        "key": "url_api",
+        "label": "URL da API",
+        "kind": "url",
+        "placeholder": "https://"
+      },
+      {
+        "key": "method",
+        "label": "Método HTTP",
+        "kind": "select",
+        "options": [
+          {
+            "value": "POST",
+            "label": "POST"
+          }
+        ]
+      },
+      {
+        "key": "body_value",
+        "label": "Corpo da requisição",
+        "kind": "textarea",
+        "placeholder": "{\n  \"campo\": \"{{input}}\"\n}",
+        "hint": "{{input}} recebe o dado digitado pelo contato."
+      },
+      {
+        "key": "headers",
+        "label": "Cabeçalhos",
+        "kind": "json"
+      },
+      {
+        "key": "response_map",
+        "label": "Mapeamento da resposta",
+        "kind": "json",
+        "hint": "Cada item: path, key, sample e variable. A variável pode ser usada nas mensagens como @@@variavel."
+      }
+    ],
+    "summary": [
+      "text"
+    ]
+  },
+  {
+    "id": "protocol",
+    "nativeType": "protocolo",
+    "nodeType": "custom",
+    "label": "Protocolo",
+    "category": "apis",
+    "icon": "Hash",
+    "defaults": {
+      "url_api": "",
+      "opt": "Automático",
+      "text": "Seu protocolo é: {protocol}"
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 174
+    },
+    "fields": [
+      {
+        "key": "opt",
+        "label": "Tipo de protocolo",
+        "kind": "select",
+        "options": [
+          {
+            "value": "Automático",
+            "label": "Automático"
+          },
+          {
+            "value": "NewActivities",
+            "label": "Novas Atividades"
+          },
+          {
+            "value": "URL",
+            "label": "URL"
+          }
+        ]
+      },
+      {
+        "key": "text",
+        "label": "Mensagem",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "{protocol} é substituído pelo número do protocolo."
+      },
+      {
+        "key": "url_api",
+        "label": "URL da API",
+        "kind": "url",
+        "placeholder": "https://",
+        "hint": "Usada quando o tipo de protocolo é URL."
+      }
+    ],
+    "summary": [
+      "text"
+    ]
+  },
+  {
+    "id": "api",
+    "nativeType": "consulta_api",
+    "nodeType": "custom",
+    "label": "Consulta API",
+    "category": "apis",
+    "icon": "Code2",
+    "defaults": {
+      "url_api": "",
+      "method": "POST",
+      "text": ""
+    },
+    "configured": {
+      "url_api": "",
+      "method": "POST",
+      "text": "",
+      "curl": "",
+      "body_value": "",
+      "parsed_body": {},
+      "parameterExplanations": {},
+      "headers": [],
+      "api_test_values": {},
+      "isApiValidated": false,
+      "validated_signature": "",
+      "response_map": []
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Falha",
+      "Sucesso"
+    ],
+    "outputTones": [
+      "danger",
+      "success"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "url_api",
+        "label": "URL da API",
+        "kind": "url",
+        "placeholder": "https://"
+      },
+      {
+        "key": "method",
+        "label": "Método HTTP",
+        "kind": "select",
+        "options": [
+          {
+            "value": "POST",
+            "label": "POST"
+          }
+        ]
+      },
+      {
+        "key": "body_value",
+        "label": "Corpo da requisição",
+        "kind": "textarea",
+        "placeholder": "{\n  \"campo\": \"{{variavel}}\"\n}",
+        "hint": "Use {{variavel}} para enviar valores capturados no atendimento."
+      },
+      {
+        "key": "text",
+        "label": "Mensagem",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem..."
+      },
+      {
+        "key": "headers",
+        "label": "Cabeçalhos",
+        "kind": "json"
+      },
+      {
+        "key": "api_test_values",
+        "label": "Valores de teste",
+        "kind": "json"
+      },
+      {
+        "key": "response_map",
+        "label": "Mapeamento da resposta",
+        "kind": "json",
+        "hint": "Cada item: path, key, sample e variable. A variável pode ser usada nas mensagens como @@@variavel."
+      }
+    ],
+    "summary": [
+      "url_api"
+    ]
+  },
+  {
+    "id": "wait",
+    "nativeType": "waitForAnswer",
+    "nodeType": "custom",
+    "label": "Aguardando Mensagem",
+    "category": "collection",
+    "icon": "Hourglass",
+    "defaults": {
+      "mask": "",
+      "customfields": ""
+    },
+    "configured": {
+      "mask": "",
+      "customfields": "",
+      "customFields": "",
+      "logToActivity": false,
+      "autoSaveContact": false
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 285,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "customFields",
+        "label": "Salvar resposta no campo",
+        "kind": "text",
+        "placeholder": "Ex.: name, empresa ou custom:ID:campo",
+        "hint": "A resposta fica disponível nas mensagens seguintes como @@@campo.",
+        "suggestions": [
+          "name",
+          "empresa",
+          "field_1",
+          "field_2",
+          "field_3",
+          "field_4",
+          "field_5"
+        ]
+      },
+      {
+        "key": "mask",
+        "label": "Máscara",
+        "kind": "select",
+        "options": [
+          {
+            "value": "",
+            "label": "Sem máscara"
+          },
+          {
+            "value": "DD/MM/YYYY",
+            "label": "DD/MM/YYYY"
+          }
+        ]
+      },
+      {
+        "key": "logToActivity",
+        "label": "Registrar na atividade",
+        "kind": "checkbox"
+      },
+      {
+        "key": "autoSaveContact",
+        "label": "Salvar no contato automaticamente",
+        "kind": "checkbox"
+      }
+    ],
+    "summary": [
+      "customFields"
+    ]
+  },
+  {
+    "id": "file",
+    "nativeType": "envio_arquivo",
+    "nodeType": "custom",
+    "label": "Enviar Arquivo",
+    "category": "messages",
+    "icon": "Paperclip",
+    "defaults": {
+      "imagem": "",
+      "url": "",
+      "caption": "",
+      "filename": "",
+      "mime_type": "",
+      "voice_note": false
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "url",
+        "label": "URL do arquivo",
+        "kind": "url",
+        "placeholder": "https://",
+        "hint": "Endereço público do arquivo. Na plataforma, é preenchido ao enviar o arquivo."
+      },
+      {
+        "key": "filename",
+        "label": "Nome do arquivo",
+        "kind": "text",
+        "placeholder": "Ex.: documento.pdf"
+      },
+      {
+        "key": "mime_type",
+        "label": "Tipo do arquivo (MIME)",
+        "kind": "text",
+        "placeholder": "Ex.: application/pdf",
+        "suggestions": [
+          "application/pdf",
+          "audio/ogg",
+          "audio/mpeg",
+          "image/jpeg",
+          "image/png",
+          "video/mp4"
+        ]
+      },
+      {
+        "key": "caption",
+        "label": "Legenda",
+        "kind": "textarea",
+        "placeholder": "Opcional",
+        "hint": "Texto enviado junto com o arquivo. O WhatsApp não exibe legenda em áudio."
+      },
+      {
+        "key": "voice_note",
+        "label": "Enviar como mensagem de voz",
+        "kind": "checkbox",
+        "hint": "Use com áudio OGG."
+      }
+    ],
+    "summary": [
+      "filename",
+      "url"
+    ],
+    "technicalLabels": {
+      "imagem": "Imagem"
+    }
+  },
+  {
+    "id": "image",
+    "nativeType": "envio_imagem",
+    "nodeType": "custom",
+    "label": "Enviar Imagem",
+    "category": "messages",
+    "icon": "ImageIcon",
+    "defaults": {
+      "imagem": "",
+      "url": "",
+      "caption": "",
+      "filename": ""
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "imagem",
+        "label": "URL da imagem",
+        "kind": "url",
+        "placeholder": "https://",
+        "hint": "Endereço público da imagem. Na plataforma, é preenchido ao enviar a imagem.",
+        "mirror": "url"
+      },
+      {
+        "key": "filename",
+        "label": "Nome do arquivo",
+        "kind": "text",
+        "placeholder": "Ex.: imagem.png"
+      },
+      {
+        "key": "caption",
+        "label": "Legenda",
+        "kind": "textarea",
+        "placeholder": "Opcional",
+        "hint": "Texto enviado junto com a imagem."
+      }
+    ],
+    "summary": [
+      "filename",
+      "imagem"
+    ]
+  },
+  {
+    "id": "template-message",
+    "nativeType": "templateMessage",
+    "nodeType": "custom",
+    "label": "Mensagem Template",
+    "category": "templates",
+    "icon": "LayoutTemplate",
+    "defaults": {
+      "templateMessage": "",
+      "df-channel": "",
+      "id": "",
+      "templateName": "",
+      "templateParams": []
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 261,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "templateMessage",
+        "label": "ID do template",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "mirror": "id"
+      },
+      {
+        "key": "templateName",
+        "label": "Nome do template",
+        "kind": "text"
+      },
+      {
+        "key": "templateParams",
+        "label": "Parâmetros do template",
+        "kind": "json",
+        "hint": "Lista das variáveis do template."
+      }
+    ],
+    "summary": [
+      "templateName",
+      "templateMessage"
+    ]
+  },
+  {
+    "id": "interactive-template",
+    "nativeType": "templateInteractive",
+    "nodeType": "custom",
+    "label": "Template Interativo",
+    "category": "templates",
+    "icon": "MousePointerClick",
+    "defaults": {
+      "id": "",
+      "templateMessage": "",
+      "buttons": "true",
+      "templateName": "",
+      "templateParams": []
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 130
+    },
+    "fields": [
+      {
+        "key": "templateMessage",
+        "label": "ID do template",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "mirror": "id"
+      },
+      {
+        "key": "templateName",
+        "label": "Nome do template",
+        "kind": "text"
+      },
+      {
+        "key": "templateParams",
+        "label": "Parâmetros do template",
+        "kind": "json",
+        "hint": "Lista das variáveis do template."
+      }
+    ],
+    "summary": [
+      "templateName",
+      "templateMessage"
+    ]
+  },
+  {
+    "id": "form",
+    "nativeType": "whatsappFlow",
+    "nodeType": "custom",
+    "label": "Enviar Formulário",
+    "category": "templates",
+    "icon": "FormInput",
+    "defaults": {
+      "formId": "",
+      "formName": "",
+      "metaFlowId": "",
+      "firstScreen": "",
+      "formFields": [],
+      "sendMode": "interactive",
+      "templateName": "",
+      "header": "",
+      "body": "",
+      "footer": "",
+      "cta": "",
+      "varPrefix": "",
+      "outputVar": "whatsappFlowResponse",
+      "crmMap": [],
+      "successMessage": "",
+      "reminderMessage": "",
+      "maxReminders": 1,
+      "errorMessage": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Respondido",
+      "Não respondido"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 524,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "formId",
+        "label": "ID do formulário",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma"
+      },
+      {
+        "key": "formName",
+        "label": "Nome do formulário",
+        "kind": "text"
+      },
+      {
+        "key": "metaFlowId",
+        "label": "ID do Flow na Meta",
+        "kind": "text",
+        "hint": "Identificador do WhatsApp Flow publicado na Meta."
+      },
+      {
+        "key": "firstScreen",
+        "label": "Tela inicial",
+        "kind": "text",
+        "hint": "ID da primeira tela do Flow."
+      },
+      {
+        "key": "formFields",
+        "label": "Campos do formulário",
+        "kind": "json",
+        "hint": "Lista dos campos do formulário."
+      },
+      {
+        "key": "sendMode",
+        "label": "Forma de envio",
+        "kind": "select",
+        "options": [
+          {
+            "value": "interactive",
+            "label": "Mensagem interativa"
+          }
+        ]
+      },
+      {
+        "key": "templateName",
+        "label": "Nome do template",
+        "kind": "text",
+        "hint": "Usado quando o envio é por template."
+      },
+      {
+        "key": "header",
+        "label": "Cabeçalho",
+        "kind": "text",
+        "placeholder": "Opcional"
+      },
+      {
+        "key": "body",
+        "label": "Corpo da mensagem",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem"
+      },
+      {
+        "key": "footer",
+        "label": "Rodapé",
+        "kind": "text",
+        "placeholder": "Opcional"
+      },
+      {
+        "key": "cta",
+        "label": "Texto do botão",
+        "kind": "text",
+        "hint": "Botão que abre o formulário no WhatsApp."
+      },
+      {
+        "key": "varPrefix",
+        "label": "Prefixo das variáveis",
+        "kind": "text",
+        "hint": "Aplicado ao nome de cada campo salvo como variável."
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável da resposta",
+        "kind": "text",
+        "hint": "Recebe a resposta completa do formulário."
+      },
+      {
+        "key": "crmMap",
+        "label": "Mapeamento para o CRM",
+        "kind": "json",
+        "hint": "Lista que liga campos do formulário a campos do CRM."
+      },
+      {
+        "key": "successMessage",
+        "label": "Mensagem de sucesso",
+        "kind": "textarea",
+        "placeholder": "Opcional",
+        "hint": "Enviada quando o contato envia o formulário."
+      },
+      {
+        "key": "reminderMessage",
+        "label": "Mensagem de lembrete",
+        "kind": "textarea",
+        "placeholder": "Opcional",
+        "hint": "Enviada quando o contato não responde."
+      },
+      {
+        "key": "maxReminders",
+        "label": "Máximo de lembretes",
+        "kind": "number",
+        "min": 0,
+        "step": 1
+      },
+      {
+        "key": "errorMessage",
+        "label": "Mensagem de erro",
+        "kind": "textarea",
+        "placeholder": "Opcional"
+      }
+    ],
+    "summary": [
+      "formName",
+      "body"
+    ]
+  },
+  {
+    "id": "pix",
+    "nativeType": "pixCharge",
+    "nodeType": "custom",
+    "label": "Cobrança PIX",
+    "category": "templates",
+    "icon": "QrCode",
+    "defaults": {
+      "id": "",
+      "templateMessage": "",
+      "buttons": "true",
+      "templateName": "",
+      "templateParams": []
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 130
+    },
+    "fields": [
+      {
+        "key": "templateMessage",
+        "label": "ID do template",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "hint": "Template usado para enviar a cobrança.",
+        "mirror": "id"
+      },
+      {
+        "key": "templateName",
+        "label": "Nome do template",
+        "kind": "text"
+      },
+      {
+        "key": "templateParams",
+        "label": "Parâmetros do template",
+        "kind": "json",
+        "hint": "Lista das variáveis do template."
+      }
+    ],
+    "summary": [
+      "templateName",
+      "templateMessage"
+    ]
+  },
+  {
+    "id": "transfer-other",
+    "nativeType": "whatsappCall",
+    "nodeType": "custom",
+    "label": "Transferir para Ligação",
+    "category": "routing",
+    "icon": "PhoneCall",
+    "defaults": {
+      "mode": "button",
+      "text": "",
+      "displayText": "",
+      "ttlMinutes": "",
+      "respectHours": true,
+      "departmentId": "",
+      "outsideHoursMessage": "",
+      "errorMessage": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 528,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "mode",
+        "label": "Tipo de envio",
+        "kind": "select",
+        "options": [
+          {
+            "value": "button",
+            "label": "Botão de ligação"
+          }
+        ]
+      },
+      {
+        "key": "text",
+        "label": "Mensagem",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem..."
+      },
+      {
+        "key": "displayText",
+        "label": "Texto do botão",
+        "kind": "text",
+        "placeholder": "Texto exibido no botão"
+      },
+      {
+        "key": "ttlMinutes",
+        "label": "Validade do botão (minutos)",
+        "kind": "numberText",
+        "hint": "Opcional. Somente números.",
+        "min": 1,
+        "step": 1
+      },
+      {
+        "key": "respectHours",
+        "label": "Respeitar o horário de atendimento",
+        "kind": "checkbox"
+      },
+      {
+        "key": "departmentId",
+        "label": "ID do departamento",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma"
+      },
+      {
+        "key": "outsideHoursMessage",
+        "label": "Mensagem fora do horário",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem..."
+      },
+      {
+        "key": "errorMessage",
+        "label": "Mensagem de erro",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem..."
+      }
+    ],
+    "summary": [
+      "displayText",
+      "text"
+    ]
+  },
+  {
+    "id": "agent",
+    "nativeType": "transferir",
+    "nodeType": "custom",
+    "label": "Transferir para Agente",
+    "category": "routing",
+    "icon": "Headset",
+    "defaults": {
+      "df-channel": "",
+      "id": "",
+      "agente": "",
+      "agenteName": ""
+    },
+    "outputs": 0,
+    "outputLabels": [],
+    "outputTones": [],
+    "measured": {
+      "width": 274,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "agente",
+        "label": "ID do agente",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "mirror": "id"
+      },
+      {
+        "key": "agenteName",
+        "label": "Nome do agente",
+        "kind": "text"
+      }
+    ],
+    "summary": [
+      "agenteName",
+      "agente"
+    ]
+  },
+  {
+    "id": "back-agent",
+    "nativeType": "backToAgent",
+    "nodeType": "custom",
+    "label": "Voltar ao Agente",
+    "category": "routing",
+    "icon": "Undo2",
+    "defaults": {
+      "backToAgent": "",
+      "department": "",
+      "df-channel": "",
+      "id": "",
+      "departmentName": "",
+      "availableDepartments": []
+    },
+    "outputs": 0,
+    "outputLabels": [],
+    "outputTones": [],
+    "measured": {
+      "width": 317,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "department",
+        "label": "ID do departamento",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "mirror": "id"
+      },
+      {
+        "key": "departmentName",
+        "label": "Nome do departamento",
+        "kind": "text"
+      }
+    ],
+    "summary": [
+      "departmentName",
+      "department"
+    ],
+    "technicalLabels": {
+      "backToAgent": "Campo legado",
+      "availableDepartments": "Departamentos disponíveis"
+    }
+  },
+  {
+    "id": "service",
+    "nativeType": "apptService",
+    "nodeType": "custom",
+    "label": "Escolher Serviço",
+    "category": "schedule",
+    "icon": "ConciergeBell",
+    "defaults": {
+      "outputVar": "appt_serviceId",
+      "headerMessage": "",
+      "emptyMessage": "",
+      "autoSelectSingle": true,
+      "selectedIds": []
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Serviço escolhido",
+      "Nenhum disponível"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 403,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "headerMessage",
+        "label": "Mensagem da lista",
+        "kind": "textarea",
+        "placeholder": "Texto enviado com a lista de serviços"
+      },
+      {
+        "key": "emptyMessage",
+        "label": "Mensagem sem serviços",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando não há serviços para escolher"
+      },
+      {
+        "key": "autoSelectSingle",
+        "label": "Escolher automaticamente quando houver um único serviço",
+        "kind": "checkbox"
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável de saída",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do serviço escolhido."
+      },
+      {
+        "key": "selectedIds",
+        "label": "Serviços oferecidos",
+        "kind": "json",
+        "hint": "Lista de IDs cadastrados na agenda da plataforma."
+      }
+    ],
+    "summary": [
+      "headerMessage",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "schedule-client",
+    "nativeType": "apptIdentify",
+    "nodeType": "custom",
+    "label": "Identificar Cliente",
+    "category": "schedule",
+    "icon": "BookUser",
+    "defaults": {
+      "contactVar": "appt_contactId"
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Identificado",
+      "Não identificado"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 508,
+      "height": 140
+    },
+    "fields": [
+      {
+        "key": "contactVar",
+        "label": "Variável do cliente",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do cliente identificado na agenda."
+      }
+    ],
+    "summary": [
+      "contactVar"
+    ]
+  },
+  {
+    "id": "location",
+    "nativeType": "apptLocation",
+    "nodeType": "custom",
+    "label": "Escolher Local",
+    "category": "schedule",
+    "icon": "MapPin",
+    "defaults": {
+      "outputVar": "appt_locationId",
+      "headerMessage": "",
+      "emptyMessage": "",
+      "autoSelectSingle": true,
+      "selectedIds": []
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Local escolhido",
+      "Nenhum disponível"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 394,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "headerMessage",
+        "label": "Mensagem da lista",
+        "kind": "textarea",
+        "placeholder": "Texto enviado com a lista de locais"
+      },
+      {
+        "key": "emptyMessage",
+        "label": "Mensagem sem locais",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando não há locais para escolher"
+      },
+      {
+        "key": "autoSelectSingle",
+        "label": "Escolher automaticamente quando houver um único local",
+        "kind": "checkbox"
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável de saída",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do local escolhido."
+      },
+      {
+        "key": "selectedIds",
+        "label": "Locais oferecidos",
+        "kind": "json",
+        "hint": "Lista de IDs cadastrados na agenda da plataforma."
+      }
+    ],
+    "summary": [
+      "headerMessage",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "professional",
+    "nativeType": "apptProvider",
+    "nodeType": "custom",
+    "label": "Escolher Profissional",
+    "category": "schedule",
+    "icon": "BriefcaseBusiness",
+    "defaults": {
+      "outputVar": "appt_providerId",
+      "headerMessage": "",
+      "emptyMessage": "",
+      "autoSelectSingle": true,
+      "selectedIds": []
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Profissional escolhido",
+      "Nenhum disponível"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 433,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "headerMessage",
+        "label": "Mensagem da lista",
+        "kind": "textarea",
+        "placeholder": "Texto enviado com a lista de profissionais"
+      },
+      {
+        "key": "emptyMessage",
+        "label": "Mensagem sem profissionais",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando não há profissionais para escolher"
+      },
+      {
+        "key": "autoSelectSingle",
+        "label": "Escolher automaticamente quando houver um único profissional",
+        "kind": "checkbox"
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável de saída",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do profissional escolhido."
+      },
+      {
+        "key": "selectedIds",
+        "label": "Profissionais oferecidos",
+        "kind": "json",
+        "hint": "Lista de IDs cadastrados na agenda da plataforma."
+      }
+    ],
+    "summary": [
+      "headerMessage",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "time-slot",
+    "nativeType": "apptSlot",
+    "nodeType": "custom",
+    "label": "Escolher Horário",
+    "category": "schedule",
+    "icon": "CalendarClock",
+    "defaults": {
+      "outputVar": "appt_slotStart",
+      "headerMessage": "",
+      "emptyMessage": "",
+      "autoSelectSingle": true
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Horário escolhido",
+      "Nenhum disponível"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 394,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "headerMessage",
+        "label": "Mensagem da lista",
+        "kind": "textarea",
+        "placeholder": "Texto enviado com a lista de horários"
+      },
+      {
+        "key": "emptyMessage",
+        "label": "Mensagem sem horários",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando não há horários para escolher"
+      },
+      {
+        "key": "autoSelectSingle",
+        "label": "Escolher automaticamente quando houver um único horário",
+        "kind": "checkbox"
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável de saída",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o início do horário escolhido."
+      }
+    ],
+    "summary": [
+      "headerMessage",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "client-data",
+    "nativeType": "apptCustomerIntake",
+    "nodeType": "custom",
+    "label": "Dados do Cliente",
+    "category": "schedule",
+    "icon": "ClipboardPen",
+    "defaults": {
+      "askName": true,
+      "askEmail": false,
+      "askNotes": false,
+      "introMessage": "",
+      "successMessage": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Dados registrados",
+      "Dados não registrados"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 457,
+      "height": 140
+    },
+    "fields": [
+      {
+        "key": "introMessage",
+        "label": "Mensagem inicial",
+        "kind": "textarea",
+        "placeholder": "Texto enviado antes de pedir os dados"
+      },
+      {
+        "key": "askName",
+        "label": "Pedir nome",
+        "kind": "checkbox"
+      },
+      {
+        "key": "askEmail",
+        "label": "Pedir e-mail",
+        "kind": "checkbox"
+      },
+      {
+        "key": "askNotes",
+        "label": "Pedir observações",
+        "kind": "checkbox"
+      },
+      {
+        "key": "successMessage",
+        "label": "Mensagem de conclusão",
+        "kind": "textarea",
+        "placeholder": "Texto enviado após receber os dados"
+      }
+    ],
+    "summary": [
+      "introMessage",
+      "successMessage"
+    ]
+  },
+  {
+    "id": "booking",
+    "nativeType": "apptBook",
+    "nodeType": "custom",
+    "label": "Confirmar Agendamento",
+    "category": "schedule",
+    "icon": "CalendarCheck",
+    "defaults": {
+      "outputVar": "appt_appointmentId",
+      "successMessage": "",
+      "errorMessage": "",
+      "conflictMessage": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Agendado",
+      "Não agendado"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 441,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "successMessage",
+        "label": "Mensagem de confirmação",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando o agendamento é criado"
+      },
+      {
+        "key": "conflictMessage",
+        "label": "Mensagem de horário ocupado",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando o horário deixa de estar livre",
+        "hint": "Usada quando o horário é ocupado antes da confirmação."
+      },
+      {
+        "key": "errorMessage",
+        "label": "Mensagem de erro",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando o agendamento falha"
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável de saída",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do agendamento criado."
+      }
+    ],
+    "summary": [
+      "successMessage",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "list-tickets",
+    "nativeType": "ticketLookup",
+    "nodeType": "custom",
+    "label": "Consultar Chamados",
+    "category": "tickets",
+    "icon": "FileSearch",
+    "defaults": {
+      "lookupScope": "both",
+      "outputVar": "ticketId",
+      "headerMessage": "",
+      "emptyMessage": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Chamado escolhido",
+      "Nenhum chamado"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 412,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "lookupScope",
+        "label": "Escopo da consulta",
+        "kind": "select",
+        "options": [
+          {
+            "value": "both",
+            "label": "Ambos"
+          }
+        ]
+      },
+      {
+        "key": "headerMessage",
+        "label": "Mensagem da lista",
+        "kind": "textarea",
+        "placeholder": "Texto enviado com a lista de chamados"
+      },
+      {
+        "key": "emptyMessage",
+        "label": "Mensagem sem chamados",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando o contato não tem chamados"
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável de saída",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do chamado escolhido. Use a mesma variável em Detalhe do Chamado."
+      }
+    ],
+    "summary": [
+      "headerMessage",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "open-ticket",
+    "nativeType": "ticketCreate",
+    "nodeType": "custom",
+    "label": "Abrir Chamado",
+    "category": "tickets",
+    "icon": "TicketPlus",
+    "defaults": {
+      "formId": "",
+      "introMessage": "",
+      "successMessage": "",
+      "errorMessage": "",
+      "subjectFieldKey": "subject",
+      "fallbackQuestion": "",
+      "defaultPriority": "medium",
+      "defaultType": "question",
+      "outputVar": "ticketId"
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Chamado aberto",
+      "Não aberto"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 592,
+      "height": 174
+    },
+    "fields": [
+      {
+        "key": "formId",
+        "label": "ID do formulário",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "hint": "Opcional. Sem formulário, a plataforma faz a pergunta alternativa."
+      },
+      {
+        "key": "introMessage",
+        "label": "Mensagem inicial",
+        "kind": "textarea",
+        "placeholder": "Texto enviado antes da abertura do chamado"
+      },
+      {
+        "key": "fallbackQuestion",
+        "label": "Pergunta alternativa",
+        "kind": "textarea",
+        "placeholder": "Pergunta feita ao contato",
+        "hint": "Feita ao contato quando nenhum formulário é informado."
+      },
+      {
+        "key": "subjectFieldKey",
+        "label": "Campo de assunto",
+        "kind": "text",
+        "hint": "Chave do campo do formulário usada como assunto do chamado."
+      },
+      {
+        "key": "defaultPriority",
+        "label": "Prioridade padrão",
+        "kind": "select",
+        "options": [
+          {
+            "value": "medium",
+            "label": "Média"
+          }
+        ]
+      },
+      {
+        "key": "defaultType",
+        "label": "Tipo padrão",
+        "kind": "select",
+        "options": [
+          {
+            "value": "question",
+            "label": "Dúvida"
+          }
+        ]
+      },
+      {
+        "key": "successMessage",
+        "label": "Mensagem de chamado aberto",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando o chamado é aberto",
+        "hint": "Use {{ticketNumber}} para o número do chamado e {{link}} para o link de acompanhamento."
+      },
+      {
+        "key": "errorMessage",
+        "label": "Mensagem de erro",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando o chamado não é aberto"
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável de saída",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do chamado aberto."
+      }
+    ],
+    "summary": [
+      "formId",
+      "fallbackQuestion",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "ticket-detail",
+    "nativeType": "ticketDetail",
+    "nodeType": "custom",
+    "label": "Detalhe do Chamado",
+    "category": "tickets",
+    "icon": "Ticket",
+    "defaults": {
+      "inputVar": "ticketId",
+      "notFoundMessage": "",
+      "actionPrompt": "",
+      "commentPrompt": "",
+      "csatCommentPrompt": "",
+      "enableComment": true,
+      "enableReopen": true,
+      "enableClose": true,
+      "enableCsat": true
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Encontrado",
+      "Não encontrado"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 416,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "inputVar",
+        "label": "Variável do chamado",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Variável com o ID do chamado, como a de saída de Consultar Chamados ou Abrir Chamado."
+      },
+      {
+        "key": "notFoundMessage",
+        "label": "Mensagem de chamado não encontrado",
+        "kind": "textarea",
+        "placeholder": "Texto enviado quando o chamado não existe"
+      },
+      {
+        "key": "actionPrompt",
+        "label": "Pergunta das ações",
+        "kind": "textarea",
+        "placeholder": "Texto enviado com as ações disponíveis"
+      },
+      {
+        "key": "enableComment",
+        "label": "Permitir comentar",
+        "kind": "checkbox"
+      },
+      {
+        "key": "commentPrompt",
+        "label": "Pedido de comentário",
+        "kind": "textarea",
+        "placeholder": "Texto enviado para o contato escrever o comentário"
+      },
+      {
+        "key": "enableReopen",
+        "label": "Permitir reabrir",
+        "kind": "checkbox"
+      },
+      {
+        "key": "enableClose",
+        "label": "Permitir encerrar",
+        "kind": "checkbox"
+      },
+      {
+        "key": "enableCsat",
+        "label": "Permitir avaliação de satisfação",
+        "kind": "checkbox"
+      },
+      {
+        "key": "csatCommentPrompt",
+        "label": "Pedido de comentário da avaliação",
+        "kind": "textarea",
+        "placeholder": "Texto enviado após a nota",
+        "hint": "Opcional."
+      }
+    ],
+    "summary": [
+      "inputVar",
+      "actionPrompt"
+    ]
+  },
+  {
+    "id": "crm-client",
+    "nativeType": "crmIdentify",
+    "nodeType": "custom",
+    "label": "Identificar Cliente",
+    "category": "crm",
+    "icon": "UserSearch",
+    "defaults": {
+      "contactVar": "crmContactName",
+      "leadVar": "crmContactId"
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Identificado",
+      "Não identificado"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 431,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "contactVar",
+        "label": "Variável do contato",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe os dados do contato identificado no CRM."
+      },
+      {
+        "key": "leadVar",
+        "label": "Variável do lead",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID vinculado ao contato identificado."
+      }
+    ],
+    "summary": [
+      "contactVar",
+      "leadVar"
+    ]
+  },
+  {
+    "id": "contact",
+    "nativeType": "crmContact",
+    "nodeType": "custom",
+    "label": "Criar/Atualizar Contato",
+    "category": "crm",
+    "icon": "Contact",
+    "defaults": {
+      "introMessage": "",
+      "successMessage": "",
+      "errorMessage": "",
+      "outputVar": "crmContactId"
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 428,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "introMessage",
+        "label": "Mensagem inicial",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Opcional. Enviada antes do registro do contato."
+      },
+      {
+        "key": "successMessage",
+        "label": "Mensagem de sucesso",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Enviada quando o contato é criado ou atualizado."
+      },
+      {
+        "key": "errorMessage",
+        "label": "Mensagem de erro",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Enviada quando não é possível registrar o contato."
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável do contato",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do contato no CRM."
+      }
+    ],
+    "summary": [
+      "introMessage",
+      "successMessage",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "lead",
+    "nativeType": "crmLead",
+    "nodeType": "custom",
+    "label": "Capturar Lead",
+    "category": "crm",
+    "icon": "Magnet",
+    "defaults": {
+      "introMessage": "",
+      "qualifyPrompt": "",
+      "successMessage": "",
+      "errorMessage": "",
+      "outputVar": "crmLeadId"
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 361,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "introMessage",
+        "label": "Mensagem inicial",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Opcional. Enviada antes do registro do lead."
+      },
+      {
+        "key": "qualifyPrompt",
+        "label": "Pergunta de qualificação",
+        "kind": "textarea",
+        "placeholder": "Digite uma pergunta...",
+        "hint": "Opcional. Pergunta enviada ao contato para qualificar o lead."
+      },
+      {
+        "key": "successMessage",
+        "label": "Mensagem de sucesso",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Enviada quando o lead é registrado."
+      },
+      {
+        "key": "errorMessage",
+        "label": "Mensagem de erro",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Enviada quando não é possível registrar o lead."
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável do lead",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o ID do lead criado."
+      }
+    ],
+    "summary": [
+      "introMessage",
+      "qualifyPrompt",
+      "outputVar"
+    ]
+  },
+  {
+    "id": "qualify",
+    "nativeType": "crmLeadUpdate",
+    "nodeType": "custom",
+    "label": "Qualificar Lead",
+    "category": "crm",
+    "icon": "BadgeCheck",
+    "defaults": {
+      "inputVar": "crmLeadId",
+      "setStatus": "",
+      "addTags": "",
+      "setValue": "",
+      "doneMessage": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 366,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "inputVar",
+        "label": "Variável do lead",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Variável com o ID do lead, como a preenchida por Capturar Lead."
+      },
+      {
+        "key": "setStatus",
+        "label": "Novo status",
+        "kind": "text",
+        "placeholder": "Status no CRM",
+        "hint": "Vazio mantém o status atual."
+      },
+      {
+        "key": "addTags",
+        "label": "Tags a adicionar",
+        "kind": "text",
+        "placeholder": "Tags do CRM",
+        "hint": "Vazio não altera as tags."
+      },
+      {
+        "key": "setValue",
+        "label": "Valor do lead",
+        "kind": "text",
+        "placeholder": "Valor no CRM",
+        "hint": "Vazio mantém o valor atual."
+      },
+      {
+        "key": "doneMessage",
+        "label": "Mensagem de conclusão",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Opcional. Enviada depois da atualização."
+      }
+    ],
+    "summary": [
+      "setStatus",
+      "addTags",
+      "setValue"
+    ]
+  },
+  {
+    "id": "follow-up",
+    "nativeType": "crmActivity",
+    "nodeType": "custom",
+    "label": "Agendar Follow-up",
+    "category": "crm",
+    "icon": "CalendarPlus",
+    "defaults": {
+      "activityType": "task",
+      "title": "",
+      "description": "",
+      "dueInDays": 1,
+      "leadVar": "crmLeadId",
+      "contactVar": "crmContactId",
+      "doneMessage": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 397,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "activityType",
+        "label": "Tipo de atividade",
+        "kind": "select",
+        "options": [
+          {
+            "value": "task",
+            "label": "Tarefa"
+          }
+        ]
+      },
+      {
+        "key": "title",
+        "label": "Título da atividade",
+        "kind": "text",
+        "placeholder": "Título exibido no CRM"
+      },
+      {
+        "key": "description",
+        "label": "Descrição",
+        "kind": "textarea",
+        "placeholder": "Opcional"
+      },
+      {
+        "key": "dueInDays",
+        "label": "Prazo em dias",
+        "kind": "number",
+        "hint": "Dias até o vencimento da atividade.",
+        "min": 0,
+        "step": 1
+      },
+      {
+        "key": "leadVar",
+        "label": "Variável do lead",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Variável com o ID do lead vinculado à atividade."
+      },
+      {
+        "key": "contactVar",
+        "label": "Variável do contato",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Variável com o ID do contato vinculado à atividade."
+      },
+      {
+        "key": "doneMessage",
+        "label": "Mensagem de conclusão",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Opcional. Enviada depois do agendamento."
+      }
+    ],
+    "summary": [
+      "title",
+      "description"
+    ]
+  },
+  {
+    "id": "subscribe",
+    "nativeType": "sequenceEnroll",
+    "nodeType": "custom",
+    "label": "Inscrever em Lista",
+    "category": "crm",
+    "icon": "ListPlus",
+    "defaults": {
+      "sequenceId": "",
+      "sequenceName": "",
+      "createContact": true
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 434,
+      "height": 140
+    },
+    "fields": [
+      {
+        "key": "sequenceId",
+        "label": "ID da lista",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma"
+      },
+      {
+        "key": "sequenceName",
+        "label": "Nome da lista",
+        "kind": "text"
+      },
+      {
+        "key": "createContact",
+        "label": "Criar o contato se ainda não existir",
+        "kind": "checkbox"
+      }
+    ],
+    "summary": [
+      "sequenceName",
+      "sequenceId"
+    ]
+  },
+  {
+    "id": "unsubscribe",
+    "nativeType": "sequenceUnenroll",
+    "nodeType": "custom",
+    "label": "Remover da Lista",
+    "category": "crm",
+    "icon": "ListMinus",
+    "defaults": {
+      "sequenceId": "",
+      "sequenceName": "",
+      "allSequences": false
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 275,
+      "height": 122
+    },
+    "fields": [
+      {
+        "key": "sequenceId",
+        "label": "ID da lista",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "hint": "Não é usado quando Remover de todas as listas está marcado."
+      },
+      {
+        "key": "sequenceName",
+        "label": "Nome da lista",
+        "kind": "text"
+      },
+      {
+        "key": "allSequences",
+        "label": "Remover de todas as listas",
+        "kind": "checkbox"
+      }
+    ],
+    "summary": [
+      "sequenceName",
+      "sequenceId"
+    ]
+  },
+  {
+    "id": "livechat",
+    "nativeType": "webchatHandoff",
+    "nodeType": "custom",
+    "label": "Continuar no Chat",
+    "category": "livechat",
+    "icon": "MessagesSquare",
+    "defaults": {
+      "widgetId": "",
+      "message": "",
+      "ttlHours": 24,
+      "targetMode": "widgetFlow",
+      "targetFlowId": "",
+      "targetDepartmentId": "",
+      "welcomeMessage": "",
+      "carryVariables": true,
+      "closeSource": true,
+      "outputVar": "webchatLink",
+      "errorMessage": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 429,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "widgetId",
+        "label": "ID do widget",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma"
+      },
+      {
+        "key": "message",
+        "label": "Mensagem com o link",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem...",
+        "hint": "Use {{link}} para inserir o link do chat."
+      },
+      {
+        "key": "ttlHours",
+        "label": "Validade do link (horas)",
+        "kind": "number",
+        "min": 1,
+        "step": 1
+      },
+      {
+        "key": "targetMode",
+        "label": "Destino no chat",
+        "kind": "select",
+        "options": [
+          {
+            "value": "widgetFlow",
+            "label": "Fluxo do widget"
+          }
+        ]
+      },
+      {
+        "key": "welcomeMessage",
+        "label": "Mensagem de boas-vindas",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem..."
+      },
+      {
+        "key": "carryVariables",
+        "label": "Levar as variáveis para o chat",
+        "kind": "checkbox"
+      },
+      {
+        "key": "closeSource",
+        "label": "Encerrar a conversa de origem",
+        "kind": "checkbox"
+      },
+      {
+        "key": "outputVar",
+        "label": "Variável do link",
+        "kind": "text",
+        "placeholder": "Nome da variável",
+        "hint": "Recebe o link gerado."
+      },
+      {
+        "key": "errorMessage",
+        "label": "Mensagem de erro",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem..."
+      }
+    ],
+    "summary": [
+      "message",
+      "widgetId"
+    ],
+    "technicalLabels": {
+      "targetFlowId": "ID do fluxo de destino",
+      "targetDepartmentId": "ID do departamento de destino"
+    }
+  },
+  {
+    "id": "note",
+    "nativeType": "note",
+    "nodeType": "note",
+    "label": "Nota",
+    "category": "control",
+    "icon": "StickyNote",
+    "defaults": {
+      "text": "",
+      "color": "yellow"
+    },
+    "outputs": 0,
+    "outputLabels": [],
+    "outputTones": [],
+    "measured": {
+      "width": 240,
+      "height": 96
+    },
+    "fields": [
+      {
+        "key": "text",
+        "label": "Texto da nota",
+        "kind": "textarea",
+        "placeholder": "Escreva uma anotação",
+        "hint": "Anotação do fluxo. Não é enviada ao contato."
+      },
+      {
+        "key": "color",
+        "label": "Cor",
+        "kind": "select",
+        "options": [
+          {
+            "value": "yellow",
+            "label": "Amarelo"
+          }
+        ]
+      }
+    ],
+    "summary": [
+      "text"
+    ]
+  },
+  {
+    "id": "return-menu",
+    "nativeType": "voltar",
+    "nodeType": "custom",
+    "label": "Retornar ao Menu",
+    "category": "control",
+    "icon": "ListRestart",
+    "defaults": {
+      "id": ""
+    },
+    "configured": {
+      "id": "",
+      "targetNodeId": "",
+      "availableNodes": [],
+      "targetNodeName": "",
+      "title": "",
+      "description": ""
+    },
+    "outputs": 0,
+    "outputLabels": [],
+    "outputTones": [],
+    "measured": {
+      "width": 260,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "targetNodeId",
+        "label": "Menu de destino",
+        "kind": "menuNode",
+        "hint": "Lista os Menus de Opções deste fluxo.",
+        "mirror": "id"
+      },
+      {
+        "key": "title",
+        "label": "Título",
+        "kind": "text"
+      },
+      {
+        "key": "description",
+        "label": "Descrição",
+        "kind": "textarea"
+      }
+    ],
+    "summary": [
+      "targetNodeName",
+      "targetNodeId"
+    ],
+    "technicalLabels": {
+      "availableNodes": "Menus disponíveis",
+      "targetNodeName": "Nome do menu de destino"
+    }
+  },
+  {
+    "id": "random",
+    "nativeType": "randomizer",
+    "nodeType": "custom",
+    "label": "Randomizador (teste A/B)",
+    "category": "conditions",
+    "icon": "Shuffle",
+    "defaults": {
+      "paths": [
+        {
+          "label": "Caminho A",
+          "weight": 50
+        },
+        {
+          "label": "Caminho B",
+          "weight": 50
+        }
+      ],
+      "variable": "",
+      "sticky": true
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Caminho A",
+      "Caminho B"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "outputRule": {
+      "kind": "list",
+      "key": "paths",
+      "labelKey": "label",
+      "fallbackLabel": "Caminho {n}",
+      "min": 2
+    },
+    "measured": {
+      "width": 449,
+      "height": 140
+    },
+    "fields": [
+      {
+        "key": "paths",
+        "label": "Caminhos",
+        "kind": "weightedPaths",
+        "hint": "Cada caminho vira uma saída. O contato segue por um deles conforme o peso.",
+        "min": 2,
+        "itemFields": [
+          {
+            "key": "label",
+            "label": "Nome do caminho",
+            "kind": "text"
+          },
+          {
+            "key": "weight",
+            "label": "Peso",
+            "kind": "number",
+            "min": 0,
+            "step": 1
+          }
+        ],
+        "itemLabel": "Caminho",
+        "addLabel": "Adicionar caminho",
+        "drivesOutputs": true
+      },
+      {
+        "key": "variable",
+        "label": "Salvar caminho na variável",
+        "kind": "text",
+        "placeholder": "Opcional",
+        "hint": "Guarda o nome do caminho sorteado."
+      },
+      {
+        "key": "sticky",
+        "label": "Manter o mesmo caminho para o contato",
+        "kind": "checkbox",
+        "hint": "O contato segue sempre pelo caminho sorteado na primeira passagem."
+      }
+    ],
+    "summary": [
+      "variable"
+    ]
+  },
+  {
+    "id": "language",
+    "nativeType": "languageRouter",
+    "nodeType": "custom",
+    "label": "Idioma",
+    "category": "conditions",
+    "icon": "Languages",
+    "defaults": {
+      "variable": "idioma",
+      "fallback": "pt",
+      "sticky": true
+    },
+    "outputs": 4,
+    "outputLabels": [
+      "Português",
+      "Inglês",
+      "Espanhol",
+      "Outro idioma"
+    ],
+    "outputTones": [
+      "accent",
+      "accent",
+      "accent",
+      "accent"
+    ],
+    "measured": {
+      "width": 382,
+      "height": 196
+    },
+    "fields": [
+      {
+        "key": "variable",
+        "label": "Salvar idioma na variável",
+        "kind": "text",
+        "placeholder": "idioma",
+        "hint": "Guarda o idioma identificado nesta variável."
+      },
+      {
+        "key": "fallback",
+        "label": "Idioma padrão",
+        "kind": "select",
+        "options": [
+          {
+            "value": "pt",
+            "label": "Português"
+          },
+          {
+            "value": "en",
+            "label": "Inglês"
+          },
+          {
+            "value": "es",
+            "label": "Espanhol"
+          }
+        ],
+        "hint": "Usado quando não for possível identificar o idioma."
+      },
+      {
+        "key": "sticky",
+        "label": "Manter o idioma identificado",
+        "kind": "checkbox",
+        "hint": "O idioma identificado na primeira passagem vale para o restante da conversa."
+      }
+    ],
+    "summary": [
+      "variable"
+    ]
+  },
+  {
+    "id": "ad",
+    "nativeType": "adCondition",
+    "nodeType": "custom",
+    "label": "Veio do anúncio?",
+    "category": "conditions",
+    "icon": "Megaphone",
+    "defaults": {
+      "adMatch": "campaign",
+      "adIds": "",
+      "adText": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sim",
+      "Não"
+    ],
+    "outputTones": [
+      "accent",
+      "accent"
+    ],
+    "measured": {
+      "width": 382,
+      "height": 140
+    },
+    "fields": [
+      {
+        "key": "adMatch",
+        "label": "Identificar por",
+        "kind": "select",
+        "options": [
+          {
+            "value": "campaign",
+            "label": "Campanha"
+          }
+        ]
+      },
+      {
+        "key": "adIds",
+        "label": "IDs de campanha ou anúncio",
+        "kind": "textarea",
+        "placeholder": "Opcional"
+      },
+      {
+        "key": "adText",
+        "label": "Texto do anúncio",
+        "kind": "text",
+        "placeholder": "Opcional"
+      }
+    ],
+    "summary": [
+      "adIds",
+      "adText"
+    ]
+  },
+  {
+    "id": "delay",
+    "nativeType": "waiting_time",
+    "nodeType": "custom",
+    "label": "Tempo de Espera",
+    "category": "conditions",
+    "icon": "Timer",
+    "defaults": {
+      "waiting_time": "",
+      "df-waiting_time": "",
+      "id": ""
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "waiting_time",
+        "label": "Tempo de espera",
+        "kind": "select",
+        "options": [
+          {
+            "value": "",
+            "label": "Selecione"
+          },
+          {
+            "value": "1000",
+            "label": "1 segundo"
+          },
+          {
+            "value": "2000",
+            "label": "2 segundos"
+          },
+          {
+            "value": "3000",
+            "label": "3 segundos"
+          },
+          {
+            "value": "4000",
+            "label": "4 segundos"
+          },
+          {
+            "value": "5000",
+            "label": "5 segundos"
+          },
+          {
+            "value": "6000",
+            "label": "6 segundos"
+          },
+          {
+            "value": "7000",
+            "label": "7 segundos"
+          },
+          {
+            "value": "8000",
+            "label": "8 segundos"
+          },
+          {
+            "value": "9000",
+            "label": "9 segundos"
+          },
+          {
+            "value": "10000",
+            "label": "10 segundos"
+          },
+          {
+            "value": "15000",
+            "label": "15 segundos"
+          },
+          {
+            "value": "20000",
+            "label": "20 segundos"
+          },
+          {
+            "value": "25000",
+            "label": "25 segundos"
+          },
+          {
+            "value": "30000",
+            "label": "30 segundos"
+          },
+          {
+            "value": "35000",
+            "label": "35 segundos"
+          },
+          {
+            "value": "40000",
+            "label": "40 segundos"
+          },
+          {
+            "value": "45000",
+            "label": "45 segundos"
+          },
+          {
+            "value": "50000",
+            "label": "50 segundos"
+          },
+          {
+            "value": "55000",
+            "label": "55 segundos"
+          },
+          {
+            "value": "60000",
+            "label": "60 segundos"
+          },
+          {
+            "value": "120000",
+            "label": "120 segundos"
+          }
+        ],
+        "hint": "A conversa segue para a próxima etapa depois desse tempo.",
+        "mirror": "id"
+      }
+    ],
+    "summary": [
+      "waiting_time"
+    ],
+    "technicalLabels": {
+      "df-waiting_time": "Campo legado"
+    }
+  },
+  {
+    "id": "ai-agent",
+    "nativeType": "aiAgentBlock",
+    "nodeType": "custom",
+    "label": "Agente de IA",
+    "category": "ai",
+    "icon": "BotMessageSquare",
+    "defaults": {
+      "openai": "Generative_AI",
+      "generative_ai": "",
+      "generativeAiName": "",
+      "fields": [],
+      "exits": [],
+      "maxTurns": 15,
+      "timeoutMinutes": 0
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Sem conclusão"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "outputRule": {
+      "kind": "list",
+      "key": "exits",
+      "labelKey": "name",
+      "fallbackLabel": "Saída {n}",
+      "trailing": [
+        "Sem conclusão"
+      ]
+    },
+    "measured": {
+      "width": 452,
+      "height": 168
+    },
+    "fields": [
+      {
+        "key": "openai",
+        "label": "Tipo de IA",
+        "kind": "select",
+        "options": [
+          {
+            "value": "Generative_AI",
+            "label": "IA Generativa"
+          }
+        ]
+      },
+      {
+        "key": "generative_ai",
+        "label": "ID do agente",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma"
+      },
+      {
+        "key": "generativeAiName",
+        "label": "Nome do agente",
+        "kind": "text"
+      },
+      {
+        "key": "exits",
+        "label": "Saídas do agente",
+        "kind": "objectList",
+        "hint": "Cada saída vira uma conexão, na ordem da lista. Sem conclusão é sempre a última.",
+        "itemFields": [
+          {
+            "key": "name",
+            "label": "Nome da saída",
+            "kind": "text",
+            "placeholder": "Nome exibido na conexão"
+          },
+          {
+            "key": "when",
+            "label": "Quando usar",
+            "kind": "textarea",
+            "placeholder": "Situação em que o agente deve seguir por esta saída"
+          },
+          {
+            "key": "requireFields",
+            "label": "Exigir os campos coletados",
+            "kind": "checkbox"
+          }
+        ],
+        "itemLabel": "Saída",
+        "addLabel": "Adicionar saída",
+        "newItem": {
+          "name": "",
+          "when": "",
+          "requireFields": false
+        },
+        "drivesOutputs": true
+      },
+      {
+        "key": "fields",
+        "label": "Campos a coletar",
+        "kind": "json",
+        "hint": "Lista JSON com os campos que o agente deve obter do contato."
+      },
+      {
+        "key": "maxTurns",
+        "label": "Máximo de turnos",
+        "kind": "number",
+        "hint": "Limite de interações antes de seguir por Sem conclusão.",
+        "min": 0,
+        "step": 1
+      },
+      {
+        "key": "timeoutMinutes",
+        "label": "Tempo limite em minutos",
+        "kind": "number",
+        "hint": "Use 0 para não limitar.",
+        "min": 0,
+        "step": 1
+      }
+    ],
+    "summary": [
+      "generativeAiName",
+      "generative_ai"
+    ]
+  },
+  {
+    "id": "ai-agents",
+    "nativeType": "OpenAI",
+    "nodeType": "custom",
+    "label": "Agentes de IA",
+    "category": "ai",
+    "icon": "BrainCircuit",
+    "defaults": {
+      "openai": "",
+      "df-OpenAI": "",
+      "aiProvider": "IA Generativa",
+      "aiModel": ""
+    },
+    "outputs": 0,
+    "outputLabels": [],
+    "outputTones": [],
+    "measured": {
+      "width": 260,
+      "height": 102
+    },
+    "fields": [
+      {
+        "key": "aiProvider",
+        "label": "Provedor",
+        "kind": "select",
+        "options": [
+          {
+            "value": "IA Generativa",
+            "label": "IA Generativa"
+          }
+        ]
+      },
+      {
+        "key": "aiModel",
+        "label": "Modelo de IA",
+        "kind": "text",
+        "placeholder": "Modelo cadastrado na plataforma"
+      },
+      {
+        "key": "df-OpenAI",
+        "label": "Agente de IA",
+        "kind": "select",
+        "options": [
+          {
+            "value": "",
+            "label": "Não selecionado"
+          },
+          {
+            "value": "ChatGPT",
+            "label": "ChatGPT"
+          },
+          {
+            "value": "NeuraAI",
+            "label": "NeuraAI"
+          }
+        ]
+      }
+    ],
+    "summary": [
+      "aiModel",
+      "df-OpenAI"
+    ],
+    "technicalLabels": {
+      "openai": "Campo legado"
+    }
+  },
+  {
+    "id": "sheets",
+    "nativeType": "googleSheetsAppend",
+    "nodeType": "custom",
+    "label": "Google Planilhas",
+    "category": "apis",
+    "icon": "FileSpreadsheet",
+    "defaults": {
+      "spreadsheet": "",
+      "sheetName": "",
+      "columns": [
+        {
+          "header": "Data",
+          "value": "{{DATE_TIME_BRAZIL}}"
+        },
+        {
+          "header": "Nome",
+          "value": "{{nome}}"
+        },
+        {
+          "header": "Telefone",
+          "value": "{{telefone}}"
+        }
+      ],
+      "resultVar": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 502,
+      "height": 140
+    },
+    "fields": [
+      {
+        "key": "spreadsheet",
+        "label": "Planilha",
+        "kind": "text",
+        "placeholder": "ID ou link da planilha"
+      },
+      {
+        "key": "sheetName",
+        "label": "Aba",
+        "kind": "text",
+        "placeholder": "Nome da aba"
+      },
+      {
+        "key": "columns",
+        "label": "Colunas",
+        "kind": "objectList",
+        "hint": "Use {{variavel}} para valores do atendimento.",
+        "itemFields": [
+          {
+            "key": "header",
+            "label": "Coluna"
+          },
+          {
+            "key": "value",
+            "label": "Valor"
+          }
+        ],
+        "itemLabel": "Coluna",
+        "addLabel": "Adicionar coluna",
+        "newItem": {
+          "header": "",
+          "value": ""
+        }
+      },
+      {
+        "key": "resultVar",
+        "label": "Variável de resultado",
+        "kind": "text",
+        "hint": "Opcional."
+      }
+    ],
+    "summary": [
+      "spreadsheet",
+      "sheetName"
+    ]
+  },
+  {
+    "id": "rd",
+    "nativeType": "rdStationConversion",
+    "nodeType": "custom",
+    "label": "Registrar no RD Station",
+    "category": "apis",
+    "icon": "Target",
+    "defaults": {
+      "conversionIdentifier": "chatbot-whatsapp",
+      "email": "{{email}}",
+      "contactName": "{{nome}}",
+      "phone": "{{telefone}}",
+      "company": "",
+      "jobTitle": "",
+      "city": "",
+      "state": "",
+      "tags": "",
+      "customFields": [],
+      "legalBasis": "",
+      "resultVar": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 492,
+      "height": 140
+    },
+    "fields": [
+      {
+        "key": "conversionIdentifier",
+        "label": "Identificador da conversão",
+        "kind": "text"
+      },
+      {
+        "key": "email",
+        "label": "E-mail",
+        "kind": "text",
+        "hint": "Use {{variavel}} para valores do atendimento."
+      },
+      {
+        "key": "contactName",
+        "label": "Nome",
+        "kind": "text"
+      },
+      {
+        "key": "phone",
+        "label": "Telefone",
+        "kind": "text"
+      },
+      {
+        "key": "company",
+        "label": "Empresa",
+        "kind": "text"
+      },
+      {
+        "key": "jobTitle",
+        "label": "Cargo",
+        "kind": "text"
+      },
+      {
+        "key": "city",
+        "label": "Cidade",
+        "kind": "text"
+      },
+      {
+        "key": "state",
+        "label": "Estado",
+        "kind": "text"
+      },
+      {
+        "key": "tags",
+        "label": "Tags",
+        "kind": "text"
+      },
+      {
+        "key": "customFields",
+        "label": "Campos personalizados",
+        "kind": "json",
+        "hint": "Lista JSON no formato da plataforma."
+      },
+      {
+        "key": "legalBasis",
+        "label": "Base legal (LGPD)",
+        "kind": "text"
+      },
+      {
+        "key": "resultVar",
+        "label": "Variável de resultado",
+        "kind": "text",
+        "hint": "Opcional."
+      }
+    ],
+    "summary": [
+      "conversionIdentifier"
+    ]
+  },
+  {
+    "id": "hubspot",
+    "nativeType": "hubspotUpsertContact",
+    "nodeType": "custom",
+    "label": "Criar/Atualizar no HubSpot",
+    "category": "apis",
+    "icon": "UserPlus",
+    "defaults": {
+      "email": "{{email}}",
+      "contactName": "{{nome}}",
+      "phone": "{{telefone}}",
+      "company": "",
+      "jobTitle": "",
+      "lifecyclestage": "",
+      "properties": [],
+      "resultVar": "hubspot_id"
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 499,
+      "height": 140
+    },
+    "fields": [
+      {
+        "key": "email",
+        "label": "E-mail",
+        "kind": "text",
+        "hint": "Use {{variavel}} para valores do atendimento."
+      },
+      {
+        "key": "contactName",
+        "label": "Nome",
+        "kind": "text"
+      },
+      {
+        "key": "phone",
+        "label": "Telefone",
+        "kind": "text"
+      },
+      {
+        "key": "company",
+        "label": "Empresa",
+        "kind": "text"
+      },
+      {
+        "key": "jobTitle",
+        "label": "Cargo",
+        "kind": "text"
+      },
+      {
+        "key": "lifecyclestage",
+        "label": "Estágio do ciclo de vida",
+        "kind": "text",
+        "suggestions": [
+          "subscriber",
+          "lead",
+          "marketingqualifiedlead",
+          "salesqualifiedlead",
+          "opportunity",
+          "customer",
+          "evangelist",
+          "other"
+        ]
+      },
+      {
+        "key": "properties",
+        "label": "Propriedades adicionais",
+        "kind": "json",
+        "hint": "Lista JSON no formato da plataforma."
+      },
+      {
+        "key": "resultVar",
+        "label": "Variável de resultado",
+        "kind": "text",
+        "hint": "Recebe o ID do contato no HubSpot."
+      }
+    ],
+    "summary": [
+      "email",
+      "lifecyclestage"
+    ]
+  },
+  {
+    "id": "multi-condition",
+    "nativeType": "multiple_condicional_api",
+    "nodeType": "custom",
+    "label": "Múltipla Condição",
+    "category": "apis",
+    "icon": "Network",
+    "defaults": {
+      "var-1": "",
+      "value-1": ""
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Condição 1"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "outputRule": {
+      "kind": "indexedKeys",
+      "key": "var",
+      "pairKey": "value",
+      "fallbackLabel": "Condição {n}",
+      "min": 1,
+      "max": 20
+    },
+    "measured": {
+      "width": 289,
+      "height": 142
+    },
+    "fields": [
+      {
+        "key": "conditions",
+        "label": "Condições",
+        "kind": "conditionPairs",
+        "hint": "Cada condição gera uma saída, na mesma ordem da lista.",
+        "min": 1,
+        "max": 20,
+        "pattern": "^(var|value)-\\d+$",
+        "itemFields": [
+          {
+            "key": "var",
+            "label": "Variável"
+          },
+          {
+            "key": "value",
+            "label": "Valor"
+          }
+        ],
+        "itemLabel": "Condição",
+        "addLabel": "Adicionar condição",
+        "drivesOutputs": true
+      }
+    ],
+    "summary": [],
+    "fieldTypePatterns": {
+      "^var-\\d+$": [
+        "string"
+      ],
+      "^value-\\d+$": [
+        "string"
+      ]
+    }
+  },
+  {
+    "id": "data-entry",
+    "nativeType": "Data_Input_Condicional",
+    "nodeType": "custom",
+    "label": "Entrada de Dados",
+    "category": "apis",
+    "icon": "TextCursorInput",
+    "defaults": {
+      "field": "",
+      "validation": "",
+      "conditions": []
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Válido",
+      "Inválido"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 332,
+      "height": 102
+    },
+    "fields": [
+      {
+        "key": "field",
+        "label": "Campo",
+        "kind": "text",
+        "placeholder": "Nome do campo ou variável"
+      },
+      {
+        "key": "validation",
+        "label": "Validação",
+        "kind": "text"
+      },
+      {
+        "key": "conditions",
+        "label": "Condições",
+        "kind": "json",
+        "hint": "Lista JSON no formato da plataforma."
+      }
+    ],
+    "summary": [
+      "field",
+      "validation"
+    ]
+  },
+  {
+    "id": "message-api",
+    "nativeType": "External_Message_Http",
+    "nodeType": "custom",
+    "label": "API de Mensagem",
+    "category": "apis",
+    "icon": "MessageSquareCode",
+    "defaults": {
+      "url_api": "",
+      "method": "POST"
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Falha",
+      "Sucesso"
+    ],
+    "outputTones": [
+      "danger",
+      "success"
+    ],
+    "measured": {
+      "width": 303,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "url_api",
+        "label": "URL da API",
+        "kind": "url",
+        "placeholder": "https://"
+      },
+      {
+        "key": "method",
+        "label": "Método HTTP",
+        "kind": "select",
+        "options": [
+          {
+            "value": "POST",
+            "label": "POST"
+          }
+        ]
+      }
+    ],
+    "summary": [
+      "url_api"
+    ]
+  },
+  {
+    "id": "condition",
+    "nativeType": "condicional_api",
+    "nodeType": "custom",
+    "label": "Condicional",
+    "category": "apis",
+    "icon": "GitBranch",
+    "defaults": {
+      "condition": "Diferente de"
+    },
+    "configured": {
+      "condition": "Diferente de",
+      "key": "",
+      "value": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Falso",
+      "Verdadeiro"
+    ],
+    "outputTones": [
+      "danger",
+      "success"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "condition",
+        "label": "Comparação",
+        "kind": "select",
+        "options": [
+          {
+            "value": "Igual a",
+            "label": "Igual a"
+          },
+          {
+            "value": "Diferente de",
+            "label": "Diferente de"
+          }
+        ]
+      },
+      {
+        "key": "key",
+        "label": "Chave",
+        "kind": "text",
+        "placeholder": "Variável",
+        "hint": "Nome da variável retornada pela API."
+      },
+      {
+        "key": "value",
+        "label": "Valor",
+        "kind": "text",
+        "placeholder": "Valor de comparação"
+      }
+    ],
+    "summary": [
+      "key",
+      "condition"
+    ]
+  },
+  {
+    "id": "datastore",
+    "nativeType": "Send_DataStore",
+    "nodeType": "custom",
+    "label": "Enviar para DataStore",
+    "category": "apis",
+    "icon": "HardDriveUpload",
+    "defaults": {
+      "url_api": "",
+      "method": "POST"
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 267,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "url_api",
+        "label": "URL da API",
+        "kind": "url",
+        "placeholder": "https://"
+      },
+      {
+        "key": "method",
+        "label": "Método HTTP",
+        "kind": "select",
+        "options": [
+          {
+            "value": "POST",
+            "label": "POST"
+          }
+        ]
+      }
+    ],
+    "summary": [
+      "url_api"
+    ]
+  },
+  {
+    "id": "local-datastore",
+    "nativeType": "Local_DataStore",
+    "nodeType": "custom",
+    "label": "DataStore Local",
+    "category": "apis",
+    "icon": "Database",
+    "defaults": {
+      "local_datastore": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Falha",
+      "Sucesso"
+    ],
+    "outputTones": [
+      "danger",
+      "success"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 129
+    },
+    "fields": [
+      {
+        "key": "local_datastore",
+        "label": "Base de dados",
+        "kind": "select",
+        "options": [
+          {
+            "value": "",
+            "label": "Não definida"
+          },
+          {
+            "value": "contact",
+            "label": "Contato"
+          },
+          {
+            "value": "datastore",
+            "label": "Datastore"
+          }
+        ]
+      }
+    ],
+    "summary": [
+      "local_datastore"
+    ]
+  },
+  {
+    "id": "invoice",
+    "nativeType": "envio_boletos",
+    "nodeType": "custom",
+    "label": "Enviar Boletos",
+    "category": "apis",
+    "icon": "Barcode",
+    "defaults": {
+      "url_api": "",
+      "channel": "Enviar Todos",
+      "text": "",
+      "url_list": "",
+      "url_send": "",
+      "menuOptions": "",
+      "menuMessage": "",
+      "menuTransfer": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Falha",
+      "Sucesso"
+    ],
+    "outputTones": [
+      "danger",
+      "success"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 138
+    },
+    "fields": [
+      {
+        "key": "channel",
+        "label": "Modo de envio",
+        "kind": "select",
+        "options": [
+          {
+            "value": "Enviar Todos",
+            "label": "Enviar todos"
+          },
+          {
+            "value": "Enviar Menu",
+            "label": "Enviar menu"
+          },
+          {
+            "value": "Catalog",
+            "label": "Catálogo"
+          }
+        ]
+      },
+      {
+        "key": "text",
+        "label": "Mensagem",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem..."
+      },
+      {
+        "key": "url_list",
+        "label": "URL da API que lista os boletos",
+        "kind": "url",
+        "placeholder": "https://"
+      },
+      {
+        "key": "url_send",
+        "label": "URL da API que envia os boletos",
+        "kind": "url",
+        "placeholder": "https://"
+      },
+      {
+        "key": "menuOptions",
+        "label": "Opção do menu customizado",
+        "kind": "text"
+      },
+      {
+        "key": "menuMessage",
+        "label": "Mensagem da opção",
+        "kind": "text"
+      },
+      {
+        "key": "menuTransfer",
+        "label": "Voltar para o menu de opções",
+        "kind": "text",
+        "hint": "Número da opção do menu de retorno."
+      }
+    ],
+    "summary": [
+      "channel",
+      "text"
+    ],
+    "technicalLabels": {
+      "url_api": "URL da API"
+    }
+  },
+  {
+    "id": "api-menu",
+    "nativeType": "api_options_menu",
+    "nodeType": "apiOptionsMenu",
+    "label": "Menu de Opções API",
+    "category": "apis",
+    "icon": "LayoutList",
+    "defaults": {
+      "buttons": "true",
+      "message": "",
+      "apiUrl": "",
+      "menuName": "Menu de Opções",
+      "postUrl": "",
+      "variableName": "option",
+      "fallbackDepartment": "",
+      "endConversation": "false",
+      "datastore": ""
+    },
+    "outputs": 2,
+    "outputLabels": [
+      "Sucesso",
+      "Falha"
+    ],
+    "outputTones": [
+      "success",
+      "danger"
+    ],
+    "measured": {
+      "width": 315,
+      "height": 130
+    },
+    "fields": [
+      {
+        "key": "message",
+        "label": "Mensagem",
+        "kind": "textarea",
+        "placeholder": "Digite uma mensagem..."
+      },
+      {
+        "key": "menuName",
+        "label": "Nome do menu",
+        "kind": "text"
+      },
+      {
+        "key": "buttons",
+        "label": "Exibir como botões",
+        "kind": "select",
+        "options": [
+          {
+            "value": "true",
+            "label": "Sim"
+          },
+          {
+            "value": "false",
+            "label": "Não"
+          }
+        ]
+      },
+      {
+        "key": "apiUrl",
+        "label": "URL da API das opções",
+        "kind": "url",
+        "placeholder": "https://"
+      },
+      {
+        "key": "postUrl",
+        "label": "URL de envio da opção escolhida",
+        "kind": "url",
+        "placeholder": "https://"
+      },
+      {
+        "key": "variableName",
+        "label": "Variável da opção escolhida",
+        "kind": "text"
+      },
+      {
+        "key": "fallbackDepartment",
+        "label": "Departamento em caso de falha",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma"
+      },
+      {
+        "key": "endConversation",
+        "label": "Encerrar a conversa",
+        "kind": "select",
+        "options": [
+          {
+            "value": "false",
+            "label": "Não"
+          },
+          {
+            "value": "true",
+            "label": "Sim"
+          }
+        ]
+      },
+      {
+        "key": "datastore",
+        "label": "DataStore",
+        "kind": "text"
+      }
+    ],
+    "summary": [
+      "message",
+      "apiUrl"
+    ]
+  },
+  {
+    "id": "consent",
+    "nativeType": "Consent",
+    "nodeType": "custom",
+    "label": "Consentimento",
+    "category": "collection",
+    "icon": "ShieldCheck",
+    "defaults": {},
+    "outputs": 2,
+    "outputLabels": [
+      "Aceitou",
+      "Recusou"
+    ],
+    "outputTones": [
+      "accent",
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 86
+    },
+    "fields": [],
+    "summary": []
+  },
+  {
+    "id": "conversion",
+    "nativeType": "sendConversion",
+    "nodeType": "custom",
+    "label": "Enviar Conversão",
+    "category": "collection",
+    "icon": "Goal",
+    "defaults": {
+      "eventName": "Lead",
+      "customEventName": "",
+      "value": "",
+      "currency": "BRL",
+      "onlyFromAd": true
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "eventName",
+        "label": "Evento de conversão",
+        "kind": "text",
+        "placeholder": "Lead",
+        "suggestions": [
+          "Lead"
+        ]
+      },
+      {
+        "key": "customEventName",
+        "label": "Nome do evento personalizado",
+        "kind": "text",
+        "placeholder": "Opcional"
+      },
+      {
+        "key": "value",
+        "label": "Valor da conversão",
+        "kind": "numberText",
+        "placeholder": "Ex.: 99.90",
+        "hint": "Opcional."
+      },
+      {
+        "key": "currency",
+        "label": "Moeda",
+        "kind": "select",
+        "options": [
+          {
+            "value": "BRL",
+            "label": "Real (BRL)"
+          },
+          {
+            "value": "USD",
+            "label": "Dólar (USD)"
+          },
+          {
+            "value": "EUR",
+            "label": "Euro (EUR)"
+          }
+        ]
+      },
+      {
+        "key": "onlyFromAd",
+        "label": "Enviar só quando a conversa vier de anúncio",
+        "kind": "checkbox"
+      }
+    ],
+    "summary": [
+      "eventName",
+      "customEventName"
+    ]
+  },
+  {
+    "id": "event",
+    "nativeType": "trackEvent",
+    "nodeType": "custom",
+    "label": "Registrar Evento",
+    "category": "collection",
+    "icon": "Activity",
+    "defaults": {
+      "eventName": "",
+      "properties": [],
+      "numericValue": "",
+      "oncePerConversation": true
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 158
+    },
+    "fields": [
+      {
+        "key": "eventName",
+        "label": "Nome do evento",
+        "kind": "text",
+        "placeholder": "Ex.: cadastro_concluido"
+      },
+      {
+        "key": "properties",
+        "label": "Propriedades",
+        "kind": "json",
+        "hint": "Lista de propriedades enviadas com o evento."
+      },
+      {
+        "key": "numericValue",
+        "label": "Valor numérico",
+        "kind": "numberText",
+        "placeholder": "Opcional",
+        "hint": "Número associado ao evento, como valor ou quantidade."
+      },
+      {
+        "key": "oncePerConversation",
+        "label": "Registrar só uma vez por conversa",
+        "kind": "checkbox"
+      }
+    ],
+    "summary": [
+      "eventName"
+    ]
+  },
+  {
+    "id": "tabulation",
+    "nativeType": "tabulation",
+    "nodeType": "custom",
+    "label": "Tabulação",
+    "category": "collection",
+    "icon": "ListChecks",
+    "defaults": {
+      "tabulation": "",
+      "df-channel": "",
+      "id": "",
+      "tabulacao": "",
+      "tabulacaoName": ""
+    },
+    "outputs": 1,
+    "outputLabels": [
+      "Próximo"
+    ],
+    "outputTones": [
+      "accent"
+    ],
+    "measured": {
+      "width": 260,
+      "height": 86
+    },
+    "fields": [
+      {
+        "key": "tabulacao",
+        "label": "ID da tabulação",
+        "kind": "text",
+        "placeholder": "ID cadastrado na plataforma",
+        "mirror": [
+          "id",
+          "tabulation"
+        ]
+      },
+      {
+        "key": "tabulacaoName",
+        "label": "Nome da tabulação",
+        "kind": "text"
+      }
+    ],
+    "summary": [
+      "tabulacaoName",
+      "tabulacao"
+    ]
+  }
+]
