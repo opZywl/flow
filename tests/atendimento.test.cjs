@@ -631,7 +631,7 @@ test('legacy layout places components by distance from the start, left to right'
 
 test('legacy menus without sourceHandle get one output per edge, in order', () => {
   const flow = importFlow({
-    name: 'Importado do BliP',
+    name: 'Menu antigo',
     nodes: [
       { id: 's', type: 'start', position: { x: 0, y: 0 }, data: {} },
       { id: 'm', type: 'options', position: { x: 0, y: 0 }, data: { message: 'Escolha', options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }] } },
@@ -645,7 +645,7 @@ test('legacy menus without sourceHandle get one output per edge, in order', () =
       { id: '4', source: 'a', target: 'f' }, { id: '5', source: 'b', target: 'g' },
     ],
   })
-  assert.equal(flow.name, 'Importado do BliP')
+  assert.equal(flow.name, 'Menu antigo')
   assert.deepEqual(flow.edges.filter(edge => edge.source === '2').map(edge => [edge.sourceHandle, edge.target]), [['output-0', '3'], ['output-1', '4']])
   assert.doesNotThrow(() => exportFlow(flow))
 })

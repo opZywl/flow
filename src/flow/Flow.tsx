@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
-import { Bot, Camera, ImageIcon, Link2, Loader2, Maximize2, Minus, Moon, Palette, Play, Plug, RotateCcw, Search, SendHorizontal, Sparkles, Sun, Workflow, X, type LucideIcon } from "lucide-react"
+import { ArrowRightLeft, Bot, Camera, ImageIcon, Link2, Loader2, Maximize2, Minus, Moon, Palette, Play, RotateCcw, Search, SendHorizontal, Sparkles, Sun, Workflow, X, type LucideIcon } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -12,12 +12,12 @@ import { behaviorSignature, exportFileName, importFlow, isObject } from "@/lib/a
 import { emptyPreview, replyPreview, startPreview, type PreviewState } from "@/lib/atendimento/simulator"
 import type { AtendimentoFlow } from "@/lib/atendimento/types"
 import { useTheme } from "../ThemeContext"
+import EraDialog from "./era-dialog"
 import WorkflowBuilder, { type WorkflowActions } from "./workflow-builder"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
 const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
-const IntegrationsMenu = dynamic(() => import("./integrations/IntegrationsMenu"), { ssr: false })
 const ColorPanel = dynamic(() => import("../ColorPanel"), { ssr: false })
 
 const warm = (load: () => Promise<unknown>) => () => {
@@ -25,7 +25,6 @@ const warm = (load: () => Promise<unknown>) => () => {
 }
 
 const warmAI = warm(() => import("./ai-workflow-dialog"))
-const warmIntegrations = warm(() => import("./integrations/IntegrationsMenu"))
 const warmColors = warm(() => import("../ColorPanel"))
 
 const WORKFLOW_KEY = "workflow"
@@ -482,13 +481,13 @@ interface FlowHeaderProps {
   onSearch: (query: string) => void
   onOpenAI: () => void
   onOpenBot: () => void
-  onOpenIntegrations: () => void
+  onOpenEra: () => void
   onChangeBackground: () => void
   onSaveImage: () => void
   onResetBackground: () => void
 }
 
-function FlowHeader({ botOpen, capturing, hasBackground, onSearch, onOpenAI, onOpenBot, onOpenIntegrations, onChangeBackground, onSaveImage, onResetBackground }: FlowHeaderProps) {
+function FlowHeader({ botOpen, capturing, hasBackground, onSearch, onOpenAI, onOpenBot, onOpenEra, onChangeBackground, onSaveImage, onResetBackground }: FlowHeaderProps) {
   const { theme, toggleTheme, showColorPanel, setShowColorPanel } = useTheme()
   const stored = useStoredWorkflow()
 
@@ -532,15 +531,13 @@ function FlowHeader({ botOpen, capturing, hasBackground, onSearch, onOpenAI, onO
         </button>
         <button
           type="button"
-          onClick={onOpenIntegrations}
-          onPointerEnter={warmIntegrations}
-          onFocus={warmIntegrations}
+          onClick={onOpenEra}
           aria-haspopup="dialog"
-          aria-label="Integrações"
-          title="Integrações"
+          aria-label="Converter para o padrão ERA"
+          title="Converter para o padrão ERA"
           className={ui.toolButton}
         >
-          <Plug className="h-4 w-4" aria-hidden />
+          <ArrowRightLeft className="h-4 w-4" aria-hidden />
         </button>
         <BackgroundMenu hasImage={hasBackground} capturing={capturing} onChange={onChangeBackground} onSave={onSaveImage} onReset={onResetBackground} />
         <button
@@ -894,8 +891,8 @@ function FlowLayout() {
   const [botOpen, setBotOpen] = useState(false)
   const [botRequest, setBotRequest] = useState(0)
   const [aiOpen, setAiOpen] = useState(false)
-  const [integrationsOpen, setIntegrationsOpen] = useState(false)
-  const [loaded, setLoaded] = useState({ ai: false, integrations: false })
+  const [aiLoaded, setAiLoaded] = useState(false)
+  const [eraOpen, setEraOpen] = useState(false)
   const [backgroundDialog, setBackgroundDialog] = useState(false)
   const [background, setBackground] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
@@ -935,16 +932,11 @@ function FlowLayout() {
   }, [])
 
   const openAI = useCallback(() => {
-    setLoaded((current) => (current.ai ? current : { ...current, ai: true }))
+    setAiLoaded(true)
     setAiOpen(true)
   }, [])
 
-  const openIntegrations = useCallback(() => {
-    setLoaded((current) => (current.integrations ? current : { ...current, integrations: true }))
-    setIntegrationsOpen(true)
-  }, [])
-
-  const closeIntegrations = useCallback(() => setIntegrationsOpen(false), [])
+  const openEra = useCallback(() => setEraOpen(true), [])
 
   const handleGenerated = useCallback((workflow: unknown) => {
     const actions = actionsRef.current
@@ -1022,7 +1014,7 @@ function FlowLayout() {
         onSearch={searchComponent}
         onOpenAI={openAI}
         onOpenBot={openBot}
-        onOpenIntegrations={openIntegrations}
+        onOpenEra={openEra}
         onChangeBackground={openBackgroundDialog}
         onSaveImage={saveCanvasImage}
         onResetBackground={resetBackground}
@@ -1031,8 +1023,8 @@ function FlowLayout() {
         {builder}
       </main>
       <YenFlowBot isOpen={botOpen} openRequest={botRequest} onClose={closeBot} onStart={runPreview} />
-      {loaded.ai && <AIWorkflowDialog open={aiOpen} onOpenChange={setAiOpen} onWorkflowGenerated={handleGenerated} />}
-      {loaded.integrations && <IntegrationsMenu isOpen={integrationsOpen} onClose={closeIntegrations} />}
+      {aiLoaded && <AIWorkflowDialog open={aiOpen} onOpenChange={setAiOpen} onWorkflowGenerated={handleGenerated} />}
+      <EraDialog open={eraOpen} onOpenChange={setEraOpen} />
       {showColorPanel && <ColorPanel />}
       <Dialog open={backgroundDialog} onOpenChange={setBackgroundDialog}>
         <DialogContent className={cn(ui.dialog, "max-w-md rounded-xl sm:rounded-xl")}>

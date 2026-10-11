@@ -75,14 +75,13 @@ Para habilitar um deles, basta um JSON exportado da plataforma com o componente 
 
 ## Outras entradas
 
-- O formato antigo deste editor (início, mensagem, opções e finalizar), usado pela geração com IA e pela importação do BliP, é convertido na importação:
+- O formato antigo deste editor (início, mensagem, opções e finalizar), usado pela geração com IA, é convertido na importação:
   - IDs renumerados (`inicio`, `2`, `3`…) e conexões `xy-edge__`;
   - layout da esquerda para a direita, por distância do início;
   - a mensagem final vira um Enviar Mensagem antes do Encerrar Conversa;
   - opções sem `sourceHandle` recebem `output-0`, `output-1`… na ordem das conexões.
 - Componentes antigos sem equivalente (como código, processo e condicional) são recusados com aviso, e o fluxo atual é mantido.
 - Na geração com IA, o prompt completo é baixado em um arquivo `.md` separado; o fluxo continua no formato de Atendimento.
-- O envio direto ao BliP continua bloqueado para componentes de Atendimento, por falta de mapeamento.
 
 ## Prévia
 
