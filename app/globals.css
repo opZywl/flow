@@ -3,83 +3,35 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
-  /* Flow background variables */
   --flow-background-image: none;
+  --flow-bg: 18 18 18;
+  --flow-menu: 26 26 26;
+  --flow-surface: 26 26 26;
+  --flow-soft: 22 22 22;
+  --flow-strong: 39 39 42;
+  --flow-border: 39 39 42;
+  --flow-fg: 237 237 237;
+  --flow-muted: 161 161 170;
+  --flow-muted-strong: 228 228 231;
+  --flow-accent: 59 130 246;
+  --flow-success: 34 197 94;
+  --flow-warning: 251 191 36;
+  --flow-danger: 248 113 113;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
-  }
-}
-
-body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(to bottom, transparent, rgb(var(--background-end-rgb))) rgb(var(--background-start-rgb));
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-.bg-grid-pattern {
-  background-image: linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
-  linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-  .animate-float {
-    animation: float 3s ease-in-out infinite;
-  }
-  .animate-glow {
-    animation: glow 2s ease-in-out infinite;
-  }
-  .animation-delay-300 {
-    animation-delay: 300ms;
-  }
-  .animation-delay-700 {
-    animation-delay: 700ms;
-  }
-}
-
-/* Ocultar completamente o ícone do Next.js */
-#__next-build-watcher,
-[data-nextjs-dialog-overlay],
-[data-nextjs-dialog],
-[data-nextjs-toast],
-[data-nextjs-errors],
-[data-nextjs-version],
-[data-nextjs-build-indicator] {
-  display: none !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  width: 0 !important;
-  height: 0 !important;
-  overflow: hidden !important;
-  z-index: -9999 !important;
-}
-
-/* Ocultar elementos com z-index alto que podem ser o indicador */
-body > div:last-child[style*="z-index: 2147483647"],
-body > div[style*="z-index: 9999"],
-body > div[style*="position: fixed"][style*="bottom: 10px"][style*="right: 20px"] {
-  display: none !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
-}
-
-/* Ocultar qualquer elemento com a classe que contenha 'nextjs' */
-[class*="nextjs"],
-[id*="nextjs"] {
-  display: none !important;
+:root.home-theme-light {
+  --flow-bg: 255 255 255;
+  --flow-menu: 250 250 250;
+  --flow-surface: 255 255 255;
+  --flow-soft: 250 250 250;
+  --flow-strong: 244 244 245;
+  --flow-border: 228 228 231;
+  --flow-fg: 9 9 11;
+  --flow-muted: 113 113 122;
+  --flow-muted-strong: 39 39 42;
+  --flow-success: 22 163 74;
+  --flow-warning: 217 119 6;
+  --flow-danger: 220 38 38;
 }
 
 @layer base {
@@ -136,9 +88,6 @@ body > div[style*="position: fixed"][style*="bottom: 10px"][style*="right: 20px"
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
   }
-}
-
-@layer base {
   * {
     @apply border-border;
   }
@@ -147,28 +96,15 @@ body > div[style*="position: fixed"][style*="bottom: 10px"][style*="right: 20px"
   }
 }
 
-/* Custom animations */
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0px);
+@layer utilities {
+  .animation-delay-300 {
+    animation-delay: 300ms;
   }
-  50% {
-    transform: translateY(-10px);
+  .animation-delay-700 {
+    animation-delay: 700ms;
   }
 }
 
-@keyframes glow {
-  0%,
-  100% {
-    box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
-  }
-  50% {
-    box-shadow: 0 0 30px rgba(168, 85, 247, 0.8), 0 0 40px rgba(6, 182, 212, 0.3);
-  }
-}
-
-/* Interactive glow effect */
 .interactive-glow {
   transition: all 0.3s ease;
 }
@@ -177,40 +113,29 @@ body > div[style*="position: fixed"][style*="bottom: 10px"][style*="right: 20px"
   text-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
 }
 
-/* Custom glow effect for text */
-.animate-text-glow-primary {
-  animation: text-glow-primary 2s ease-in-out infinite alternate;
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--flow-muted) / 0.45) transparent;
 }
 
-@keyframes text-glow-primary {
-  from {
-    text-shadow: 0 0 5px rgba(168, 85, 247, 0.5), 0 0 10px rgba(6, 182, 212, 0.5);
-  }
-  to {
-    text-shadow: 0 0 10px rgba(168, 85, 247, 0.8), 0 0 20px rgba(6, 182, 212, 0.8);
-  }
-}
-
-/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1a1a1a;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(45deg, #8b5cf6, #06b6d4);
-  border-radius: 4px;
+  background: rgb(var(--flow-muted) / 0.45);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(45deg, #7c3aed, #0891b2);
+  background: rgb(var(--flow-muted) / 0.7);
 }
 
-/* ===== FLOW BACKGROUND STYLES ===== */
-/* Flow background styles */
 .flow-background {
   background-image: var(--flow-background-image);
   background-size: cover;
@@ -218,7 +143,6 @@ body > div[style*="position: fixed"][style*="bottom: 10px"][style*="right: 20px"
   background-repeat: no-repeat;
 }
 
-/* Panel glow effect */
 .panel-glow {
   filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.2));
 }
@@ -227,31 +151,23 @@ body > div[style*="position: fixed"][style*="bottom: 10px"][style*="right: 20px"
   filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.3));
 }
 
-/* ===== APENAS ESTILOS PARA SCREENSHOT ===== */
-/* Hide elements during screenshot */
-.hiding-for-screenshot {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
+@keyframes flow-edge-dash {
+  to {
+    stroke-dashoffset: -22;
+  }
 }
 
-/* Sidebar specific hiding */
-.node-library-sidebar.hiding-for-screenshot {
-  transform: translateX(-100%) !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
+.flow-edge-dash {
+  stroke-dasharray: 5 13;
+  animation: flow-edge-dash 0.9s linear infinite;
 }
 
-/* Header specific hiding */
-header.hiding-for-screenshot {
-  transform: translateY(-100%) !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
+.flow-edge-glow {
+  filter: drop-shadow(0 0 3px rgb(var(--flow-accent) / 0.7));
 }
 
-/* Elegant sidebar hiding */
-.fixed.left-0.top-0.hiding-for-screenshot {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
+@media (prefers-reduced-motion: reduce) {
+  .flow-edge-dash {
+    animation: none;
+  }
 }

@@ -14,14 +14,8 @@ const config: Config = {
   safelist: [
     "text-balance",
     { pattern: /^animate-(fade-in|marquee|gradient|pulse|shimmer|spin|chart-glow|chart-pulse)$/ },
-    { pattern: /^data-\[.*]/ },
     { pattern: /^home-(bg|text|border)-(dark|light)-(primary|secondary|card|white|gray|yellow|blue)(-\d+)?$/ },
-    {
-      pattern:
-        /^home-(sidebar|header|stats|menu|card|metric|project|team|circular)-(gradient|light|item|hover|member|progress)(-light)?$/,
-    },
     { pattern: /^home-(upgrade|text|hover)-(btn|glow|glow-light)$/ },
-    { pattern: /^hover:home-(bg|text)-(yellow|blue)-(400|50|600)(-10)?:hover$/ },
   ],
   theme: {
     fontFamily: {
@@ -66,8 +60,21 @@ const config: Config = {
         accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
         popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
         card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
-
-        // Home Dashboard specific colors
+        flow: {
+          bg: "rgb(var(--flow-bg) / <alpha-value>)",
+          menu: "rgb(var(--flow-menu) / <alpha-value>)",
+          surface: "rgb(var(--flow-surface) / <alpha-value>)",
+          soft: "rgb(var(--flow-soft) / <alpha-value>)",
+          strong: "rgb(var(--flow-strong) / <alpha-value>)",
+          border: "rgb(var(--flow-border) / <alpha-value>)",
+          fg: "rgb(var(--flow-fg) / <alpha-value>)",
+          muted: "rgb(var(--flow-muted) / <alpha-value>)",
+          "muted-strong": "rgb(var(--flow-muted-strong) / <alpha-value>)",
+          accent: "rgb(var(--flow-accent) / <alpha-value>)",
+          success: "rgb(var(--flow-success) / <alpha-value>)",
+          warning: "rgb(var(--flow-warning) / <alpha-value>)",
+          danger: "rgb(var(--flow-danger) / <alpha-value>)",
+        },
         "home-dark": {
           primary: "#0a0a0a",
           secondary: "#1a1a1a",
@@ -210,7 +217,6 @@ const config: Config = {
   },
   plugins: [
     animatePlugin,
-    require("tailwindcss-animate"),
     ({ addUtilities, theme }: any) => {
       const homeUtilities = {
         ".home-bg-dark-primary": { backgroundColor: theme("colors.home-dark.primary") },

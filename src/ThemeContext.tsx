@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 
 type HomeTheme = "dark" | "light"
 
@@ -127,7 +127,7 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
     // Extract colors from gradient theme
-    const extractColorsFromGradient = (gradient: GradientTheme) => {
+    const extractColorsFromGradient = useCallback((gradient: GradientTheme) => {
         const primaryMatch = gradient.primary.match(/#[0-9a-fA-F]{6}/g)
         if (primaryMatch && primaryMatch.length >= 2) {
             return {
@@ -139,10 +139,10 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
             color1: "#3b82f6",
             color2: "#8b5cf6",
         }
-    }
+    }, [])
 
     // Apply CSS variables immediately
-    const applyCSSVariables = (gradient: GradientTheme) => {
+    const applyCSSVariables = useCallback((gradient: GradientTheme) => {
         const root = document.documentElement
         root.style.setProperty("--gradient-primary", gradient.primary)
         root.style.setProperty("--gradient-secondary", gradient.secondary)
@@ -169,14 +169,15 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
         root.style.setProperty("--glow-color-light", gradient.glow.replace("0.6", "0.3"))
         root.style.setProperty("--glow-color-strong", gradient.glow.replace("0.6", "0.8"))
 
-        // Auto-sync fade colors with theme
         const colors = extractColorsFromGradient(gradient)
+        const accent = colors.color1.slice(1).match(/../g)?.map((pair) => Number.parseInt(pair, 16)).join(" ")
+        if (accent) root.style.setProperty("--flow-accent", accent)
         setFadeColor1(colors.color1)
         setFadeColor2(colors.color2)
-    }
+    }, [extractColorsFromGradient])
 
     // Apply glow and fade settings
-    const applyGlowFadeSettings = () => {
+    const applyGlowFadeSettings = useCallback(() => {
         const root = document.documentElement
 
         // Aplicar configurações de glow
@@ -211,7 +212,7 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
             root.style.setProperty("--fade-color-2", fadeColor2)
             root.style.setProperty("--fade-speed", `${fadeSpeed}s`)
         }
-    }
+    }, [glowEnabled, glowIntensity, glowThickness, glowAnimation, fadeEnabled, fadeColor1, fadeColor2, fadeSpeed])
 
     const toggleSidebar = () => {
         const newState = !sidebarCollapsed
@@ -271,7 +272,7 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
             applyCSSVariables(gradientThemes[0])
         }
         setIsLoaded(true)
-    }, [])
+    }, [applyCSSVariables])
 
     useEffect(() => {
         if (isLoaded) {
@@ -283,28 +284,18 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
                 const root = document.documentElement
                 root.classList.remove("home-theme-dark", "home-theme-light")
                 root.classList.add(`home-theme-${theme}`)
+                root.classList.toggle("dark", theme === "dark")
             } catch (error) {
                 console.log("Error saving theme to localStorage:", error)
             }
         }
-    }, [theme, currentGradient, isLoaded])
+    }, [theme, currentGradient, isLoaded, applyCSSVariables])
 
     useEffect(() => {
         if (isLoaded) {
             applyGlowFadeSettings()
         }
-    }, [
-        isLoaded,
-        glowEnabled,
-        glowIntensity,
-        glowThickness,
-        glowAnimation,
-        fadeEnabled,
-        fadeMode,
-        fadeColor1,
-        fadeColor2,
-        fadeSpeed,
-    ])
+    }, [isLoaded, applyGlowFadeSettings])
 
     const toggleTheme = () => {
         setTheme((prevTheme) => {
