@@ -1,90 +1,80 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { useEffect, useRef, useState } from "react"
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 
 interface Particle {
   id: number
   x: number
   y: number
+  driftX: number
+  driftY: number
   size: number
   color: string
   opacity: number
 }
 
-interface CursorPosition {
-  x: number
-  y: number
+const COLORS = ["#a78bfa", "#22d3ee", "#7c3aed", "#0891b2"]
+const PARTICLE_CHANCE = 0.3
+const MAX_PARTICLES = 16
+const KEPT_PARTICLES = 10
+const IDLE_DELAY_MS = 100
+const CLEANUP_INTERVAL_MS = 2000
+
+function createParticle(x: number, y: number): Particle {
+  return {
+    id: Date.now() + Math.random(),
+    x: x + (Math.random() - 0.5) * 20,
+    y: y + (Math.random() - 0.5) * 20,
+    driftX: (Math.random() - 0.5) * 100,
+    driftY: (Math.random() - 0.5) * 100,
+    size: Math.random() * 4 + 2,
+    color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    opacity: Math.random() * 0.8 + 0.2,
+  }
 }
 
 export function MouseTrailEffect() {
+  const reduceMotion = useReducedMotion()
   const [particles, setParticles] = useState<Particle[]>([])
-  const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ x: 0, y: 0 })
+  const [cursor, setCursor] = useState({ x: 0, y: 0 })
   const [isMoving, setIsMoving] = useState(false)
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  const colors = ["#a78bfa", "#22d3ee", "#7c3aed", "#0891b2"]
-
-  const createParticle = useCallback(
-    (x: number, y: number) => {
-      const particle: Particle = {
-        id: Date.now() + Math.random(),
-        x: x + (Math.random() - 0.5) * 20,
-        y: y + (Math.random() - 0.5) * 20,
-        size: Math.random() * 4 + 2,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        opacity: Math.random() * 0.8 + 0.2,
-      }
-      return particle
-    },
-    [colors],
-  )
-
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      setCursorPosition({ x: e.clientX, y: e.clientY })
+  useEffect(() => {
+    if (reduceMotion) return
+    const handleMouseMove = (event: MouseEvent) => {
+      setCursor({ x: event.clientX, y: event.clientY })
       setIsMoving(true)
-
-      // Create particles occasionally
-      if (Math.random() < 0.3) {
-        const newParticle = createParticle(e.clientX, e.clientY)
-        setParticles((prev) => [...prev.slice(-15), newParticle])
+      if (Math.random() < PARTICLE_CHANCE) {
+        const particle = createParticle(event.clientX, event.clientY)
+        setParticles((previous) => [...previous.slice(-(MAX_PARTICLES - 1)), particle])
       }
-
-      // Clear moving state after a delay
-      setTimeout(() => setIsMoving(false), 100)
-    },
-    [createParticle],
-  )
-
-  useEffect(() => {
+      clearTimeout(idleTimer.current)
+      idleTimer.current = setTimeout(() => setIsMoving(false), IDLE_DELAY_MS)
+    }
     window.addEventListener("mousemove", handleMouseMove)
-    return () => window.removeEventListener("mousemove", handleMouseMove)
-  }, [handleMouseMove])
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove)
+      clearTimeout(idleTimer.current)
+    }
+  }, [reduceMotion])
 
-  // Clean up old particles
   useEffect(() => {
-    const interval = setInterval(() => {
-      setParticles((prev) => prev.slice(-10))
-    }, 2000)
+    if (reduceMotion) return
+    const interval = setInterval(() => setParticles((previous) => previous.slice(-KEPT_PARTICLES)), CLEANUP_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [])
+  }, [reduceMotion])
+
+  if (reduceMotion) return null
 
   return (
     <>
-      {/* Custom Cursor */}
       <motion.div
-        className="fixed pointer-events-none z-50 mix-blend-difference"
-        animate={{
-          x: cursorPosition.x - 10,
-          y: cursorPosition.y - 10,
-          scale: isMoving ? 1.5 : 1,
-        }}
-        transition={{
-          type: "spring",
-          stiffness: 500,
-          damping: 28,
-          mass: 0.5,
-        }}
+        className="pointer-events-none fixed z-50 mix-blend-difference"
+        aria-hidden="true"
+        animate={{ x: cursor.x - 10, y: cursor.y - 10, scale: isMoving ? 1.5 : 1 }}
+        transition={{ type: "spring", stiffness: 500, damping: 28, mass: 0.5 }}
         style={{
           width: 20,
           height: 20,
@@ -94,19 +84,11 @@ export function MouseTrailEffect() {
         }}
       />
 
-      {/* Glow Effect */}
       <motion.div
-        className="fixed pointer-events-none z-40"
-        animate={{
-          x: cursorPosition.x - 50,
-          y: cursorPosition.y - 50,
-          opacity: isMoving ? 0.6 : 0.2,
-        }}
-        transition={{
-          type: "spring",
-          stiffness: 200,
-          damping: 25,
-        }}
+        className="pointer-events-none fixed z-40"
+        aria-hidden="true"
+        animate={{ x: cursor.x - 50, y: cursor.y - 50, opacity: isMoving ? 0.6 : 0.2 }}
+        transition={{ type: "spring", stiffness: 200, damping: 25 }}
         style={{
           width: 100,
           height: 100,
@@ -116,32 +98,15 @@ export function MouseTrailEffect() {
         }}
       />
 
-      {/* Particles */}
-      <div className="fixed inset-0 pointer-events-none z-30">
+      <div className="pointer-events-none fixed inset-0 z-30" aria-hidden="true">
         <AnimatePresence>
           {particles.map((particle) => (
             <motion.div
               key={particle.id}
-              initial={{
-                x: particle.x,
-                y: particle.y,
-                scale: 0,
-                opacity: particle.opacity,
-              }}
-              animate={{
-                x: particle.x + (Math.random() - 0.5) * 100,
-                y: particle.y + (Math.random() - 0.5) * 100,
-                scale: 1,
-                opacity: 0,
-              }}
-              exit={{
-                scale: 0,
-                opacity: 0,
-              }}
-              transition={{
-                duration: 2,
-                ease: "easeOut",
-              }}
+              initial={{ x: particle.x, y: particle.y, scale: 0, opacity: particle.opacity }}
+              animate={{ x: particle.x + particle.driftX, y: particle.y + particle.driftY, scale: 1, opacity: 0 }}
+              exit={{ scale: 0, opacity: 0 }}
+              transition={{ duration: 2, ease: "easeOut" }}
               style={{
                 position: "absolute",
                 width: particle.size,
@@ -155,28 +120,21 @@ export function MouseTrailEffect() {
         </AnimatePresence>
       </div>
 
-      {/* Interactive Elements Glow */}
       <style jsx global>{`
-        .interactive-glow {
-          transition: all 0.3s ease;
-        }
-        
-        .interactive-glow:hover {
-          box-shadow: 0 0 30px rgba(167, 139, 250, 0.4);
-          transform: translateY(-2px);
-        }
-        
-        a:hover, button:hover {
+        a:hover,
+        button:hover {
           text-shadow: 0 0 10px rgba(167, 139, 250, 0.6);
         }
-        
-        /* Hide default cursor */
+
         * {
           cursor: none !important;
         }
-        
-        /* Show cursor on interactive elements */
-        a, button, input, textarea, select {
+
+        a,
+        button,
+        input,
+        textarea,
+        select {
           cursor: pointer !important;
         }
       `}</style>
