@@ -1,499 +1,491 @@
-import { generateObject } from "ai"
+import { APICallError, NoObjectGeneratedError, RetryError, generateObject } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
 import { z } from "zod"
+import { exportFlow, importFlow, isObject } from "@/lib/atendimento/format"
+import type { AtendimentoFlow } from "@/lib/atendimento/types"
+
+export const maxDuration = 60
 
 const WorkflowSchema = z.object({
-    nodes: z
-        .array(
-            z.object({
-                id: z.string().min(1, "Node ID cannot be empty"),
-                type: z.enum(["start", "sendMessage", "options", "process", "conditional", "code", "finalizar"], {
-                    errorMap: () => ({
-                        message:
-                            "Invalid node type. Must be one of: start, sendMessage, options, process, conditional, code, finalizar",
-                    }),
-                }),
-                position: z.object({
-                    x: z.number().finite("X position must be a valid number"),
-                    y: z.number().finite("Y position must be a valid number"),
-                }),
-                data: z.object({
-                    label: z.string().min(1, "Label cannot be empty"),
-                    customId: z.string().optional(),
-                    description: z.string().optional(),
-                    message: z.string().optional(),
-                    options: z
-                        .array(
-                            z.object({
-                                id: z.string().min(1, "Option ID cannot be empty"),
-                                text: z.string().min(1, "Option text cannot be empty"),
-                            }),
-                        )
-                        .optional(),
-                    condition: z.string().optional(),
-                    code: z.string().optional(),
-                    finalizationType: z.string().optional(),
-                    finalMessage: z.string().optional(),
-                }),
-                deletable: z.boolean().optional(),
-                draggable: z.boolean().optional(),
-            }),
-        )
-        .min(2, "Workflow must have at least 2 nodes (start + one other)"),
-    edges: z.array(
-        z.object({
-            id: z.string().min(1, "Edge ID cannot be empty"),
-            source: z.string().min(1, "Source node ID cannot be empty"),
-            target: z.string().min(1, "Target node ID cannot be empty"),
-            sourceHandle: z.string().optional(),
-            targetHandle: z.string().optional(),
-            type: z.string().optional(),
+  nodes: z
+    .array(
+      z.object({
+        id: z.string().min(1, "O ID do componente não pode ficar vazio."),
+        type: z.enum(["start", "sendMessage", "options", "finalizar"], {
+          errorMap: () => ({
+            message: "Tipo de componente inválido. Use start, sendMessage, options ou finalizar.",
+          }),
         }),
-    ),
-    nodeCounters: z.record(z.number().nonnegative()).optional(),
+        position: z.object({
+          x: z.number().finite("A posição x deve ser um número válido."),
+          y: z.number().finite("A posição y deve ser um número válido."),
+        }),
+        data: z.object({
+          label: z.string().min(1, "O rótulo do componente não pode ficar vazio."),
+          customId: z.string().optional(),
+          description: z.string().optional(),
+          message: z.string().optional(),
+          options: z
+            .array(
+              z.object({
+                id: z.string().min(1, "O ID da opção não pode ficar vazio."),
+                text: z.string().min(1, "O texto da opção não pode ficar vazio."),
+              }),
+            )
+            .optional(),
+          condition: z.string().optional(),
+          code: z.string().optional(),
+          finalizationType: z.string().optional(),
+          finalMessage: z.string().optional(),
+        }),
+        deletable: z.boolean().optional(),
+        draggable: z.boolean().optional(),
+      }),
+    )
+    .min(2, "O fluxo deve ter ao menos 2 componentes: o início e mais um."),
+  edges: z.array(
+    z.object({
+      id: z.string().min(1, "O ID da conexão não pode ficar vazio."),
+      source: z.string().min(1, "A origem da conexão não pode ficar vazia."),
+      target: z.string().min(1, "O destino da conexão não pode ficar vazio."),
+      sourceHandle: z.string().optional(),
+      targetHandle: z.string().optional(),
+      type: z.string().optional(),
+    }),
+  ),
+  nodeCounters: z.record(z.number().nonnegative()).optional(),
 })
 
-function validateWorkflowIntegrity(workflow: any): { valid: boolean; errors: string[] } {
-    const errors: string[] = []
+type GeneratedWorkflow = z.infer<typeof WorkflowSchema>
+type GeneratedNode = GeneratedWorkflow["nodes"][number]
+type Size = "small" | "medium" | "large" | "custom"
 
-    // Check if there's exactly one start node
-    const startNodes = workflow.nodes.filter((n: any) => n.type === "start")
-    if (startNodes.length === 0) {
-        errors.push("Workflow must have exactly one start node")
-    } else if (startNodes.length > 1) {
-        errors.push("Workflow cannot have more than one start node")
-    }
-
-    // Check if start node has correct ID
-    if (startNodes.length === 1 && startNodes[0].id !== "start-node") {
-        errors.push("Start node must have id 'start-node'")
-    }
-
-    // Check if all edges reference existing nodes
-    const nodeIds = new Set(workflow.nodes.map((n: any) => n.id))
-    workflow.edges.forEach((edge: any, index: number) => {
-        if (!nodeIds.has(edge.source)) {
-            errors.push(`Edge ${index} references non-existent source node: ${edge.source}`)
-        }
-        if (!nodeIds.has(edge.target)) {
-            errors.push(`Edge ${index} references non-existent target node: ${edge.target}`)
-        }
-    })
-
-    // Check if all edges have type "custom"
-    workflow.edges.forEach((edge: any, index: number) => {
-        if (!edge.type || edge.type !== "custom") {
-            errors.push(`Edge ${index} (${edge.id}) must have type "custom", got: ${edge.type || "undefined"}`)
-        }
-    })
-
-    // Check if sendMessage nodes have message
-    workflow.nodes.forEach((node: any, index: number) => {
-        if (node.type === "sendMessage" && (!node.data.message || node.data.message.trim() === "")) {
-            errors.push(`SendMessage node ${index} (${node.id}) must have a non-empty message`)
-        }
-    })
-
-    // Check if options nodes have options array
-    workflow.nodes.forEach((node: any, index: number) => {
-        if (node.type === "options") {
-            if (!node.data.options || !Array.isArray(node.data.options) || node.data.options.length === 0) {
-                errors.push(`Options node ${index} (${node.id}) must have at least one option`)
-            }
-        }
-    })
-
-    workflow.nodes.forEach((node: any) => {
-        if (node.id !== "start-node") {
-            const incomingEdges = workflow.edges.filter((edge: any) => edge.target === node.id)
-            if (incomingEdges.length === 0) {
-                const nodeLabel = node.data?.customId || node.data?.label || node.id
-                errors.push(`Node ${nodeLabel} is not connected to start`)
-                errors.push(`Node ${nodeLabel} has no incoming edges`)
-            }
-        }
-    })
-
-    workflow.nodes.forEach((node: any) => {
-        if (node.type !== "finalizar" && node.id !== "start-node") {
-            const outgoingEdges = workflow.edges.filter((edge: any) => edge.source === node.id)
-            if (outgoingEdges.length === 0) {
-                const nodeLabel = node.data?.customId || node.data?.label || node.id
-                errors.push(`Node ${nodeLabel} has no outgoing edges (must connect to another node)`)
-            }
-        }
-    })
-
-    // Check if all nodes are connected to start (directly or indirectly)
-    const connectedNodes = new Set<string>()
-    const queue = ["start-node"]
-
-    while (queue.length > 0) {
-        const currentNode = queue.shift()!
-        connectedNodes.add(currentNode)
-
-        const connectedEdges = workflow.edges.filter((edge: any) => edge.source === currentNode)
-        connectedEdges.forEach((edge: any) => {
-            if (!connectedNodes.has(edge.target)) {
-                queue.push(edge.target)
-            }
-        })
-    }
-
-    workflow.nodes.forEach((node: any) => {
-        if (!connectedNodes.has(node.id)) {
-            const nodeLabel = node.data?.customId || node.data?.label || node.id
-            errors.push(`Node ${nodeLabel} is not reachable from start node`)
-        }
-    })
-
-    return {
-        valid: errors.length === 0,
-        errors,
-    }
+interface Limits {
+  min: number
+  max: number
+  target: number
 }
 
-export async function POST(req: Request) {
-    try {
-        const { description, size, customNodeCount, model, apiKey, imageUrl, additionalContext } = await req.json()
+interface ModelProfile {
+  name: string
+  structuredOutputs: boolean
+  vision: boolean
+}
 
-        if (!apiKey || typeof apiKey !== "string" || !apiKey.startsWith("sk-")) {
-            return Response.json(
-                {
-                    success: false,
-                    error: "Chave da API OpenAI inválida. Deve começar com 'sk-' e ser uma string válida",
-                },
-                { status: 400 },
-            )
-        }
+const START_NODE_ID = "start-node"
+const DEFAULT_MODEL = "gpt-4o"
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg|webp));base64,([a-z0-9+/]+=*)$/i
+const FETCH_FAILURES = ["fetch failed", "failed to fetch"]
 
-        const nodeLimits: Record<string, { min: number; max: number; target: number }> = {
-            small: { min: 3, max: 5, target: 4 },
-            medium: { min: 6, max: 10, target: 8 },
-            large: { min: 11, max: 20, target: 15 },
-            custom: { min: 3, max: 30, target: 10 },
-        }
+const SIZES: Size[] = ["small", "medium", "large", "custom"]
 
-        let limits = nodeLimits[size] || nodeLimits.medium
+const SIZE_LIMITS: Record<Size, Limits> = {
+  small: { min: 3, max: 5, target: 4 },
+  medium: { min: 6, max: 10, target: 8 },
+  large: { min: 11, max: 20, target: 15 },
+  custom: { min: 3, max: 30, target: 10 },
+}
 
-        if (size === "custom" && customNodeCount) {
-            const count = Math.max(3, Math.min(30, customNodeCount))
-            limits = { min: count, max: count, target: count }
-        }
+const MODEL_PROFILES = new Map<string, ModelProfile>([
+  ["gpt-4o", { name: "GPT-4o", structuredOutputs: true, vision: true }],
+  ["gpt-4o-mini", { name: "GPT-4o mini", structuredOutputs: true, vision: true }],
+  ["gpt-4-turbo", { name: "GPT-4 Turbo", structuredOutputs: false, vision: true }],
+  ["gpt-3.5-turbo", { name: "GPT-3.5 Turbo", structuredOutputs: false, vision: false }],
+])
 
-        const prompt = `Você é um especialista em criar workflows de chatbot. Crie um workflow completo e funcional baseado na seguinte descrição: "${description}".
-
-${additionalContext ? `Contexto adicional: ${additionalContext}` : ""}
-
-🚨🚨🚨 ATENÇÃO CRÍTICA - QUANTIDADE DE NÓS OBRIGATÓRIA 🚨🚨🚨
-
-VOCÊ DEVE GERAR EXATAMENTE ${limits.target} NÓS NO TOTAL (incluindo o nó start).
-
-${
-            size === "custom"
-                ? `O USUÁRIO SOLICITOU EXATAMENTE ${limits.target} NÓS. VOCÊ DEVE GERAR EXATAMENTE ${limits.target} NÓS, NEM MAIS, NEM MENOS!`
-                : `QUANTIDADE MÍNIMA: ${limits.min} nós
-QUANTIDADE MÁXIMA: ${limits.max} nós
-QUANTIDADE ALVO: ${limits.target} nós (TENTE GERAR EXATAMENTE ESTA QUANTIDADE)`
-        }
-
-SE VOCÊ GERAR MENOS DE ${limits.min} NÓS OU MAIS DE ${limits.max} NÓS, O WORKFLOW SERÁ REJEITADO!
-
-⚠️ FORMATO JSON OBRIGATÓRIO - SIGA EXATAMENTE ESTE MODELO ⚠️
-
-Você DEVE gerar um JSON VÁLIDO seguindo EXATAMENTE esta estrutura:
-
-{
-  "nodes": [
+const EXAMPLE: GeneratedWorkflow = {
+  nodes: [
+    { id: START_NODE_ID, type: "start", position: { x: 0, y: 0 }, data: { label: "Início" } },
     {
-      "id": "start-node",
-      "type": "start",
-      "position": { "x": 250, "y": 50 },
-      "data": {
-        "label": "INÍCIO",
-        "description": "Ponto de início do fluxo"
-      },
-      "deletable": false,
-      "draggable": true
+      id: "boas-vindas",
+      type: "sendMessage",
+      position: { x: 300, y: 0 },
+      data: { label: "Boas-vindas", message: "Olá! Você está no atendimento da Clínica Exemplo." },
     },
     {
-      "id": "welcome-msg",
-      "type": "sendMessage",
-      "position": { "x": 250, "y": 200 },
-      "data": {
-        "label": "Mensagem de Boas-vindas",
-        "message": "Olá! Bem-vindo ao sistema!",
-        "customId": "#1"
-      },
-      "draggable": true
-    },
-    {
-      "id": "main-menu",
-      "type": "options",
-      "position": { "x": 250, "y": 350 },
-      "data": {
-        "label": "Menu Principal",
-        "message": "Como posso ajudar?",
-        "options": [
-          { "id": "opt1", "text": "Opção 1" },
-          { "id": "opt2", "text": "Opção 2" }
+      id: "menu-principal",
+      type: "options",
+      position: { x: 600, y: 0 },
+      data: {
+        label: "Menu principal",
+        message: "Como podemos ajudar?",
+        options: [
+          { id: "opt1", text: "Agendar consulta" },
+          { id: "opt2", text: "Encerrar atendimento" },
         ],
-        "customId": "#2"
       },
-      "draggable": true
     },
     {
-      "id": "end-node",
-      "type": "finalizar",
-      "position": { "x": 250, "y": 500 },
-      "data": {
-        "label": "Finalizar",
-        "message": "Obrigado!",
-        "customId": "#3"
-      },
-      "draggable": true
-    }
+      id: "agendamento",
+      type: "sendMessage",
+      position: { x: 900, y: 0 },
+      data: { label: "Agendamento", message: "Para agendar, acesse o portal do paciente ou ligue para a recepção." },
+    },
+    { id: "encerrar", type: "finalizar", position: { x: 1200, y: 150 }, data: { label: "Encerrar" } },
   ],
-  "edges": [
-    {
-      "id": "start-to-welcome",
-      "source": "start-node",
-      "target": "welcome-msg",
-      "type": "custom"
-    },
-    {
-      "id": "welcome-to-menu",
-      "source": "welcome-msg",
-      "target": "main-menu",
-      "type": "custom"
-    },
-    {
-      "id": "menu-opt1-to-end",
-      "source": "main-menu",
-      "sourceHandle": "output-0",
-      "target": "end-node",
-      "type": "custom"
-    },
-    {
-      "id": "menu-opt2-to-end",
-      "source": "main-menu",
-      "sourceHandle": "output-1",
-      "target": "end-node",
-      "type": "custom"
-    }
+  edges: [
+    { id: "inicio-boas-vindas", source: START_NODE_ID, target: "boas-vindas", type: "custom" },
+    { id: "boas-vindas-menu", source: "boas-vindas", target: "menu-principal", type: "custom" },
+    { id: "menu-agendamento", source: "menu-principal", sourceHandle: "output-0", target: "agendamento", type: "custom" },
+    { id: "menu-encerrar", source: "menu-principal", sourceHandle: "output-1", target: "encerrar", type: "custom" },
+    { id: "agendamento-encerrar", source: "agendamento", target: "encerrar", type: "custom" },
   ],
-  "nodeCounters": {
-    "sendMessage": 1,
-    "options": 1,
-    "finalizar": 1
+  nodeCounters: { sendMessage: 2, options: 1, finalizar: 1 },
+}
+
+function isSize(value: unknown): value is Size {
+  return typeof value === "string" && (SIZES as string[]).includes(value)
+}
+
+function resolveLimits(size: Size, customNodeCount: unknown): Limits {
+  const requested = Number(customNodeCount)
+  if (size !== "custom" || !Number.isFinite(requested) || requested <= 0) return SIZE_LIMITS[size]
+  const exact = Math.min(SIZE_LIMITS.custom.max, Math.max(SIZE_LIMITS.custom.min, Math.round(requested)))
+  return { min: exact, max: exact, target: exact }
+}
+
+function expectedCount(limits: Limits): string {
+  return limits.min === limits.max ? String(limits.target) : `de ${limits.min} a ${limits.max}`
+}
+
+function readImage(dataUrl: string): { mediaType: string; data: string } | null {
+  const match = IMAGE_DATA_URL.exec(dataUrl)
+  if (!match) return null
+  const data = match[2]
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0
+  const bytes = Math.floor((data.length * 3) / 4) - padding
+  return bytes > MAX_IMAGE_BYTES ? null : { mediaType: match[1].toLowerCase(), data }
+}
+
+function flowName(description: string): string {
+  const clean = description.replace(/\s+/g, " ").trim()
+  if (!clean) return "Fluxo gerado por IA"
+  if (clean.length <= 80) return clean
+  const cut = clean.slice(0, 80)
+  const space = cut.lastIndexOf(" ")
+  return (space >= 40 ? cut.slice(0, space) : cut).trim()
+}
+
+function buildInstructions(limits: Limits): string {
+  const quantity =
+    limits.min === limits.max
+      ? `Gere exatamente ${limits.target} nós, contando o nó de início.`
+      : `Gere entre ${limits.min} e ${limits.max} nós, contando o nó de início. O ideal é ${limits.target}.`
+
+  return [
+    "Você cria fluxos de atendimento para chatbots. Responda somente com um objeto JSON no formato descrito abaixo.",
+    "",
+    "Quantidade de nós",
+    `- ${quantity}`,
+    "- Respostas fora dessa quantidade são rejeitadas.",
+    "",
+    "Tipos de nó",
+    `- start: início do fluxo. Exatamente um, com id "${START_NODE_ID}". Não recebe conexões.`,
+    "- sendMessage: envia uma mensagem. data.message é obrigatório.",
+    "- options: apresenta um menu. data.message (até 1024 caracteres) e data.options são obrigatórios. Cada menu tem de 1 a 10 opções, cada uma com id e text.",
+    "- finalizar: encerra o atendimento e não tem conexões de saída. Para enviar uma despedida, use um sendMessage antes dele.",
+    "",
+    "Campos de cada nó",
+    '- id: único, em kebab-case, por exemplo "boas-vindas".',
+    "- type: um dos tipos acima.",
+    "- position: { x, y } com valores numéricos. O editor reorganiza o layout ao importar.",
+    "- data.label: nome curto do nó.",
+    "",
+    "Conexões (edges)",
+    '- Cada conexão tem id único, source, target e type "custom", e liga nós existentes.',
+    "- start e sendMessage têm exatamente uma conexão de saída, sem sourceHandle.",
+    '- options tem exatamente uma conexão por opção, com sourceHandle "output-N", em que N é a posição da opção a partir de zero: a primeira opção usa "output-0", a segunda usa "output-1" e assim por diante.',
+    "- Todo nó, exceto start, recebe ao menos uma conexão e é alcançável a partir de start.",
+    "- Quando várias opções encerram o atendimento da mesma forma, ligue todas ao mesmo nó finalizar. Crie mais de um finalizar somente para desfechos diferentes.",
+    "",
+    "nodeCounters",
+    "- Quantidade de nós de cada tipo, sem contar o start.",
+    "",
+    "Conteúdo",
+    "- Mensagens em português do Brasil, claras, profissionais e específicas para o cenário pedido, sem textos genéricos ou de preenchimento.",
+    "- Use emojis somente se a solicitação pedir.",
+    "",
+    "Exemplo ilustrativo da estrutura, com 5 nós. Adapte o conteúdo e a quantidade ao que foi pedido:",
+    JSON.stringify(EXAMPLE, null, 2),
+  ].join("\n")
+}
+
+function buildRequest(description: string, context: string, hasImage: boolean): string {
+  const sections = ["Solicitação"]
+  if (description) sections.push(`Descrição do atendimento:\n${description}`)
+  if (context) sections.push(`Contexto adicional:\n${context}`)
+  if (hasImage) {
+    sections.push(
+      "Imagem de referência: anexada a esta mensagem. Reproduza as etapas, mensagens, opções e conexões mostradas nela.",
+    )
+  }
+  return sections.join("\n\n")
+}
+
+function nodeName(node: GeneratedNode): string {
+  return `“${node.data.label || node.id}”`
+}
+
+function validateWorkflowIntegrity(workflow: GeneratedWorkflow): string[] {
+  const errors: string[] = []
+
+  const starts = workflow.nodes.filter((node) => node.type === "start")
+  if (starts.length === 0) errors.push("O fluxo não tem componente de início.")
+  if (starts.length > 1) errors.push("O fluxo tem mais de um componente de início.")
+  if (starts.length === 1 && starts[0].id !== START_NODE_ID) {
+    errors.push(`O componente de início deve ter o ID "${START_NODE_ID}".`)
+  }
+
+  const nodeIds = new Set(workflow.nodes.map((node) => node.id))
+  for (const edge of workflow.edges) {
+    if (!nodeIds.has(edge.source)) errors.push(`Conexão “${edge.id}”: a origem “${edge.source}” não existe.`)
+    if (!nodeIds.has(edge.target)) errors.push(`Conexão “${edge.id}”: o destino “${edge.target}” não existe.`)
+    if (edge.type !== "custom") errors.push(`Conexão “${edge.id}”: o tipo deve ser "custom".`)
+  }
+
+  const incoming = new Set(workflow.edges.map((edge) => edge.target))
+  const outgoing = new Set(workflow.edges.map((edge) => edge.source))
+  for (const node of workflow.nodes) {
+    if (node.type === "sendMessage" && !node.data.message?.trim()) {
+      errors.push(`Componente ${nodeName(node)}: a mensagem está vazia.`)
+    }
+    if (node.type === "options" && !node.data.options?.length) {
+      errors.push(`Componente ${nodeName(node)}: o menu não tem opções.`)
+    }
+    if (node.id === START_NODE_ID) continue
+    if (!incoming.has(node.id)) errors.push(`Componente ${nodeName(node)}: não tem conexão de entrada.`)
+    if (node.type !== "finalizar" && !outgoing.has(node.id)) {
+      errors.push(`Componente ${nodeName(node)}: não tem conexão de saída.`)
+    }
+  }
+
+  const reachable = new Set<string>()
+  const queue = [START_NODE_ID]
+  while (queue.length > 0) {
+    const current = queue.shift() as string
+    if (reachable.has(current)) continue
+    reachable.add(current)
+    for (const edge of workflow.edges) {
+      if (edge.source === current && !reachable.has(edge.target)) queue.push(edge.target)
+    }
+  }
+  for (const node of workflow.nodes) {
+    if (!reachable.has(node.id) && incoming.has(node.id)) {
+      errors.push(`Componente ${nodeName(node)}: não é alcançável a partir do início.`)
+    }
+  }
+
+  return errors
+}
+
+function describeFailure(error: unknown): { error: string; details: string } {
+  const cause = RetryError.isInstance(error) && error.lastError ? error.lastError : error
+
+  if (APICallError.isInstance(cause)) {
+    const status = cause.statusCode
+    if (status === undefined) {
+      return { error: "Não foi possível conectar à OpenAI.", details: "Verifique a conexão com a internet e tente novamente." }
+    }
+    if (status === 401) {
+      return { error: "A OpenAI recusou a chave da API.", details: "Confira a chave informada e tente novamente." }
+    }
+    if (status === 403) {
+      return { error: "A chave da API não tem acesso a este recurso.", details: cause.message }
+    }
+    if (status === 404) {
+      return {
+        error: "O modelo escolhido não está disponível para esta chave.",
+        details: "Escolha outro modelo ou verifique o acesso da conta na OpenAI.",
+      }
+    }
+    if (status === 429) {
+      return {
+        error: "Limite de uso da OpenAI atingido.",
+        details: "Aguarde alguns instantes ou verifique os créditos da conta.",
+      }
+    }
+    if (status >= 500) {
+      return { error: "A OpenAI está indisponível no momento.", details: "Tente novamente em alguns instantes." }
+    }
+    return { error: "A OpenAI recusou a solicitação.", details: cause.message }
+  }
+
+  if (NoObjectGeneratedError.isInstance(cause)) {
+    if (cause.finishReason === "length") {
+      return {
+        error: "A resposta do modelo foi interrompida por excesso de tamanho.",
+        details: "Reduza a quantidade de componentes ou escolha um modelo com mais capacidade.",
+      }
+    }
+    return {
+      error: "A resposta do modelo não seguiu o formato esperado.",
+      details: "Gere novamente ou escolha outro modelo.",
+    }
+  }
+
+  if (cause instanceof TypeError && FETCH_FAILURES.includes(cause.message.toLowerCase())) {
+    return { error: "Não foi possível conectar à OpenAI.", details: "Verifique a conexão com a internet e tente novamente." }
+  }
+
+  if (cause instanceof z.ZodError) {
+    return {
+      error: "A resposta do modelo não seguiu o formato esperado.",
+      details: cause.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "),
+    }
+  }
+
+  return {
+    error: "Não foi possível gerar o fluxo.",
+    details: cause instanceof Error && cause.message ? cause.message : "Erro desconhecido.",
   }
 }
 
-🔴 REGRAS CRÍTICAS - NUNCA VIOLE ESTAS REGRAS:
+export async function POST(req: Request) {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    body = null
+  }
+  if (!isObject(body)) {
+    return Response.json({ success: false, error: "Não foi possível ler a solicitação." }, { status: 400 })
+  }
 
-1. ✅ ESTRUTURA DOS NODES:
-   - O workflow DEVE ter EXATAMENTE ${limits.target} nós no total (incluindo o start)
-   - SEMPRE comece com um nó "start" com id EXATAMENTE "start-node"
-   - Position do start DEVE ser {x: 250, y: 50}
-   - SEMPRE termine com pelo menos um nó "finalizar"
-   - Todos os nós DEVEM ter "draggable": true
-   - O nó start DEVE ter "deletable": false
-   - Todos os IDs devem ser únicos e em kebab-case: "welcome-msg", "main-menu"
-
-2. ✅ POSICIONAMENTO VERTICAL:
-   - Start node: y: 50
-   - Próximo nó: y: 200 (diferença de 150px)
-   - Próximo nó: y: 350 (diferença de 150px)
-   - Próximo nó: y: 500 (diferença de 150px)
-   - Continue com diferença de 150px entre níveis
-
-3. ✅ POSICIONAMENTO HORIZONTAL:
-   - Nó central: x: 250
-   - Ramificação esquerda: x: 50 (diferença de 200px)
-   - Ramificação direita: x: 450 (diferença de 200px)
-   - Para 3 ramificações: x: 50, 250, 450
-
-4. ✅ EDGES (CONEXÕES) - CRÍTICO:
-   - TODAS as edges DEVEM ter "type": "custom" (OBRIGATÓRIO!)
-   - Para nós "options", use "sourceHandle": "output-0", "output-1", "output-2"
-   - IDs das edges devem ser descritivos: "start-to-welcome", "menu-to-info"
-   - Cada edge DEVE conectar nós existentes
-   - NUNCA deixe um nó sem conexão de entrada (exceto start)
-   - NUNCA deixe um nó sem conexão de saída (exceto finalizar)
-   - 🚨 CRÍTICO: TODO NÓ "finalizar" DEVE TER PELO MENOS UMA EDGE DE ENTRADA!
-   - 🚨 CRÍTICO: NENHUM NÓ PODE FICAR ISOLADO SEM CONEXÕES!
-
-5. ✅ CUSTOM IDs:
-   - Numere sequencialmente: "#1", "#2", "#3", "#4", etc
-   - NÃO use customId no nó start
-   - Todos os outros nós DEVEM ter customId
-
-6. ✅ MENSAGENS E CONTEÚDO:
-   - Devem ser claras, profissionais e em português
-   - Use emojis quando apropriado (mas não exagere)
-   - Nós "sendMessage" DEVEM ter data.message não vazio e com conteúdo relevante
-   - Nós "options" DEVEM ter data.message e data.options
-   - NUNCA deixe mensagens vazias, undefined ou genéricas como "Mensagem não configurada"
-   - SEMPRE crie mensagens específicas e contextualizadas para o workflow
-
-7. ✅ TIPOS DE NÓS DISPONÍVEIS:
-   - start: Ponto de início (obrigatório, apenas 1, id="start-node")
-   - sendMessage: Envia mensagem (data.message obrigatório e específico)
-   - options: Apresenta opções (data.message e data.options obrigatórios)
-   - process: Processa dados
-   - conditional: Ramificação condicional
-   - code: Executa código
-   - finalizar: Finaliza o fluxo (DEVE ter pelo menos uma edge de entrada!)
-
-8. ✅ OPTIONS NODE - ESTRUTURA:
-   - Cada opção DEVE ter "id" e "text"
-   - IDs das opções: "opt1", "opt2", "opt3", etc
-   - Para cada opção, crie uma edge com sourceHandle correspondente
-   - Opção 0 → "sourceHandle": "output-0"
-   - Opção 1 → "sourceHandle": "output-1"
-   - Opção 2 → "sourceHandle": "output-2"
-
-9. ✅ NODE COUNTERS:
-   - Conte quantos nós de cada tipo foram criados (exceto start)
-   - Exemplo: {"sendMessage": 2, "options": 1, "finalizar": 1}
-
-10. ✅ CONECTIVIDADE COMPLETA - REGRA MAIS IMPORTANTE:
-    - 🚨 TODOS os nós devem estar conectados ao start (direta ou indiretamente)
-    - 🚨 NENHUM nó pode ficar isolado sem conexões
-    - 🚨 TODO nó "finalizar" DEVE ter pelo menos UMA edge apontando para ele
-    - 🚨 Se você criar um nó "finalizar", VOCÊ DEVE criar uma edge que aponte para ele
-    - Cada nó sendMessage ou options DEVE ter uma saída
-    - Cada nó (exceto start) DEVE ter uma entrada
-    - EXEMPLO CORRETO: start → sendMessage → options → finalizar (todas conectadas!)
-    - EXEMPLO ERRADO: start → sendMessage, finalizar (finalizar isolado!)
-
-11. ✅ EVITAR NÓS DUPLICADOS - REGRA CRÍTICA:
-    - 🚨 NUNCA crie múltiplos nós "finalizar" com o mesmo propósito!
-    - 🚨 Se várias opções levam ao fim, TODAS devem apontar para o MESMO nó "finalizar"!
-    - 🚨 Só crie múltiplos nós "finalizar" se eles tiverem propósitos DIFERENTES (ex: "Finalizar com Sucesso" vs "Finalizar com Erro")
-    - 🚨 REUTILIZE nós sempre que possível - não duplique funcionalidades!
-    - EXEMPLO CORRETO: options → (opt1, opt2, opt3) → MESMO nó finalizar
-    - EXEMPLO ERRADO: options → opt1 → finalizar-1, opt2 → finalizar-2 (duplicação desnecessária!)
-    - Se você precisa de múltiplos fins, dê nomes DIFERENTES e propósitos CLAROS: "finalizar-sucesso", "finalizar-erro", "finalizar-cancelado"
-
-🚨 FLUXO LINEAR OBRIGATÓRIO:
-- O fluxo DEVE ser linear e conectado: start → nó1 → nó2 → ... → finalizar
-- NUNCA crie nós "finalizar" isolados
-- SEMPRE conecte o último nó antes do finalizar AO nó finalizar
-- Se houver opções, TODAS as opções devem levar a algum lugar (não deixe opções sem saída)
-- 🚨 IMPORTANTE: Se múltiplas opções levam ao fim, REUTILIZE o mesmo nó "finalizar"!
-
-${imageUrl ? `\n\n📸 IMPORTANTE: Uma imagem de referência foi fornecida. Analise a estrutura visual do fluxo na imagem e recrie-a fielmente, mantendo a mesma sequência de nós e conexões.` : ""}
-
-🚨 VALIDAÇÃO FINAL ANTES DE GERAR:
-- ✅ Verifique se você gerou EXATAMENTE ${limits.target} nós (conte: 1 start + ${limits.target - 1} outros)
-- ✅ Verifique se TODAS as edges têm "type": "custom"
-- ✅ Verifique se o nó start tem id "start-node"
-- ✅ Verifique se todos os nós têm IDs únicos
-- ✅ Verifique se todas as conexões referenciam nós existentes
-- ✅ Verifique se nós sendMessage têm mensagens específicas e não vazias
-- ✅ Verifique se nós options têm opções e mensagens
-- ✅ Verifique se todos os nós estão conectados ao start
-- ✅ 🚨 VERIFIQUE SE TODOS OS NÓS "finalizar" TÊM PELO MENOS UMA EDGE DE ENTRADA!
-- ✅ 🚨 VERIFIQUE SE NÃO HÁ NENHUM NÓ ISOLADO SEM CONEXÕES!
-- ✅ 🚨 VERIFIQUE SE NÃO HÁ NÓS DUPLICADOS DESNECESSÁRIOS (especialmente "finalizar")!
-
-LEMBRE-SE: VOCÊ DEVE GERAR EXATAMENTE ${limits.target} NÓS! CONTE OS NÓS ANTES DE RETORNAR O JSON!
-
-IMPORTANTE: Gere APENAS o JSON válido, sem texto adicional. O JSON deve ser compatível com ReactFlow e seguir EXATAMENTE o formato do exemplo acima.`
-
-        console.log("Gerando workflow com ChatGPT...")
-        console.log("Descrição:", description)
-        console.log("Tamanho:", size, `(${limits.min}-${limits.max} nós, alvo: ${limits.target})`)
-        console.log("Quantidade exata solicitada:", limits.target)
-        console.log("Modelo:", model || "gpt-4o")
-
-        const selectedModel = model || "gpt-4o"
-
-        const openai = createOpenAI({
-            apiKey: apiKey,
-        })
-
-        const result = await generateObject({
-            model: openai(selectedModel),
-            schema: WorkflowSchema,
-            prompt: prompt,
-            temperature: 0.7,
-        })
-
-        console.log("Workflow gerado!")
-        console.log("Número de nós gerados:", result.object.nodes.length)
-        console.log("Número de nós esperados:", limits.target)
-        console.log("Número de conexões:", result.object.edges.length)
-
-        if (result.object.nodes.length < limits.min || result.object.nodes.length > limits.max) {
-            console.error(
-                `Quantidade de nós inválida: ${result.object.nodes.length} (esperado: ${limits.min}-${limits.max})`,
-            )
-            return Response.json(
-                {
-                    success: false,
-                    error: `A IA gerou ${result.object.nodes.length} nós, mas o esperado era entre ${limits.min} e ${limits.max} nós`,
-                    validationErrors: [
-                        `Quantidade de nós inválida: ${result.object.nodes.length} (esperado: ${limits.min}-${limits.max})`,
-                        `Por favor, tente novamente. A IA deve gerar exatamente ${limits.target} nós.`,
-                    ],
-                    workflow: result.object,
-                },
-                { status: 400 },
-            )
-        }
-
-        const integrityCheck = validateWorkflowIntegrity(result.object)
-
-        if (!integrityCheck.valid) {
-            console.error("Workflow validation failed:", integrityCheck.errors)
-            return Response.json(
-                {
-                    success: false,
-                    error: "Workflow gerado contém erros de validação",
-                    validationErrors: integrityCheck.errors,
-                    workflow: result.object,
-                },
-                { status: 400 },
-            )
-        }
-
-        console.log("Workflow passou em todas as validações!")
-        console.log("Quantidade de nós correta:", result.object.nodes.length)
-
-        return Response.json({
-            success: true,
-            workflow: result.object,
-            prompt: prompt,
-            metadata: {
-                model: selectedModel,
-                nodeCount: result.object.nodes.length,
-                edgeCount: result.object.edges.length,
-                size: size,
-                requestedNodeCount: limits.target,
-                validated: true,
-            },
-        })
-    } catch (error: any) {
-        console.error("Erro ao gerar workflow:", error)
-
-        let errorMessage = "Erro ao gerar workflow"
-        let errorDetails = error.message || "Erro desconhecido"
-
-        if (error.name === "ZodError") {
-            errorMessage = "Erro de validação do schema"
-            errorDetails = error.errors?.map((e: any) => `${e.path.join(".")}: ${e.message}`).join(", ") || errorDetails
-        }
-
-        return Response.json(
-            {
-                success: false,
-                error: errorMessage,
-                details: errorDetails,
-                stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
-            },
-            { status: 500 },
-        )
+  try {
+    const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : ""
+    if (!apiKey.startsWith("sk-")) {
+      return Response.json(
+        { success: false, error: "Chave da API da OpenAI inválida. Ela deve começar com sk-." },
+        { status: 400 },
+      )
     }
+
+    const description = typeof body.description === "string" ? body.description.trim() : ""
+    const additionalContext = typeof body.additionalContext === "string" ? body.additionalContext.trim() : ""
+    const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl : ""
+    const image = imageUrl ? readImage(imageUrl) : null
+
+    if (imageUrl && !image) {
+      return Response.json(
+        { success: false, error: "Imagem de referência inválida. Envie um arquivo PNG, JPG ou WEBP de até 10 MB." },
+        { status: 400 },
+      )
+    }
+    if (!description && !image) {
+      return Response.json(
+        { success: false, error: "Descreva o fluxo ou envie uma imagem de referência." },
+        { status: 400 },
+      )
+    }
+
+    const modelId = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL
+    const profile = MODEL_PROFILES.get(modelId) ?? { name: modelId, structuredOutputs: true, vision: true }
+    if (image && !profile.vision) {
+      return Response.json(
+        { success: false, error: `O modelo ${profile.name} não analisa imagens. Escolha outro modelo.` },
+        { status: 400 },
+      )
+    }
+
+    const size: Size = isSize(body.size) ? body.size : "medium"
+    const limits = resolveLimits(size, body.customNodeCount)
+    const instructions = buildInstructions(limits)
+    const request = buildRequest(description, additionalContext, Boolean(image))
+    const prompt = `${instructions}\n\n${request}`
+
+    const openai = createOpenAI({ apiKey })
+    const result = await generateObject({
+      model: profile.structuredOutputs ? openai(modelId) : openai.chat(modelId),
+      schema: WorkflowSchema,
+      system: instructions,
+      messages: [
+        {
+          role: "user",
+          content: image
+            ? [
+                { type: "text", text: request },
+                { type: "image", image: image.data, mediaType: image.mediaType },
+              ]
+            : request,
+        },
+      ],
+      temperature: 0.7,
+      abortSignal: req.signal,
+      providerOptions: profile.structuredOutputs ? undefined : { openai: { structuredOutputs: false } },
+    })
+
+    const workflow = result.object
+    const nodeCount = workflow.nodes.length
+
+    if (nodeCount < limits.min || nodeCount > limits.max) {
+      return Response.json(
+        {
+          success: false,
+          error: "A quantidade de componentes gerada está fora do esperado.",
+          validationErrors: [`Componentes gerados: ${nodeCount}. Esperados: ${expectedCount(limits)}.`],
+          workflow,
+        },
+        { status: 400 },
+      )
+    }
+
+    const integrityErrors = validateWorkflowIntegrity(workflow)
+    if (integrityErrors.length > 0) {
+      return Response.json(
+        {
+          success: false,
+          error: "O fluxo gerado tem pendências de estrutura.",
+          validationErrors: integrityErrors,
+          workflow,
+        },
+        { status: 400 },
+      )
+    }
+
+    let compatibleWorkflow: AtendimentoFlow
+    try {
+      compatibleWorkflow = importFlow({
+        ...workflow,
+        name: image ? "Fluxo gerado por IA a partir de imagem" : flowName(description),
+        description: image ? additionalContext : description,
+      })
+      exportFlow(compatibleWorkflow)
+    } catch (conversionError) {
+      return Response.json(
+        {
+          success: false,
+          error: "O fluxo gerado não pôde ser convertido para o formato de Atendimento.",
+          validationErrors: String((conversionError as Error).message).split("\n"),
+          workflow,
+        },
+        { status: 400 },
+      )
+    }
+
+    return Response.json({
+      success: true,
+      workflow: compatibleWorkflow,
+      prompt,
+      metadata: {
+        model: modelId,
+        nodeCount: compatibleWorkflow.nodes.length,
+        edgeCount: compatibleWorkflow.edges.length,
+        size,
+        requestedNodeCount: limits.target,
+        validated: true,
+      },
+    })
+  } catch (error) {
+    const failure = describeFailure(error)
+    return Response.json(
+      {
+        success: false,
+        error: failure.error,
+        details: failure.details,
+        stack: process.env.NODE_ENV === "development" && error instanceof Error ? error.stack : undefined,
+      },
+      { status: 500 },
+    )
+  }
 }

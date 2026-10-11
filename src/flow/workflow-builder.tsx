@@ -1,1431 +1,1087 @@
 "use client"
 
-import type React from "react"
-import { useState, useCallback, useRef, useEffect } from "react"
-import { FiSave, FiLayers, FiMaximize, FiMinimize } from "react-icons/fi"
-import { motion } from "framer-motion"
-
-import ReactFlow, {
-    ReactFlowProvider,
-    Background,
-    Controls,
-    MiniMap,
-    addEdge,
-    useNodesState,
-    useEdgesState,
-    useReactFlow,
-    type Connection,
-    type Edge,
-    type NodeTypes,
-    type EdgeTypes,
-    type Node,
-    type BackgroundVariant,
-} from "reactflow"
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
+import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, useReactFlow, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type XYPosition } from "reactflow"
 import "reactflow/dist/style.css"
-import { toast } from "@/components/ui/use-toast"
+import { Check, Download, FilePlus2, Info, MapIcon, Maximize, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
+import { toast } from "@/hooks/use-toast"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
+import { START_TYPE, getComponentColor, getComponentLabel } from "@/lib/atendimento/catalog"
+import { downloadJson } from "@/lib/atendimento/download"
+import { behaviorSignature, createEdge, duplicateNode, exportFileName, exportFlow, importFlow, maxNumericId, newFlow, newNode, outputHandles, outputLabel, removeMenuOption, stampExport, validateFlow } from "@/lib/atendimento/format"
+import type { AtendimentoData, AtendimentoFlow, AtendimentoNode, FlowIssue, JsonObject } from "@/lib/atendimento/types"
 import NodeLibrary from "./node-library"
 import NodeConfigPanel from "./node-config-panel"
-import CustomEdge from "./custom-edge"
-import { SendMessageNode } from "@/src/flow/nodes/send-message-node"
-import { OptionsNode } from "@/src/flow/nodes/options-node"
-import { ProcessNode } from "@/src/flow/nodes/process-node"
-import { ConditionalNode } from "@/src/flow/nodes/conditional-node"
-import { CodeNode } from "@/src/flow/nodes/code-node"
-import { StartNode } from "@/src/flow/nodes/start-node"
-import { FinalizarNode } from "@/src/flow/nodes/finalizar-node"
-import { generateNodeId, createNode } from "@/lib/workflow-utils"
-import type { WorkflowNode } from "@/lib/types"
-import { useTheme } from "../ThemeContext"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import CustomEdge, { EdgeActionsContext } from "./custom-edge"
+import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, nodeSummary } from "./nodes/atendimento-node"
+import { ui } from "./ui"
 
-const nodeTypes: NodeTypes = {
-    sendMessage: (props) => (
-        <SendMessageNode
-            {...props}
-            onRemove={() => removeNodeById(props.id)}
-            onUpdateData={(data) => updateNodeDataById(props.id, data)}
-        />
-    ),
-    options: (props) => (
-        <OptionsNode
-            {...props}
-            onRemove={() => removeNodeById(props.id)}
-            onUpdateData={(data) => updateNodeDataById(props.id, data)}
-        />
-    ),
-    process: (props) => <ProcessNode {...props} onRemove={() => removeNodeById(props.id)} />,
-    conditional: (props) => <ConditionalNode {...props} onRemove={() => removeNodeById(props.id)} />,
-    code: (props) => <CodeNode {...props} onRemove={() => removeNodeById(props.id)} />,
-    finalizar: (props) => <FinalizarNode {...props} onRemove={() => removeNodeById(props.id)} />,
-    start: StartNode,
-}
-
-const edgeTypes: EdgeTypes = {
-    custom: CustomEdge,
-}
-
-let removeNodeById: (id: string) => void = () => {}
-let updateNodeDataById: (id: string, data: any) => void = () => {}
-
-// Fluxo padrão que sempre funciona - COMPLETAMENTE CONECTADO
-// Fluxo padrão que sempre funciona
-const createDefaultWorkflow = () => {
-    const defaultNodes = [
-        {
-            id: "start-node",
-            type: "start",
-            position: { x: 250, y: 100 },
-            data: {
-                label: "INÍCIO",
-                description: "Ponto de início do fluxo",
-            },
-            deletable: false,
-            draggable: true,
-        },
-        {
-            id: "welcome-message",
-            type: "sendMessage",
-            position: { x: 250, y: 200 },
-            data: {
-                label: "Mensagem de Boas-vindas",
-                message: "Olá! Bem-vindo ao ¥$! 🤖\n\nSou seu assistente virtual e estou aqui para ajudar você.",
-                customId: "#1",
-            },
-            draggable: true,
-        },
-        {
-            id: "main-options",
-            type: "options",
-            position: { x: 250, y: 320 },
-            data: {
-                label: "Menu Principal",
-                message: "Como posso ajudar você hoje?",
-                options: [
-                    { id: "opt1", text: "Informações sobre produtos" },
-                    { id: "opt2", text: "Suporte técnico" },
-                    { id: "opt3", text: "Falar com atendente" },
-                ],
-                customId: "#2",
-            },
-            draggable: true,
-        },
-        {
-            id: "info-produtos",
-            type: "sendMessage",
-            position: { x: 50, y: 480 },
-            data: {
-                label: "Informações Produtos",
-                message:
-                    "📦 Nossos produtos incluem:\n\n• Soluções de IA\n• Chatbots inteligentes\n• Automação de processos\n• Integração com sistemas",
-                customId: "#3",
-            },
-            draggable: true,
-        },
-        {
-            id: "suporte-tecnico",
-            type: "sendMessage",
-            position: { x: 250, y: 480 },
-            data: {
-                label: "Suporte Técnico",
-                message:
-                    "🔧 Para suporte técnico:\n\n• Acesse nossa documentação\n• Envie um email para lucas.user.xyz@gmail.com\n• Ou continue conversando comigo!",
-                customId: "#4",
-            },
-            draggable: true,
-        },
-        {
-            id: "atendente",
-            type: "finalizar",
-            position: { x: 450, y: 480 },
-            data: {
-                label: "Transferir Atendente",
-                message:
-                    "👨‍💼 Transferindo você para um atendente humano...\n\nAguarde um momento que alguém da nossa equipe entrará em contato!",
-                customId: "#5",
-            },
-            draggable: true,
-        },
-        {
-            id: "finalizar-info",
-            type: "finalizar",
-            position: { x: 50, y: 600 },
-            data: {
-                label: "Finalizar Informações",
-                message:
-                    "Espero que estas informações sobre nossos produtos tenham sido úteis! Posso ajudar com mais alguma coisa?",
-                customId: "#6",
-            },
-            draggable: true,
-        },
-        {
-            id: "finalizar-suporte",
-            type: "finalizar",
-            position: { x: 250, y: 600 },
-            data: {
-                label: "Finalizar Suporte",
-                message: "Espero ter ajudado com suas dúvidas técnicas! Se precisar de mais suporte, estamos à disposição.",
-                customId: "#7",
-            },
-            draggable: true,
-        },
-    ]
-
-    const defaultEdges = [
-        {
-            id: "start-to-welcome",
-            source: "start-node",
-            target: "welcome-message",
-            type: "custom",
-        },
-        {
-            id: "welcome-to-options",
-            source: "welcome-message",
-            target: "main-options",
-            type: "custom",
-        },
-        {
-            id: "option1-to-info",
-            source: "main-options",
-            sourceHandle: "output-0",
-            target: "info-produtos",
-            type: "custom",
-        },
-        {
-            id: "option2-to-suporte",
-            source: "main-options",
-            sourceHandle: "output-1",
-            target: "suporte-tecnico",
-            type: "custom",
-        },
-        {
-            id: "option3-to-atendente",
-            source: "main-options",
-            sourceHandle: "output-2",
-            target: "atendente",
-            type: "custom",
-        },
-        {
-            id: "info-to-finalizar",
-            source: "info-produtos",
-            target: "finalizar-info",
-            type: "custom",
-        },
-        {
-            id: "suporte-to-finalizar",
-            source: "suporte-tecnico",
-            target: "finalizar-suporte",
-            type: "custom",
-        },
-    ]
-
-    return {
-        nodes: defaultNodes,
-        edges: defaultEdges,
-        nodeCounters: {
-            sendMessage: 3,
-            options: 1,
-            finalizar: 3,
-        },
-    }
-}
-
-const createEmptyWorkflow = () => {
-    const emptyNodes = [
-        {
-            id: "start-node",
-            type: "start",
-            position: { x: 250, y: 100 },
-            data: {
-                label: "INÍCIO",
-                description: "Ponto de início do fluxo",
-            },
-            deletable: false,
-            draggable: true,
-        },
-    ]
-
-    return {
-        nodes: emptyNodes,
-        edges: [],
-        nodeCounters: {},
-    }
-}
-
-const findConnectedNodes = (nodes: Node[], edges: Edge[], startNodeId: string): Set<string> => {
-    const connected = new Set<string>()
-    const queue = [startNodeId]
-    connected.add(startNodeId)
-
-    while (queue.length > 0) {
-        const currentId = queue.shift()!
-        const outgoingEdges = edges.filter((edge) => edge.source === currentId)
-
-        for (const edge of outgoingEdges) {
-            if (!connected.has(edge.target)) {
-                connected.add(edge.target)
-                queue.push(edge.target)
-            }
-        }
-    }
-
-    return connected
-}
-
-const findUnconnectedHandles = (nodes: Node[], edges: Edge[]): string[] => {
-    const unconnected: string[] = []
-    const existingNodes = nodes.filter((node) => node && node.id && node.data)
-
-    existingNodes.forEach((node) => {
-        if (node.type !== "finalizar") {
-            const hasOutgoingConnection = edges.some((edge) => edge.source === node.id)
-            if (!hasOutgoingConnection) {
-                unconnected.push(`${node.data.customId || node.data.label} (saída verde sem conexão)`)
-            }
-        }
-
-        if (node.type !== "start") {
-            const hasIncomingConnection = edges.some((edge) => edge.target === node.id)
-            if (!hasIncomingConnection) {
-                unconnected.push(`${node.data.customId || node.data.label} (entrada amarela sem conexão)`)
-            }
-        }
-
-        if (node.type === "options") {
-            const options = node.data.options || []
-            const outgoingConnections = edges.filter((edge) => edge.source === node.id)
-
-            if (outgoingConnections.length < options.length) {
-                unconnected.push(
-                    `${node.data.customId || node.data.label} (${options.length - outgoingConnections.length} opções verdes sem conexão)`,
-                )
-            }
-        }
-    })
-
-    return unconnected
+export interface WorkflowActions {
+  zoomIn: () => void
+  zoomOut: () => void
+  fitView: () => void
+  save: () => boolean
+  load: () => void
+  loadWorkflow: (input: unknown) => boolean
+  execute: () => boolean
+  search: (query: string) => boolean
+  removeNode: (id: string) => void
+  reset: () => void
+  download: () => boolean
 }
 
 interface WorkflowBuilderProps {
-    onActionsReady: (actions: any) => void
-    onStartPositionChange?: (position: { x: number; y: number }) => void
-    onMousePositionChange?: (position: { x: number; y: number }) => void
-    onComponentCountChange?: (count: number) => void
-    onNodesChange?: (nodes: any[]) => void
-    onEdgesChange?: (edges: any[]) => void
-    showSidebar?: boolean
-    onToggleSidebar?: () => void
-    onOpenBot?: () => void
+  onActionsReady: (actions: WorkflowActions) => void
+  onOpenBot?: () => void
 }
 
-function WorkflowBuilderInner({
-                                  onActionsReady,
-                                  onStartPositionChange,
-                                  onMousePositionChange,
-                                  onComponentCountChange,
-                                  onNodesChange,
-                                  onEdgesChange,
-                                  showSidebar = true,
-                                  onToggleSidebar,
-                                  onOpenBot,
-                              }: WorkflowBuilderProps) {
-    const { theme, currentGradient } = useTheme()
-    const reactFlowWrapper = useRef<HTMLDivElement>(null)
-    const fileInputRef = useRef<HTMLInputElement>(null)
-    const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
-    const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
-    const [selectedNode, setSelectedNode] = useState<Node | null>(null)
-    const [reactFlowInstance, setReactFlowInstance] = useState<any>(null)
-    const [nodeCounters, setNodeCounters] = useState<Record<string, number>>({})
-    const [showValidationDialog, setShowValidationDialog] = useState(false)
-    const [showSuccessDialog, setShowSuccessDialog] = useState(false)
-    const [showErrorDialog, setShowErrorDialog] = useState(false)
-    const [errorMessage, setErrorMessage] = useState("")
-    const [disconnectedNodes, setDisconnectedNodes] = useState<string[]>([])
-    const [isMinimapFullscreen, setIsMinimapFullscreen] = useState(false)
-    const { zoomIn, zoomOut, fitView, setCenter } = useReactFlow()
-
-    // Garantir persistência do localStorage
-    const WORKFLOW_KEY = "workflow"
-    const EXECUTED_KEY = "executedFlow"
-
-    // Carregar fluxo salvo ou criar padrão
-    useEffect(() => {
-        const loadSavedWorkflow = () => {
-            try {
-                const savedWorkflow = localStorage.getItem(WORKFLOW_KEY)
-                if (savedWorkflow) {
-                    const workflow = JSON.parse(savedWorkflow)
-                    setNodes(workflow.nodes || [])
-                    setEdges(workflow.edges || [])
-                    setNodeCounters(workflow.nodeCounters || {})
-
-                    toast({
-                        title: "✅ Fluxo carregado",
-                        description: "Fluxo salvo anteriormente foi restaurado",
-                    })
-                    return
-                }
-            } catch (error) {
-                console.error("Erro ao carregar fluxo salvo:", error)
-            }
-
-            // Se não há fluxo salvo, criar o padrão
-            const defaultWorkflow = createDefaultWorkflow()
-            setNodes(defaultWorkflow.nodes)
-            setEdges(defaultWorkflow.edges)
-            setNodeCounters(defaultWorkflow.nodeCounters)
-
-            // Salvar o fluxo padrão
-            localStorage.setItem(WORKFLOW_KEY, JSON.stringify(defaultWorkflow))
-            localStorage.setItem(EXECUTED_KEY, "true")
-
-            toast({
-                title: "🚀 Fluxo padrão carregado",
-                description: "Um fluxo de demonstração foi criado e está pronto para uso!",
-            })
-        }
-
-        loadSavedWorkflow()
-    }, [setNodes, setEdges])
-
-    // Notificar mudanças nos nodes e edges para o componente pai
-    useEffect(() => {
-        if (onNodesChange) {
-            onNodesChange(nodes)
-        }
-    }, [nodes, onNodesChange])
-
-    useEffect(() => {
-        if (onEdgesChange) {
-            onEdgesChange(edges)
-        }
-    }, [edges, onEdgesChange])
-
-    useEffect(() => {
-        const startNode = nodes.find((node) => node.id === "start-node")
-        if (startNode && onStartPositionChange) {
-            onStartPositionChange(startNode.position)
-        }
-
-        if (onComponentCountChange) {
-            onComponentCountChange(nodes.length)
-        }
-    }, [nodes, onStartPositionChange, onComponentCountChange])
-
-    const handleMouseMove = useCallback(
-        (event: React.MouseEvent) => {
-            if (reactFlowInstance && onMousePositionChange) {
-                const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
-                if (reactFlowBounds) {
-                    const position = reactFlowInstance.screenToFlowPosition({
-                        x: event.clientX - reactFlowBounds.left,
-                        y: event.clientY - reactFlowBounds.top,
-                    })
-                    onMousePositionChange(position)
-                }
-            }
-        },
-        [reactFlowInstance, onMousePositionChange],
-    )
-
-    const removeNode = useCallback(
-        (nodeId: string) => {
-            if (nodeId === "start-node") {
-                toast({
-                    title: "Não é possível remover",
-                    description: "O nó INÍCIO não pode ser removido",
-                    variant: "destructive",
-                })
-                return
-            }
-
-            setNodes((nds) => nds.filter((node) => node.id !== nodeId))
-            setEdges((eds) => eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
-            setSelectedNode(null)
-
-            toast({
-                title: "Nó removido",
-                description: "O nó foi removido com sucesso",
-            })
-        },
-        [setNodes, setEdges],
-    )
-
-    const updateNodeData = useCallback(
-        (nodeId: string, data: any) => {
-            setNodes((nds) =>
-                nds.map((node) => {
-                    if (node.id === nodeId) {
-                        return {
-                            ...node,
-                            data: {
-                                ...node.data,
-                                ...data,
-                            },
-                        }
-                    }
-                    return node
-                }),
-            )
-        },
-        [setNodes],
-    )
-
-    removeNodeById = removeNode
-    updateNodeDataById = updateNodeData
-
-    const onConnect = useCallback(
-        (params: Edge | Connection) => {
-            if (params.source === params.target) {
-                toast({
-                    title: "❌ Auto-conexão não permitida",
-                    description: "Um nó não pode se conectar consigo mesmo",
-                    variant: "destructive",
-                })
-                return
-            }
-
-            setEdges((currentEdges) => {
-                const sourceOccupied = currentEdges.some(
-                    (edge) => edge.source === params.source && edge.sourceHandle === params.sourceHandle,
-                )
-
-                const targetOccupied = currentEdges.some(
-                    (edge) => edge.target === params.target && edge.targetHandle === params.targetHandle,
-                )
-
-                if (targetOccupied) {
-                    toast({
-                        title: "❌ Entrada já ocupada",
-                        description: "Esta entrada amarela já possui uma conexão. Remova a conexão existente primeiro.",
-                        variant: "destructive",
-                    })
-                    return currentEdges
-                }
-
-                const filteredEdges = currentEdges.filter(
-                    (edge) => !(edge.source === params.source && edge.sourceHandle === params.sourceHandle),
-                )
-
-                const newEdges = addEdge({ ...params, type: "custom" }, filteredEdges)
-
-                if (sourceOccupied) {
-                    toast({
-                        title: "🔄 Saída substituída",
-                        description: "A conexão anterior da saída verde foi removida e uma nova foi criada",
-                    })
-                } else {
-                    toast({
-                        title: "✅ Conexão criada",
-                        description: "Nova conexão estabelecida com sucesso",
-                    })
-                }
-
-                return newEdges
-            })
-        },
-        [setEdges],
-    )
-
-    const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-        event.preventDefault()
-        event.dataTransfer.dropEffect = "move"
-    }, [])
-
-    const generateSimpleId = useCallback(
-        (type: string) => {
-            setNodeCounters((prev) => {
-                const newCount = (prev[type] || 0) + 1
-                return { ...prev, [type]: newCount }
-            })
-            const currentCount = (nodeCounters[type] || 0) + 1
-            return `#${currentCount}`
-        },
-        [nodeCounters],
-    )
-
-    const onDrop = useCallback(
-        (event: React.DragEvent<HTMLDivElement>) => {
-            event.preventDefault()
-
-            const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
-            const type = event.dataTransfer.getData("application/reactflow")
-
-            if (typeof type === "undefined" || !type || type === "start") {
-                return
-            }
-
-            if (reactFlowBounds && reactFlowInstance) {
-                const position = reactFlowInstance.screenToFlowPosition({
-                    x: event.clientX - reactFlowBounds.left,
-                    y: event.clientY - reactFlowBounds.top,
-                })
-
-                const newNode = createNode({
-                    type,
-                    position,
-                    id: generateNodeId(type),
-                })
-
-                const simpleId = generateSimpleId(type)
-                newNode.data = {
-                    ...newNode.data,
-                    customId: simpleId,
-                }
-
-                setNodes((nds) => nds.concat(newNode))
-            }
-        },
-        [reactFlowInstance, setNodes, generateSimpleId],
-    )
-
-    const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-        // Config panel disabled - users can edit nodes inline
-        return
-    }, [])
-
-    const onPaneClick = useCallback(() => {
-        setSelectedNode(null)
-    }, [])
-
-    const searchNodeById = useCallback(
-        (searchId: string) => {
-            const foundNode = nodes.find(
-                (node) =>
-                    node.data.customId?.toLowerCase().includes(searchId.toLowerCase()) ||
-                    node.data.label?.toLowerCase().includes(searchId.toLowerCase()) ||
-                    node.id.toLowerCase().includes(searchId.toLowerCase()),
-            )
-
-            if (foundNode) {
-                setCenter(foundNode.position.x + 75, foundNode.position.y + 50, { zoom: 1.5, duration: 800 })
-                setSelectedNode(foundNode)
-
-                toast({
-                    title: "Nó encontrado!",
-                    description: `Navegando para o nó: ${foundNode.data.label || foundNode.data.customId}`,
-                })
-            } else {
-                toast({
-                    title: "Nó não encontrado",
-                    description: "Nenhum nó foi encontrado com esse ID",
-                    variant: "destructive",
-                })
-            }
-        },
-        [nodes, setCenter],
-    )
-
-    const validateConnectivity = useCallback(() => {
-        const startNode = nodes.find((node) => node.id === "start-node")
-        if (!startNode) return { isValid: false, disconnected: ["Nó INÍCIO não encontrado"] }
-
-        const startHasOutgoingConnection = edges.some((edge) => edge.source === "start-node")
-        if (nodes.length > 1 && !startHasOutgoingConnection) {
-            return {
-                isValid: false,
-                disconnected: ["INÍCIO (deve estar conectado a pelo menos um componente)"],
-            }
-        }
-
-        const emptyMessageNodes: string[] = []
-
-        nodes.forEach((node) => {
-            if (node.type === "sendMessage") {
-                const message = node.data.message || ""
-                if (!message.trim()) {
-                    emptyMessageNodes.push(`${node.data.customId || node.id} (Enviar Mensagem sem texto)`)
-                }
-            }
-
-            if (node.type === "options") {
-                const message = node.data.message || ""
-                const options = node.data.options || []
-
-                if (!message.trim()) {
-                    emptyMessageNodes.push(`${node.data.customId || node.id} (Opções sem mensagem)`)
-                }
-
-                options.forEach((option: any, index: number) => {
-                    if (!option.text || !option.text.trim()) {
-                        emptyMessageNodes.push(`${node.data.customId || node.id} (Opção ${index + 1} sem texto)`)
-                    }
-                })
-            }
-        })
-
-        if (emptyMessageNodes.length > 0) {
-            return {
-                isValid: false,
-                disconnected: emptyMessageNodes,
-            }
-        }
-
-        const connectedNodes = findConnectedNodes(nodes, edges, "start-node")
-        const allNodeIds = nodes.map((node) => node.id)
-        const disconnectedFromStart = allNodeIds.filter((id) => !connectedNodes.has(id))
-        const unconnectedHandles = findUnconnectedHandles(nodes, edges)
-
-        const allDisconnected = [
-            ...disconnectedFromStart
-                .filter((id) => id !== "start-node")
-                .map((id) => {
-                    const node = nodes.find((n) => n.id === id)
-                    return `${node?.data.customId || node?.data.label || id} (não conectado ao INÍCIO)`
-                }),
-            ...unconnectedHandles,
-        ]
-
-        return {
-            isValid: allDisconnected.length === 0,
-            disconnected: allDisconnected,
-        }
-    }, [nodes, edges])
-
-    const saveWorkflow = useCallback(() => {
-        if (nodes.length <= 1) {
-            toast({
-                title: "❌ Fluxo vazio",
-                description: "Adicione pelo menos um componente ao seu fluxo antes de salvar",
-                variant: "destructive",
-            })
-            return false
-        }
-
-        const validation = validateConnectivity()
-
-        if (!validation.isValid) {
-            setDisconnectedNodes(validation.disconnected)
-            setShowValidationDialog(true)
-            return false // Return false to indicate save failed
-        }
-
-        // SEMPRE salvar o estado atual dos nodes e edges com chave persistente
-        const workflow = { nodes, edges, nodeCounters }
-        const workflowString = JSON.stringify(workflow)
-        localStorage.setItem(WORKFLOW_KEY, workflowString)
-
-        // Também limpar o status de execução para forçar nova execução
-        localStorage.removeItem(EXECUTED_KEY)
-        window.dispatchEvent(new Event("storage"))
-
-        setShowSuccessDialog(true)
-
-        toast({
-            title: "✅ Fluxo salvo com sucesso!",
-            description: `${nodes.length} componentes salvos e prontos para execução`,
-        })
-
-        return true // Return true to indicate successful save
-    }, [nodes, edges, nodeCounters, validateConnectivity])
-
-    const loadWorkflow = useCallback(() => {
-        fileInputRef.current?.click()
-    }, [])
-
-    const loadWorkflowDirect = useCallback(
-        (workflowData: any) => {
-            try {
-                console.log("Carregando workflow direto...")
-
-                // Verificar se é o formato direto (da IA) ou encapsulado (do arquivo)
-                let nodes, edges, counters
-
-                if (workflowData.flowData) {
-                    // Formato encapsulado (arquivo JSON exportado)
-                    console.log("Formato encapsulado detectado")
-                    nodes = workflowData.flowData.nodes
-                    edges = workflowData.flowData.edges
-                    counters = workflowData.flowData.nodeCounters
-                } else if (workflowData.nodes && workflowData.edges) {
-                    // Formato direto (gerado pela IA)
-                    console.log("Formato direto da IA detectado")
-                    nodes = workflowData.nodes
-                    edges = workflowData.edges
-                    counters = workflowData.nodeCounters
-                } else {
-                    throw new Error("Formato de workflow não reconhecido")
-                }
-
-                if (!Array.isArray(nodes) || !Array.isArray(edges)) {
-                    throw new Error("Dados de workflow inválidos")
-                }
-
-                // Garantir que há um nó start
-                const hasStartNode = nodes.some((node: any) => node.id === "start-node")
-                if (!hasStartNode) {
-                    const startNode = {
-                        id: "start-node",
-                        type: "start",
-                        position: { x: 250, y: 100 },
-                        data: {
-                            label: "INÍCIO",
-                            description: "Ponto de início do fluxo",
-                        },
-                        deletable: false,
-                        draggable: true,
-                    }
-                    nodes.unshift(startNode)
-                }
-
-                // Validar edges
-                const invalidEdges = edges.filter((edge: any) => !edge.type || edge.type !== "custom")
-                if (invalidEdges.length > 0) {
-                    console.warn("Corrigindo edges sem type 'custom':", invalidEdges.length)
-                    edges = edges.map((edge: any) => ({
-                        ...edge,
-                        type: "custom",
-                    }))
-                }
-
-                console.log("Carregando", nodes.length, "nós e", edges.length, "edges")
-
-                setNodes(nodes)
-                setEdges(edges)
-                setNodeCounters(counters || {})
-
-                // Salvar no localStorage
-                const workflow = { nodes, edges, nodeCounters: counters || {} }
-                localStorage.setItem(WORKFLOW_KEY, JSON.stringify(workflow))
-                localStorage.removeItem(EXECUTED_KEY)
-                window.dispatchEvent(new Event("storage"))
-
-                toast({
-                    title: "✅ Workflow carregado!",
-                    description: `${nodes.length} componentes carregados. Clique em Salvar e depois Executar.`,
-                })
-
-                setTimeout(() => {
-                    fitView()
-                }, 100)
-            } catch (error: any) {
-                console.error("Erro ao carregar workflow:", error)
-                toast({
-                    title: "Erro ao carregar workflow",
-                    description: error.message,
-                    variant: "destructive",
-                })
-            }
-        },
-        [setNodes, setEdges, fitView],
-    )
-
-    const handleFileUpload = useCallback(
-        (event: React.ChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0]
-            if (!file) return
-
-            const reader = new FileReader()
-            reader.onload = (e) => {
-                try {
-                    const jsonContent = e.target?.result as string
-
-                    if (!jsonContent || jsonContent.trim() === "") {
-                        throw new Error("Arquivo vazio ou não é um arquivo de texto válido")
-                    }
-
-                    let workflowData
-                    try {
-                        workflowData = JSON.parse(jsonContent)
-                    } catch (parseError) {
-                        throw new Error("Arquivo não é um JSON válido - verifique a sintaxe")
-                    }
-
-                    if (!workflowData || typeof workflowData !== "object") {
-                        throw new Error("Arquivo JSON não contém dados válidos")
-                    }
-
-                    if (!workflowData.flowData || !workflowData._id) {
-                        throw new Error("Formato de arquivo inválido - não é um fluxo válido")
-                    }
-
-                    const { nodes: loadedNodes, edges: loadedEdges, nodeCounters: loadedCounters } = workflowData.flowData
-
-                    if (!Array.isArray(loadedNodes)) {
-                        throw new Error("Dados de nós corrompidos - estrutura inválida")
-                    }
-
-                    if (!Array.isArray(loadedEdges)) {
-                        throw new Error("Dados de conexões corrompidos - estrutura inválida")
-                    }
-
-                    for (let i = 0; i < loadedNodes.length; i++) {
-                        const node = loadedNodes[i]
-                        if (!node.id || !node.type || !node.position || !node.data) {
-                            throw new Error(`Nó ${i + 1} tem estrutura inválida - faltam propriedades obrigatórias`)
-                        }
-                    }
-
-                    const hasStartNode = loadedNodes.some((node: Node) => node.id === "start-node")
-                    if (!hasStartNode) {
-                        const startNode = {
-                            id: "start-node",
-                            type: "start",
-                            position: { x: 250, y: 100 },
-                            data: {
-                                label: "INÍCIO",
-                                description: "Ponto de início do fluxo",
-                            },
-                            deletable: false,
-                            draggable: true,
-                        }
-                        loadedNodes.unshift(startNode)
-                    }
-
-                    setNodes(loadedNodes)
-                    setEdges(loadedEdges)
-                    setNodeCounters(loadedCounters || {})
-
-                    // Salvar com chave persistente
-                    const workflow = { nodes: loadedNodes, edges: loadedEdges, nodeCounters: loadedCounters || {} }
-                    localStorage.setItem(WORKFLOW_KEY, JSON.stringify(workflow))
-
-                    // Limpar status de execução para forçar nova execução do fluxo importado
-                    localStorage.removeItem(EXECUTED_KEY)
-                    window.dispatchEvent(new Event("storage"))
-
-                    toast({
-                        title: "✅ Fluxo carregado com sucesso!",
-                        description: `${loadedNodes.length} componentes carregados - clique em Salvar e depois Executar`,
-                    })
-
-                    setTimeout(() => {
-                        fitView()
-                    }, 100)
-                } catch (error) {
-                    const errorMsg = error instanceof Error ? error.message : "Arquivo JSON inválido ou corrompido"
-                    setErrorMessage(errorMsg)
-                    setShowErrorDialog(true)
-                }
-            }
-
-            reader.onerror = () => {
-                setErrorMessage("Erro ao ler o arquivo - arquivo pode estar corrompido")
-                setShowErrorDialog(true)
-            }
-
-            reader.readAsText(file)
-            event.target.value = ""
-        },
-        [setNodes, setEdges, fitView],
-    )
-
-    const executeWorkflow = useCallback(() => {
-        console.log("executeWorkflow called")
-        console.log("nodes.length:", nodes.length)
-
-        if (nodes.length <= 1) {
-            toast({
-                title: "Nada para executar",
-                description: "Adicione alguns nós ao seu fluxo primeiro",
-                variant: "destructive",
-            })
-            return false
-        }
-
-        console.log("Validating connectivity...")
-        const validation = validateConnectivity()
-        console.log("Validation result:", validation)
-
-        if (!validation.isValid) {
-            setDisconnectedNodes(validation.disconnected)
-            setShowValidationDialog(true)
-            return false
-        }
-
-        console.log("Saving workflow to localStorage...")
-        // PRIMEIRO: Salvar o estado atual no localStorage com chave persistente
-        const workflow = { nodes, edges, nodeCounters }
-        const workflowString = JSON.stringify(workflow)
-        localStorage.setItem(WORKFLOW_KEY, workflowString)
-        console.log("Workflow saved:", workflowString.substring(0, 100) + "...")
-
-        // DEPOIS: Marcar como executado com chave persistente
-        localStorage.setItem(EXECUTED_KEY, "true")
-        console.log("Execution flag set to true")
-
-        toast({
-            title: "✅ Fluxo executado com sucesso!",
-            description: "Abra o Bot para testar seu fluxo agora!",
-            duration: 5000,
-        })
-
-        console.log("Dispatching storage event...")
-        window.dispatchEvent(new Event("storage"))
-        console.log("Execute workflow completed successfully")
-
-        if (onOpenBot) {
-            console.log("Opening bot automatically...")
-            setTimeout(() => {
-                onOpenBot()
-            }, 500)
-        }
-
-        return true
-    }, [nodes, edges, nodeCounters, validateConnectivity, onOpenBot])
-
-    const resetWorkflow = useCallback(() => {
-        const emptyWorkflow = createEmptyWorkflow()
-        setNodes(emptyWorkflow.nodes)
-        setEdges(emptyWorkflow.edges)
-        setNodeCounters(emptyWorkflow.nodeCounters)
-        setSelectedNode(null)
-
-        localStorage.setItem(WORKFLOW_KEY, JSON.stringify(emptyWorkflow))
-        localStorage.removeItem(EXECUTED_KEY)
-        window.dispatchEvent(new Event("storage"))
-
-        toast({
-            title: "🧹 Fluxo resetado",
-            description: "Todos os componentes foram removidos. Apenas o nó INÍCIO permanece.",
-        })
-    }, [setNodes, setEdges])
-
-    const downloadWorkflow = useCallback(() => {
-        if (nodes.length <= 1) {
-            toast({
-                title: "❌ Fluxo vazio",
-                description: "Adicione pelo menos um componente antes de fazer download",
-                variant: "destructive",
-            })
-            return
-        }
-
-        const validation = validateConnectivity()
-
-        if (!validation.isValid) {
-            setDisconnectedNodes(validation.disconnected)
-            setShowValidationDialog(true)
-            return
-        }
-
-        try {
-            const cleanNodes = nodes.map((node) => ({
-                id: node.id,
-                type: node.type,
-                position: node.position,
-                data: {
-                    ...node.data,
-                    description: undefined,
-                    label: node.data.label === "Node" ? undefined : node.data.label,
-                },
-                deletable: node.deletable,
-                draggable: node.draggable,
-            }))
-
-            const cleanEdges = edges.map((edge) => ({
-                id: edge.id,
-                source: edge.source,
-                target: edge.target,
-                sourceHandle: edge.sourceHandle,
-                targetHandle: edge.targetHandle,
-                type: edge.type,
-            }))
-
-            const workflowData = {
-                _id: `yzy_flow_${Date.now()}`,
-                _tag: "Fluxo ¥$",
-                _insertedAt: new Date().toISOString(),
-                _enabled: true,
-                flowData: {
-                    nodes: cleanNodes,
-                    edges: cleanEdges,
-                    nodeCounters,
-                },
-                summary: {
-                    totalNodes: nodes.length,
-                    totalEdges: edges.length,
-                    nodeTypes: [...new Set(nodes.map((node) => node.type))],
-                    createdAt: new Date().toISOString(),
-                },
-            }
-
-            const jsonString = JSON.stringify(workflowData, null, 2)
-            const blob = new Blob([jsonString], { type: "application/json" })
-            const url = URL.createObjectURL(blob)
-
-            const link = document.createElement("a")
-            link.href = url
-            link.download = `yzy_flow_${new Date().toISOString().split("T")[0]}.json`
-            document.body.appendChild(link)
-            link.click()
-            document.body.removeChild(link)
-            URL.revokeObjectURL(url)
-
-            toast({
-                title: "✅ Download concluído!",
-                description: `Arquivo JSON gerado com ${nodes.length} componentes`,
-            })
-        } catch (error) {
-            toast({
-                title: "❌ Erro no download",
-                description: "Não foi possível gerar o arquivo JSON",
-                variant: "destructive",
-            })
-        }
-    }, [nodes, edges, nodeCounters, validateConnectivity])
-
-    // Auto-salvar a cada<bos> mudança
-    useEffect(() => {
-        if (nodes.length > 0) {
-            const workflow = { nodes, edges, nodeCounters }
-            localStorage.setItem(WORKFLOW_KEY, JSON.stringify(workflow))
-        }
-    }, [nodes, edges, nodeCounters])
-
-    useEffect(() => {
-        onActionsReady({
-            zoomIn,
-            zoomOut,
-            fitView,
-            save: saveWorkflow,
-            load: loadWorkflow,
-            loadWorkflow: loadWorkflowDirect, // Adicionar função direta
-            execute: executeWorkflow,
-            search: searchNodeById,
-            removeNode,
-            reset: resetWorkflow,
-            download: downloadWorkflow,
-        })
-    }, [
-        zoomIn,
-        zoomOut,
-        fitView,
-        saveWorkflow,
-        loadWorkflow,
-        loadWorkflowDirect, // Incluir na dependência
-        executeWorkflow,
-        searchNodeById,
-        removeNode,
-        resetWorkflow,
-        downloadWorkflow,
-        onActionsReady,
-    ])
-
-    const isDark = theme === "dark"
-    const primaryColor = isDark ? currentGradient.glow : "#4a5568"
-    const glowColor = isDark ? currentGradient.glow : "#4a5568"
-
-    const getMiniMapProps = () => {
-        return {
-            nodeColor: (node: Node) => {
-                if (isDark) {
-                    switch (node.type) {
-                        case "start":
-                            return currentGradient.primary
-                        case "sendMessage":
-                            return "#3B82F6"
-                        case "options":
-                            return "#8B5CF6"
-                        case "finalizar":
-                            return "#EF4444"
-                        default:
-                            return currentGradient.secondary
-                    }
-                } else {
-                    return "#9CA3AF"
-                }
-            },
-            maskColor: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(255, 255, 255, 0.85)",
-            style: {
-                backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
-                border: isDark ? `2px solid ${currentGradient.glow}50` : "2px solid #d1d5db",
-                borderRadius: "12px",
-            },
-            position: "bottom-right" as const,
-        }
+type Handlers = WorkflowActions & { undo: () => void; redo: () => void }
+type Size = { width: number; height: number }
+type ToolButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "type"> & { label: string; icon: LucideIcon; pressed?: boolean }
+
+const ConfigPanel = memo(NodeConfigPanel)
+const nodeTypes = { custom: AtendimentoNodeView }
+const edgeTypes = { deletable: CustomEdge }
+const STORAGE_KEY = "workflow"
+const EXECUTED_KEY = "executedFlow"
+const BACKUP_KEY = "workflow-backup"
+const HISTORY_LIMIT = 50
+const DELETE_KEYS = ["Backspace", "Delete"]
+const MULTI_SELECTION_KEYS = ["Shift", "Control", "Meta"]
+const PRO_OPTIONS = { hideAttribution: true }
+const CONNECTION_LINE_STYLE = { stroke: "rgb(var(--flow-accent))", strokeWidth: 2 }
+const CANVAS_CLASS = String.raw`[&_.react-flow\_\_nodesselection-rect]:border-flow-accent/70 [&_.react-flow\_\_nodesselection-rect]:bg-flow-accent/10 [&_.react-flow\_\_selection]:border-flow-accent/70 [&_.react-flow\_\_selection]:bg-flow-accent/10`
+const MINIMAP_CLASS = "!m-3 overflow-hidden rounded-xl border border-flow-border !bg-flow-surface shadow-sm [&_path]:fill-flow-bg/70"
+const DEFAULT_NODE_SIZE: Size = { width: 280, height: 160 }
+const NO_INVALID_NODES: ReadonlySet<string> = new Set()
+const ID_SEPARATOR = "\u0000"
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
+const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+const formatPoint = (point?: XYPosition | null) => (point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "—")
+const isTypingTarget = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+const minimapColor = (node: Node<AtendimentoData>) => getComponentColor(node.data.type)
+
+function ToolButton({ label, icon: Icon, pressed, title, className, ...props }: ToolButtonProps) {
+  return (
+    <button {...props} type="button" aria-label={label} aria-pressed={pressed} title={title ?? label} className={cn(ui.toolButton, pressed && ui.toolButtonActive, className)}>
+      <Icon className="h-4 w-4" aria-hidden />
+    </button>
+  )
+}
+
+const CanvasStatus = memo(function CanvasStatus({ container, count, start }: { container: RefObject<HTMLDivElement | null>; count: number; start?: XYPosition }) {
+  const { screenToFlowPosition } = useReactFlow()
+  const [mouse, setMouse] = useState<XYPosition | null>(null)
+
+  useEffect(() => {
+    const element = container.current
+    if (!element) return
+    let frame = 0
+    let pointer: XYPosition = { x: 0, y: 0 }
+    const update = () => {
+      frame = 0
+      const point = screenToFlowPosition(pointer)
+      const next = { x: Math.round(point.x), y: Math.round(point.y) }
+      setMouse((current) => (current && current.x === next.x && current.y === next.y ? current : next))
     }
+    const move = (event: MouseEvent) => {
+      pointer = { x: event.clientX, y: event.clientY }
+      if (!frame) frame = requestAnimationFrame(update)
+    }
+    element.addEventListener("mousemove", move)
+    return () => {
+      element.removeEventListener("mousemove", move)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [container, screenToFlowPosition])
 
-    return (
-        <div className="flex h-full">
-            <input ref={fileInputRef} type="file" accept=".json" onChange={handleFileUpload} style={{ display: "none" }} />
+  return (
+    <div className={cn(ui.overlay, "pointer-events-none absolute bottom-3 left-3 z-10 flex max-w-[calc(100%_-_1.5rem)] items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-lg px-3 py-1.5 text-[11px] font-medium text-flow-muted shadow-sm")}>
+      <span>Componentes: <span className="text-flow-muted-strong">{count}</span></span>
+      <span className="h-3 w-px shrink-0 bg-flow-border" aria-hidden />
+      <span>Início <span className="text-flow-muted-strong">{formatPoint(start)}</span></span>
+      <span className="h-3 w-px shrink-0 bg-flow-border" aria-hidden />
+      <span>Mouse <span className="text-flow-muted-strong">{formatPoint(mouse)}</span></span>
+    </div>
+  )
+})
 
-            {showSidebar && (
-                <div
-                    className="w-64 p-4 transition-all duration-300"
-                    style={{
-                        marginTop: "60px", // Add margin to prevent overlap with header
-                        height: "calc(100vh - 60px)", // Adjust height to account for header
-                        background: isDark
-                            ? `linear-gradient(135deg, rgba(0,0,0,0.4) 0%, ${currentGradient.primary}10 50%, rgba(0,0,0,0.4) 100%)`
-                            : `linear-gradient(135deg, rgba(255,255,255,0.4) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.4) 100%)`,
-                        border: isDark ? `1px solid ${currentGradient.glow}20` : `1px solid ${currentGradient.primary}15`,
-                        borderRight: isDark ? `1px solid ${currentGradient.glow}30` : `1px solid ${currentGradient.primary}20`,
-                    }}
-                >
-                    <NodeLibrary />
-                </div>
-            )}
+function IssuesPanel({ id, issues, nodes, onClose, onSelect }: {
+  id: string
+  issues: FlowIssue[]
+  nodes: ReadonlyMap<string, AtendimentoNode>
+  onClose: () => void
+  onSelect: (node: AtendimentoNode) => void
+}) {
+  const errors = issues.filter((issue) => issue.severity === "error").length
+  const warnings = issues.length - errors
+  const ordered = [...issues].sort((a, b) => Number(a.severity !== "error") - Number(b.severity !== "error"))
+  const tone = errors
+    ? { frame: "border-flow-danger/40", header: "border-flow-danger/30 bg-flow-danger/10 text-flow-danger", icon: TriangleAlert, title: `${plural(errors, "pendência impede", "pendências impedem")} a exportação` }
+    : warnings
+      ? { frame: "border-flow-warning/40", header: "border-flow-warning/30 bg-flow-warning/10 text-flow-warning", icon: TriangleAlert, title: `Fluxo validado com ${plural(warnings, "aviso", "avisos")}` }
+      : { frame: "border-flow-success/40", header: "border-flow-success/30 bg-flow-success/10 text-flow-success", icon: Check, title: "Fluxo validado" }
+  const Icon = tone.icon
 
-            <div className="flex-1 flex flex-col">
-                <div className="flex-1 relative" ref={reactFlowWrapper}>
-                    <ReactFlow
-                        nodes={nodes}
-                        edges={edges}
-                        onNodesChange={onNodesChangeInternal}
-                        onEdgesChange={onEdgesChangeInternal}
-                        onConnect={onConnect}
-                        onInit={setReactFlowInstance}
-                        onDrop={onDrop}
-                        onDragOver={onDragOver}
-                        onNodeClick={onNodeClick}
-                        onPaneClick={onPaneClick}
-                        onMouseMove={handleMouseMove}
-                        nodeTypes={nodeTypes}
-                        edgeTypes={edgeTypes}
-                        fitView
-                        snapToGrid
-                        snapGrid={[15, 15]}
-                        defaultEdgeOptions={{ type: "custom" }}
-                        className={isDark ? "dark" : ""}
-                        proOptions={{ hideAttribution: true }}
-                    >
-                        <Background
-                            variant={"dots" as BackgroundVariant}
-                            color={primaryColor}
-                            gap={16}
-                            size={1}
-                            style={{
-                                filter: `drop-shadow(0 0 10px ${glowColor}40)`,
-                                opacity: 0.3,
-                            }}
-                        />
-                        <Controls showZoom={false} showFitView={false} showInteractive={false} />
-                        <MiniMap {...getMiniMapProps()} />
-                    </ReactFlow>
-                </div>
-            </div>
+  return (
+    <section id={id} aria-label="Validação do fluxo" className={cn(ui.overlay, "absolute left-1/2 top-3 z-20 flex max-h-[min(24rem,calc(100%_-_1.5rem))] w-[min(92%,30rem)] -translate-x-1/2 flex-col overflow-hidden", tone.frame)}>
+      <div className={cn("flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2", tone.header)}>
+        <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+          <Icon className="h-4 w-4 shrink-0" aria-hidden />
+          <span className="truncate">{tone.title}</span>
+        </h2>
+        <button type="button" onClick={onClose} aria-label="Fechar validação" title="Fechar validação" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-soft hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30">
+          <X className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      </div>
+      {ordered.length ? (
+        <ul className="min-h-0 flex-1 overflow-y-auto p-1.5">
+          {ordered.map((issue, index) => {
+            const node = issue.nodeId ? nodes.get(issue.nodeId) : undefined
+            const content = (
+              <>
+                <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", issue.severity === "error" ? "bg-flow-danger" : "bg-flow-warning")} aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="sr-only">{issue.severity === "error" ? "Pendência: " : "Aviso: "}</span>
+                  {node && <span className="block truncate font-semibold text-flow-fg">{getComponentLabel(node.data.type)} · ID {node.id}</span>}
+                  <span className="block break-words">{issue.message}</span>
+                </span>
+              </>
+            )
+            return (
+              <li key={`${issue.nodeId ?? "fluxo"}-${index}`}>
+                {node ? (
+                  <button type="button" onClick={() => onSelect(node)} className="flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs leading-5 text-flow-muted-strong transition hover:bg-flow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30">
+                    {content}
+                  </button>
+                ) : (
+                  <div className="flex items-start gap-2 px-2.5 py-1.5 text-xs leading-5 text-flow-muted-strong">{content}</div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <p className="px-3 py-2.5 text-xs text-flow-muted-strong">Estrutura, campos e conexões prontos para exportar no formato de Atendimento.</p>
+      )}
+    </section>
+  )
+}
 
-            {selectedNode && (
-                <div
-                    className={`w-80 border-l p-4 ${isDark ? "bg-black border-gray-800" : "bg-white border-gray-200"} transition-all duration-300`}
-                >
-                    <NodeConfigPanel
-                        node={selectedNode as WorkflowNode}
-                        updateNodeData={updateNodeData}
-                        onClose={() => setSelectedNode(null)}
-                        onRemove={() => removeNode(selectedNode.id)}
-                    />
-                </div>
-            )}
+function FlowSettings({ open, onOpenChange, triggerRef, description, serviceType, onDescriptionChange, onServiceTypeChange, onCreateNew }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  triggerRef: RefObject<HTMLButtonElement | null>
+  description: string
+  serviceType: string
+  onDescriptionChange: (value: string) => void
+  onServiceTypeChange: (value: string) => void
+  onCreateNew: () => void
+}) {
+  const id = useId()
 
-            {/* POPUP DE ERRO - JSON Inválido */}
-            <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
-                <DialogContent
-                    className={`${isDark ? "bg-black border-red-700" : "bg-white border-red-200"} max-w-lg mx-auto rounded-xl`}
-                >
-                    <DialogHeader className="text-center">
-                        <DialogTitle
-                            className={`text-xl font-bold ${
-                                isDark ? "text-white" : "text-gray-900"
-                            } flex items-center justify-center gap-2`}
-                        >
-                            ❌ Arquivo JSON Inválido
-                        </DialogTitle>
-                        <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-2 text-center`}>
-                            <span className="text-red-500 font-bold text-lg">Não foi possível importar o arquivo!</span>
-                            <br />
-                            <span className="text-sm">Verifique se o arquivo é um fluxo válido:</span>
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="mt-4">
-                        <div
-                            className={`p-4 rounded-lg border ${
-                                isDark ? "bg-red-900/20 border-red-700 text-red-300" : "bg-red-50 border-red-200 text-red-700"
-                            }`}
-                        >
-                            <div className="flex items-start gap-2">
-                                <span className="text-red-500 font-bold text-lg">⚠️</span>
-                                <div>
-                                    <span className="font-medium block">Erro encontrado:</span>
-                                    <span className="text-sm">{errorMessage}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="flex justify-center mt-6">
-                        <Button
-                            onClick={() => setShowErrorDialog(false)}
-                            className={`${
-                                isDark
-                                    ? "bg-red-800 hover:bg-red-700 text-white border-red-600"
-                                    : "bg-red-100 hover:bg-red-200 text-red-900 border-red-300"
-                            } font-semibold px-6`}
-                        >
-                            Entendi, vou corrigir!
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
-
-            {/* POPUP DE VALIDAÇÃO - Componentes desconectados */}
-            <Dialog open={showValidationDialog} onOpenChange={setShowValidationDialog}>
-                <DialogContent
-                    className={`${isDark ? "bg-black border-gray-700" : "bg-white border-gray-200"} max-w-lg mx-auto rounded-xl`}
-                >
-                    <DialogHeader className="text-center">
-                        <DialogTitle
-                            className={`text-xl font-bold ${
-                                isDark ? "text-white" : "text-gray-900"
-                            } flex items-center justify-center gap-2`}
-                        >
-                            ⚠️ Componentes Desconectados
-                        </DialogTitle>
-                        <DialogDescription className={`${isDark ? "text-gray-300" : "text-gray-600"} mt-2 text-center`}>
-                            <span className="text-red-500 font-bold text-lg">NADA pode ficar vazio ou desconectado!</span>
-                            <br />
-                            <span className="text-sm">Preencha todas as mensagens e conecte todos os componentes:</span>
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-2 max-h-60 overflow-y-auto mt-4">
-                        {disconnectedNodes.map((issue, index) => (
-                            <div
-                                key={index}
-                                className={`p-3 rounded-lg border ${
-                                    isDark ? "bg-red-900/20 border-red-700 text-red-300" : "bg-red-50 border-red-200 text-red-700"
-                                }`}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <span className="text-red-500 font-bold">🔗</span>
-                                    <span className="font-medium">{issue}</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="flex justify-center mt-6">
-                        <Button
-                            onClick={() => setShowValidationDialog(false)}
-                            className={`${
-                                isDark
-                                    ? "bg-gray-800 hover:bg-gray-700 text-white border-gray-600"
-                                    : "bg-gray-100 hover:bg-gray-200 text-gray-900 border-gray-300"
-                            } font-semibold px-6`}
-                        >
-                            Entendi, vou conectar tudo!
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
-
-            {/* POPUP DE SUCESSO - Fluxo salvo */}
-            {/*** POPUP DE SUCESSO – Fluxo Salvo (VISUAL NEON) ***/}
-            <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
-                <DialogContent
-                    className="sm:max-w-[450px] p-0 bg-transparent border-0"
-                    style={{ background: "transparent", border: "none", boxShadow: "none" }}
-                >
-                    <div
-                        className="relative rounded-2xl overflow-hidden"
-                        style={{
-                            background: isDark
-                                ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${currentGradient.primary}15 50%, rgba(0,0,0,0.95) 100%)`
-                                : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.95) 100%)`,
-                            border: isDark ? `1px solid ${currentGradient.glow}40` : `1px solid ${currentGradient.primary}30`,
-                            boxShadow: isDark
-                                ? `0 25px 50px -12px rgba(0,0,0,0.8), 0 0 40px ${currentGradient.glow}30`
-                                : `0 25px 50px -12px rgba(0,0,0,0.3), 0 0 40px ${currentGradient.primary}20`,
-                            backdropFilter: "blur(20px)",
-                        }}
-                    >
-                        {/* brilho de fundo */}
-                        <div
-                            className="absolute inset-0 opacity-20 rounded-2xl"
-                            style={{
-                                backgroundImage: isDark
-                                    ? `radial-gradient(circle at 20% 30%, ${currentGradient.primary}60 0%, transparent 40%),
-               radial-gradient(circle at 80% 70%, ${currentGradient.secondary}60 0%, transparent 40%),
-               radial-gradient(circle at 50% 50%, ${currentGradient.accent}40 0%, transparent 60%)`
-                                    : `radial-gradient(circle at 20% 30%, ${currentGradient.primary}40 0%, transparent 40%),
-               radial-gradient(circle at 80% 70%, ${currentGradient.secondary}40 0%, transparent 40%),
-               radial-gradient(circle at 50% 50%, ${currentGradient.accent}30 0%, transparent 60%)`,
-                            }}
-                        />
-
-                        <DialogHeader className="relative z-10 p-6 pb-2">
-                            <div className="flex items-center gap-4 mb-2">
-                                <div
-                                    className="p-4 rounded-2xl"
-                                    style={{
-                                        background: "rgba(34,197,94,0.2)",
-                                        boxShadow: "0 8px 20px rgba(34,197,94,0.3)",
-                                    }}
-                                >
-                                    <FiSave
-                                        className="w-8 h-8 text-green-400"
-                                        style={{ filter: "drop-shadow(0 0 8px rgba(34,197,94,0.6))" }}
-                                    />
-                                </div>
-                                <div>
-                                    <DialogTitle
-                                        className="text-xl font-bold mb-1"
-                                        style={{
-                                            color: isDark ? "#ffffff" : "#111827",
-                                            textShadow: isDark
-                                                ? `0 0 15px ${currentGradient.glow}60`
-                                                : `0 0 8px ${currentGradient.primary}40`,
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Fluxo Salvo!
-                                    </DialogTitle>
-                                    <DialogDescription
-                                        className="text-sm"
-                                        style={{
-                                            color: isDark ? "#d1d5db" : "#6b7280",
-                                            textShadow: isDark ? `0 0 5px ${currentGradient.glow}30` : "none",
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Parabéns! Seu fluxo foi salvo com sucesso!
-                                    </DialogDescription>
-                                </div>
-                            </div>
-
-                            {/* detalhes */}
-                            <div
-                                className="mt-2 px-3 py-3 text-sm font-medium rounded-lg flex items-center gap-2"
-                                style={{
-                                    background: isDark ? "rgba(0,255,128,0.05)" : "rgba(0,128,64,0.05)",
-                                    border: isDark ? `1px solid ${currentGradient.glow}30` : `1px solid ${currentGradient.primary}20`,
-                                    color: isDark ? "#34d399" : "#065f46",
-                                    fontFamily: "system-ui, -apple-system, sans-serif",
-                                }}
-                            >
-                                <FiLayers className="w-4 h-4" />
-                                {nodes.length} componentes salvos
-                                <span className="text-xs ml-2">Todos os dados foram armazenados no navegador com segurança.</span>
-                            </div>
-                        </DialogHeader>
-
-                        <div className="relative z-10 flex justify-end gap-3 p-6 pt-2">
-                            <motion.button
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={() => setShowSuccessDialog(false)}
-                                className="px-6 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
-                                style={{
-                                    background: "rgba(34,197,94,0.15)",
-                                    color: "#ffffff",
-                                    border: `1px solid rgba(34,197,94,0.4)`,
-                                    boxShadow: "0 0 8px rgba(34,197,94,0.5)",
-                                    fontFamily: "system-ui, -apple-system, sans-serif",
-                                }}
-                            >
-                                Perfeito!
-                            </motion.button>
-                        </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <button ref={triggerRef} type="button" aria-label="Configurações do fluxo" title="Configurações do fluxo" className={cn(ui.toolButton, open && ui.toolButtonActive)}>
+          <Settings2 className="h-4 w-4" aria-hidden />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} collisionPadding={12} className={cn(ui.dialog, "w-80 space-y-4 rounded-xl p-4 shadow-xl")}>
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold text-flow-fg">Configurações do fluxo</h2>
+          <p className="text-xs text-flow-muted">Dados gravados no JSON de Atendimento.</p>
         </div>
-    )
+        <div>
+          <label htmlFor={`${id}-description`} className={ui.label}>Descrição</label>
+          <textarea id={`${id}-description`} className={cn(ui.textarea, "min-h-20 resize-y")} placeholder="Objetivo deste atendimento" value={description} onChange={(event) => onDescriptionChange(event.target.value)} />
+        </div>
+        <div>
+          <label htmlFor={`${id}-service`} className={ui.label}>Tipo de serviço</label>
+          <input id={`${id}-service`} aria-describedby={`${id}-service-hint`} className={ui.input} value={serviceType} onChange={(event) => onServiceTypeChange(event.target.value)} />
+          <p id={`${id}-service-hint`} className={ui.hint}>No JSON de referência o valor é chat.</p>
+        </div>
+        <p className="flex items-start gap-2 rounded-lg bg-flow-soft px-3 py-2 text-[11px] leading-4 text-flow-muted">
+          <Info className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+          A data de criação (created_at) é gravada no momento da exportação.
+        </p>
+        <div className="border-t border-flow-border pt-3">
+          <button type="button" onClick={onCreateNew} className={cn(ui.dangerButton, "w-full justify-center")}>
+            <FilePlus2 className="h-3.5 w-3.5" aria-hidden />
+            Criar novo fluxo
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProps) {
+  const [flow, setFlowState] = useState<AtendimentoFlow>(() => newFlow())
+  const [ready, setReady] = useState(false)
+  const [recovery, setRecovery] = useState("")
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([])
+  const [selectedEdges, setSelectedEdges] = useState<string[]>([])
+  const [panelId, setPanelId] = useState<string | null>(null)
+  const [sizes, setSizes] = useState<Record<string, Size>>({})
+  const [drafts, setDrafts] = useState<Record<string, boolean>>({})
+  const [showIssues, setShowIssues] = useState(false)
+  const [showLibrary, setShowLibrary] = useState(true)
+  const [showMinimap, setShowMinimap] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [importError, setImportError] = useState("")
+  const [, setHistoryVersion] = useState(0)
+  const flowRef = useRef(flow)
+  const past = useRef<AtendimentoFlow[]>([])
+  const future = useRef<AtendimentoFlow[]>([])
+  const lastCommit = useRef<{ key: string; at: number } | null>(null)
+  const idFloor = useRef(1)
+  const executed = useRef<string | null>(null)
+  const dragOrigin = useRef<AtendimentoFlow | null>(null)
+  const removalBatch = useRef(false)
+  const lookup = useRef<{ nodes: AtendimentoNode[]; byId: Map<string, AtendimentoNode> } | null>(null)
+  const handlers = useRef<Handlers | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const canvas = useRef<HTMLDivElement>(null)
+  const settingsTrigger = useRef<HTMLButtonElement>(null)
+  const issuesId = useId()
+  const { setViewport, getViewport, screenToFlowPosition, fitView, zoomIn, zoomOut, setCenter } = useReactFlow()
+  const dirty = Object.values(drafts).some(Boolean)
+  const issues = useMemo(() => validateFlow(flow), [flow])
+  const errorCount = useMemo(() => issues.filter((issue) => issue.severity === "error").length, [issues])
+  const nodesById = useMemo(() => new Map(flow.nodes.map((node) => [node.id, node])), [flow.nodes])
+  const startNode = useMemo(() => flow.nodes.find((node) => node.data.type === START_TYPE), [flow.nodes])
+  const panelNode = panelId ? nodesById.get(panelId) : undefined
+  const invalidKey = useMemo(() => {
+    if (!showIssues) return ""
+    const ids = new Set<string>()
+    for (const issue of issues) if (issue.severity === "error" && issue.nodeId) ids.add(issue.nodeId)
+    return [...ids].sort().join(ID_SEPARATOR)
+  }, [issues, showIssues])
+  const invalidNodes = useMemo<ReadonlySet<string>>(() => (invalidKey ? new Set(invalidKey.split(ID_SEPARATOR)) : NO_INVALID_NODES), [invalidKey])
+
+  const findNode = useCallback((id: string | null | undefined) => {
+    if (!id) return undefined
+    const nodes = flowRef.current.nodes
+    if (lookup.current?.nodes !== nodes) lookup.current = { nodes, byId: new Map(nodes.map((node) => [node.id, node])) }
+    return lookup.current.byId.get(id)
+  }, [])
+
+  const pushHistory = useCallback((snapshot: AtendimentoFlow) => {
+    past.current = [...past.current.slice(-(HISTORY_LIMIT - 1)), snapshot]
+    future.current = []
+    setHistoryVersion((version) => version + 1)
+  }, [])
+
+  const setDocument = useCallback((next: AtendimentoFlow, mode: "history" | "silent", options: { resetIds?: boolean; coalesce?: string } = {}) => {
+    const current = flowRef.current
+    if (next === current) return
+    if (mode === "history") {
+      const now = Date.now()
+      const previous = lastCommit.current
+      const repeated = Boolean(options.coalesce) && previous !== null && previous.key === options.coalesce && now - previous.at < 1500
+      if (repeated) future.current = []
+      else pushHistory(current)
+      lastCommit.current = options.coalesce ? { key: options.coalesce, at: now } : null
+    }
+    flowRef.current = next
+    const highest = maxNumericId(next.nodes.map((node) => node.id))
+    idFloor.current = options.resetIds ? highest : Math.max(idFloor.current, highest)
+    setFlowState(next)
+  }, [pushHistory])
+
+  const commit = useCallback((change: (current: AtendimentoFlow) => AtendimentoFlow, coalesce?: string) => setDocument(change(flowRef.current), "history", { coalesce }), [setDocument])
+
+  const removal = useCallback(() => {
+    const mode = removalBatch.current ? "silent" as const : "history" as const
+    if (!removalBatch.current) {
+      removalBatch.current = true
+      queueMicrotask(() => { removalBatch.current = false })
+    }
+    return mode
+  }, [])
+
+  const syncViewport = useCallback((delay = 0) => {
+    setTimeout(() => {
+      const viewport = getViewport()
+      const current = flowRef.current
+      if (current.viewport.x !== viewport.x || current.viewport.y !== viewport.y || current.viewport.zoom !== viewport.zoom) setDocument({ ...current, viewport }, "silent")
+    }, delay)
+  }, [getViewport, setDocument])
+
+  const allocateId = useCallback(() => {
+    idFloor.current = Math.max(idFloor.current, maxNumericId(flowRef.current.nodes.map((node) => node.id))) + 1
+    return String(idFloor.current)
+  }, [])
+
+  const ensureApplied = useCallback(() => {
+    if (!dirty) return true
+    toast({ title: "Edição de JSON pendente", description: "Aplique ou descarte as edições de JSON no painel antes de continuar.", variant: "destructive" })
+    return false
+  }, [dirty])
+
+  const persist = useCallback((document: AtendimentoFlow, markExecuted = false) => {
+    try {
+      const serialized = JSON.stringify(document)
+      const before = [localStorage.getItem(STORAGE_KEY), localStorage.getItem(EXECUTED_KEY)]
+      localStorage.setItem(STORAGE_KEY, serialized)
+      if (markExecuted) {
+        executed.current = behaviorSignature(document)
+        localStorage.setItem(EXECUTED_KEY, "true")
+      } else if (executed.current !== null && executed.current !== behaviorSignature(document)) {
+        executed.current = null
+        localStorage.removeItem(EXECUTED_KEY)
+      }
+      if (before[0] !== serialized || before[1] !== localStorage.getItem(EXECUTED_KEY)) window.dispatchEvent(new Event("storage"))
+      return true
+    } catch {
+      toast({ title: "Não foi possível salvar no navegador", description: "Exporte o JSON para guardar suas alterações.", variant: "destructive" })
+      return false
+    }
+  }, [])
+
+  const backupStored = useCallback(() => {
+    try {
+      const previous = localStorage.getItem(STORAGE_KEY)
+      if (previous) localStorage.setItem(BACKUP_KEY, previous)
+    } catch {
+      toast({ title: "Backup local indisponível", description: "O navegador bloqueou o armazenamento local.", variant: "destructive" })
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY)
+      if (stored) {
+        const restored = importFlow(stored)
+        setDocument(restored, "silent", { resetIds: true })
+        if (localStorage.getItem(EXECUTED_KEY) === "true") executed.current = behaviorSignature(restored)
+        void setViewport(restored.viewport)
+      }
+    } catch (cause) {
+      setRecovery(`O fluxo salvo neste navegador não pôde ser aberto: ${(cause as Error).message} Ele continua guardado até você importar outro fluxo ou criar um novo.`)
+    }
+    setReady(true)
+  }, [setDocument, setViewport])
+
+  useEffect(() => {
+    if (!ready || recovery) return
+    const timer = setTimeout(() => persist(flow), 500)
+    return () => clearTimeout(timer)
+  }, [flow, ready, recovery, persist])
+
+  const clearSelection = useCallback(() => {
+    setPanelId(null)
+    setSelectedNodes([])
+    setSelectedEdges([])
+    setDrafts({})
+  }, [])
+
+  const loadWorkflow = useCallback((input: unknown) => {
+    if (!ensureApplied()) return false
+    try {
+      const imported = importFlow(input)
+      backupStored()
+      setDocument(imported, "history", { resetIds: true })
+      setRecovery("")
+      setSizes({})
+      clearSelection()
+      void setViewport(imported.viewport)
+      persist(imported)
+      toast({ title: "Fluxo importado", description: `${plural(imported.nodes.length, "componente", "componentes")} e ${plural(imported.edges.length, "conexão", "conexões")} carregados.` })
+      return true
+    } catch (cause) {
+      setImportError(cause instanceof SyntaxError ? "O arquivo não é um JSON válido." : (cause as Error).message)
+      return false
+    }
+  }, [backupStored, clearSelection, ensureApplied, persist, setDocument, setViewport])
+
+  const reportIssues = useCallback((title: string) => {
+    setShowIssues(true)
+    toast({ title, description: `${plural(errorCount, "pendência", "pendências")} no painel de validação.`, variant: "destructive" })
+  }, [errorCount])
+
+  const save = useCallback(() => {
+    if (recovery) {
+      toast({ title: "Salvamento pausado", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
+      return false
+    }
+    if (!ensureApplied()) return false
+    const document = { ...flowRef.current, viewport: getViewport() }
+    setDocument(document, "silent")
+    const saved = persist(document)
+    if (saved) {
+      const pending = errorCount ? ` ${plural(errorCount, "pendência impede", "pendências impedem")} a exportação.` : ""
+      toast({ title: "Fluxo salvo", description: `${plural(document.nodes.length, "componente", "componentes")} e ${plural(document.edges.length, "conexão", "conexões")} guardados neste navegador.${pending}` })
+    }
+    return saved
+  }, [ensureApplied, errorCount, getViewport, persist, recovery, setDocument])
+
+  const download = useCallback(() => {
+    if (!ensureApplied()) return false
+    if (errorCount) {
+      reportIssues("Corrija as pendências antes de exportar")
+      return false
+    }
+    try {
+      const document = stampExport({ ...flowRef.current, viewport: getViewport() })
+      downloadJson(exportFlow(document), exportFileName(document))
+      toast({ title: "JSON de Atendimento exportado", description: `${plural(document.nodes.length, "componente", "componentes")} e ${plural(document.edges.length, "conexão", "conexões")}.` })
+      return true
+    } catch (cause) {
+      setShowIssues(true)
+      toast({ title: "Exportação bloqueada", description: (cause as Error).message, variant: "destructive" })
+      return false
+    }
+  }, [ensureApplied, errorCount, getViewport, reportIssues])
+
+  const execute = useCallback(() => {
+    if (recovery || !ensureApplied()) return false
+    if (errorCount) {
+      reportIssues("Corrija as pendências antes de abrir a prévia")
+      return false
+    }
+    const document = flowRef.current
+    if (!persist(document, true)) return false
+    window.dispatchEvent(new CustomEvent("workflow:executed", { detail: document }))
+    onOpenBot?.()
+    return true
+  }, [ensureApplied, errorCount, onOpenBot, persist, recovery, reportIssues])
+
+  const removeNodes = useCallback((ids: string[]) => {
+    const current = flowRef.current
+    const removable = new Set(ids.filter((id) => {
+      const node = findNode(id)
+      return Boolean(node && node.data.type !== START_TYPE)
+    }))
+    if (!removable.size) return
+    setDocument({
+      ...current,
+      nodes: current.nodes.filter((node) => !removable.has(node.id)),
+      edges: current.edges.filter((edge) => !removable.has(edge.source) && !removable.has(edge.target)),
+    }, removal())
+    setSelectedNodes((selected) => selected.filter((id) => !removable.has(id)))
+    setPanelId((open) => (open && removable.has(open) ? null : open))
+    setDrafts({})
+  }, [findNode, removal, setDocument])
+
+  const removeNode = useCallback((id: string) => {
+    if (ensureApplied()) removeNodes([id])
+  }, [ensureApplied, removeNodes])
+
+  const removeEdges = useCallback((ids: string[]) => {
+    const remove = new Set(ids)
+    const current = flowRef.current
+    if (!current.edges.some((edge) => remove.has(edge.id))) return
+    setDocument({ ...current, edges: current.edges.filter((edge) => !remove.has(edge.id)) }, removal())
+    setSelectedEdges((selected) => selected.filter((id) => !remove.has(id)))
+  }, [removal, setDocument])
+
+  const reset = useCallback(() => {
+    if (!ensureApplied()) return
+    backupStored()
+    const empty = newFlow()
+    setDocument(empty, "history", { resetIds: true })
+    setRecovery("")
+    setSizes({})
+    clearSelection()
+    void setViewport(empty.viewport)
+    persist(empty)
+  }, [backupStored, clearSelection, ensureApplied, persist, setDocument, setViewport])
+
+  const focusNode = useCallback((node: AtendimentoNode) => {
+    setPanelId(node.id)
+    setSelectedNodes([node.id])
+    setSelectedEdges([])
+    const size = sizes[node.id] || DEFAULT_NODE_SIZE
+    void setCenter(node.position.x + size.width / 2, node.position.y + size.height / 2, { zoom: Math.max(getViewport().zoom, 0.9), duration: 300 })
+    syncViewport(350)
+  }, [getViewport, setCenter, sizes, syncViewport])
+
+  const selectIssue = useCallback((node: AtendimentoNode) => {
+    if (ensureApplied()) focusNode(node)
+  }, [ensureApplied, focusNode])
+
+  const search = useCallback((query: string) => {
+    if (!ensureApplied()) return false
+    const text = query.trim()
+    const term = normalize(text)
+    if (!term) return false
+    const nodes = flowRef.current.nodes
+    const node = nodes.find((entry) => normalize(entry.id) === term)
+      || nodes.find((entry) => normalize(`${getComponentLabel(entry.data.type)} ${nodeSummary(entry.data)}`).includes(term))
+    if (!node) {
+      toast({ title: "Componente não encontrado", description: `Nenhum componente com ID ou texto “${text}”.` })
+      return false
+    }
+    focusNode(node)
+    return true
+  }, [ensureApplied, focusNode])
+
+  const undo = useCallback(() => {
+    if (!ensureApplied()) return
+    const previous = past.current.pop()
+    if (!previous) return
+    future.current = [flowRef.current, ...future.current].slice(0, HISTORY_LIMIT)
+    lastCommit.current = null
+    setDocument(previous, "silent")
+    setHistoryVersion((version) => version + 1)
+    clearSelection()
+  }, [clearSelection, ensureApplied, setDocument])
+
+  const redo = useCallback(() => {
+    if (!ensureApplied()) return
+    const [next, ...rest] = future.current
+    if (!next) return
+    past.current = [...past.current, flowRef.current].slice(-HISTORY_LIMIT)
+    future.current = rest
+    lastCommit.current = null
+    setDocument(next, "silent")
+    setHistoryVersion((version) => version + 1)
+    clearSelection()
+  }, [clearSelection, ensureApplied, setDocument])
+
+  const zoomInView = useCallback(() => {
+    void zoomIn({ duration: 200 })
+    syncViewport(250)
+  }, [syncViewport, zoomIn])
+
+  const zoomOutView = useCallback(() => {
+    void zoomOut({ duration: 200 })
+    syncViewport(250)
+  }, [syncViewport, zoomOut])
+
+  const fitCanvas = useCallback(() => {
+    void fitView({ padding: 0.2, duration: 300 })
+    syncViewport(350)
+  }, [fitView, syncViewport])
+
+  const openFile = useCallback(() => fileInput.current?.click(), [])
+
+  useLayoutEffect(() => {
+    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, undo, redo }
+  })
+
+  const actions = useMemo<WorkflowActions>(() => ({
+    zoomIn: () => handlers.current?.zoomIn(),
+    zoomOut: () => handlers.current?.zoomOut(),
+    fitView: () => handlers.current?.fitView(),
+    save: () => handlers.current?.save() ?? false,
+    load: () => handlers.current?.load(),
+    loadWorkflow: (input) => handlers.current?.loadWorkflow(input) ?? false,
+    execute: () => handlers.current?.execute() ?? false,
+    search: (query) => handlers.current?.search(query) ?? false,
+    removeNode: (id) => handlers.current?.removeNode(id),
+    reset: () => handlers.current?.reset(),
+    download: () => handlers.current?.download() ?? false,
+  }), [])
+
+  useEffect(() => {
+    onActionsReady(actions)
+  }, [actions, onActionsReady])
+
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const load = handlers.current?.loadWorkflow
+      if (!load) return
+      const detail = (event as CustomEvent).detail
+      if (detail && typeof detail === "object" && "input" in detail) detail.accepted = load(detail.input)
+      else load(detail)
+    }
+    window.addEventListener("workflow:import", receive)
+    return () => window.removeEventListener("workflow:import", receive)
+  }, [])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      const current = handlers.current
+      if (!current) return
+      const key = event.key.toLowerCase()
+      if (key === "s") {
+        event.preventDefault()
+        current.save()
+        return
+      }
+      if (isTypingTarget(event.target)) return
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault()
+        current.undo()
+      } else if (key === "y" || (key === "z" && event.shiftKey)) {
+        event.preventDefault()
+        current.redo()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
+  const addComponent = useCallback((type: string, position?: XYPosition) => {
+    if (recovery) {
+      toast({ title: "Edição pausada", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
+      return
+    }
+    if (!ensureApplied()) return
+    try {
+      let point = position
+      if (!point) {
+        const anchor = findNode(panelId)
+        const bounds = canvas.current?.getBoundingClientRect()
+        point = anchor
+          ? { x: anchor.position.x + 360, y: anchor.position.y }
+          : screenToFlowPosition({ x: (bounds?.left || 0) + (bounds?.width || 600) / 2 - 140, y: (bounds?.top || 0) + (bounds?.height || 500) / 2 - 60 })
+        const nodes = flowRef.current.nodes
+        const occupied = (candidate: XYPosition) => nodes.some((node) => Math.abs(node.position.x - candidate.x) < 280 && Math.abs(node.position.y - candidate.y) < 140)
+        for (let attempt = 0; attempt < 20 && occupied(point); attempt++) point = { x: point.x, y: point.y + 180 }
+      }
+      const node = newNode(type, point, allocateId())
+      commit((current) => ({ ...current, nodes: [...current.nodes, node] }))
+      setPanelId(node.id)
+      setSelectedNodes([node.id])
+      setSelectedEdges([])
+      setDrafts({})
+    } catch (cause) {
+      toast({ title: "Componente indisponível", description: (cause as Error).message, variant: "destructive" })
+    }
+  }, [allocateId, commit, ensureApplied, findNode, panelId, recovery, screenToFlowPosition])
+
+  const isValidConnection = useCallback((connection: Connection) => {
+    const source = findNode(connection.source)
+    const target = findNode(connection.target)
+    return Boolean(source && target && source.id !== target.id && target.data.type !== START_TYPE && outputHandles(source, flowRef.current.edges).includes(connection.sourceHandle || ""))
+  }, [findNode])
+
+  const connect = useCallback((connection: Connection) => {
+    const { source: sourceId, sourceHandle, target } = connection
+    if (!sourceId || !target || !sourceHandle || !isValidConnection(connection)) return
+    const source = findNode(sourceId)
+    if (!source) return
+    const current = flowRef.current
+    const incoming = current.edges.find((edge) => edge.target === target && !(edge.source === sourceId && edge.sourceHandle === sourceHandle))
+    if (incoming) {
+      toast({ title: "Entrada já ocupada", description: "No formato de Atendimento cada componente recebe uma única conexão. Remova a conexão existente primeiro.", variant: "destructive" })
+      return
+    }
+    const replaced = new Set(current.edges.filter((edge) => edge.source === sourceId && edge.sourceHandle === sourceHandle))
+    if (replaced.size === 1 && [...replaced][0].target === target) return
+    const edge = createEdge(current.edges.filter((entry) => !replaced.has(entry)), sourceId, sourceHandle, target)
+    commit((document) => ({ ...document, edges: [...document.edges.filter((entry) => !replaced.has(entry)), edge] }))
+    if (replaced.size) toast({ title: "Conexão substituída", description: `A saída “${outputLabel(source, sourceHandle)}” agora leva ao componente ${target}.` })
+  }, [commit, findNode, isValidConnection])
+
+  const handleNodeChanges = useCallback((changes: NodeChange[]) => {
+    const removals: string[] = []
+    const dimensions: Array<{ id: string } & Size> = []
+    const selections = new Map<string, boolean>()
+    const positions = new Map<string, XYPosition>()
+    for (const change of changes) {
+      if (change.type === "remove") removals.push(change.id)
+      else if (change.type === "dimensions" && change.dimensions) dimensions.push({ id: change.id, width: change.dimensions.width, height: change.dimensions.height })
+      else if (change.type === "select") selections.set(change.id, change.selected)
+      else if (change.type === "position" && change.position) positions.set(change.id, change.position)
+    }
+    if (removals.length) {
+      if (ensureApplied()) removeNodes(removals)
+      return
+    }
+    if (dimensions.length) setSizes((current) => {
+      let next = current
+      for (const { id, width, height } of dimensions) {
+        if (current[id]?.width === width && current[id]?.height === height) continue
+        if (next === current) next = { ...current }
+        next[id] = { width, height }
+      }
+      return next
+    })
+    if (selections.size) setSelectedNodes((current) => {
+      const next = new Set(current)
+      for (const [id, selected] of selections) {
+        if (selected) next.add(id)
+        else next.delete(id)
+      }
+      return next.size === current.length && current.every((id) => next.has(id)) ? current : [...next]
+    })
+    if (positions.size) {
+      const current = flowRef.current
+      setDocument({ ...current, nodes: current.nodes.map((node) => {
+        const position = positions.get(node.id)
+        return position ? { ...node, position: { x: position.x, y: position.y } } : node
+      }) }, "silent")
+    }
+  }, [ensureApplied, removeNodes, setDocument])
+
+  const handleEdgeChanges = useCallback((changes: EdgeChange[]) => {
+    const selections = new Map<string, boolean>()
+    const removals: string[] = []
+    for (const change of changes) {
+      if (change.type === "select") selections.set(change.id, change.selected)
+      else if (change.type === "remove") removals.push(change.id)
+    }
+    if (selections.size) setSelectedEdges((current) => {
+      const next = new Set(current)
+      for (const [id, selected] of selections) {
+        if (selected) next.add(id)
+        else next.delete(id)
+      }
+      return next.size === current.length && current.every((id) => next.has(id)) ? current : [...next]
+    })
+    if (removals.length) removeEdges(removals)
+  }, [removeEdges])
+
+  const startDrag = useCallback(() => {
+    dragOrigin.current = flowRef.current
+  }, [])
+
+  const finishDrag = useCallback(() => {
+    const origin = dragOrigin.current
+    dragOrigin.current = null
+    const current = flowRef.current
+    if (!origin || origin === current) return
+    const positions = new Map(current.nodes.map((node) => [node.id, node.position]))
+    if (origin.nodes.some((node) => node.position !== positions.get(node.id))) {
+      pushHistory(origin)
+      lastCommit.current = null
+    }
+  }, [pushHistory])
+
+  const openNode = useCallback((_: ReactMouseEvent, node: Node) => {
+    if (node.id === panelId || !ensureApplied()) return
+    setPanelId(node.id)
+    setDrafts({})
+  }, [ensureApplied, panelId])
+
+  const closeOnPane = useCallback(() => {
+    if (!ensureApplied()) return
+    setPanelId(null)
+    setDrafts({})
+  }, [ensureApplied])
+
+  const moveEnd = useCallback(() => {
+    if (ready) syncViewport()
+  }, [ready, syncViewport])
+
+  const dragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    const types = Array.from(event.dataTransfer.types)
+    if (!types.includes("application/reactflow") && !types.includes("Files")) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = types.includes("Files") ? "copy" : "move"
+  }, [])
+
+  const readFile = useCallback(async (file: File) => {
+    try {
+      loadWorkflow(await file.text())
+    } catch (cause) {
+      setImportError(`Não foi possível ler o arquivo: ${(cause as Error).message}`)
+    }
+  }, [loadWorkflow])
+
+  const drop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const type = event.dataTransfer.getData("application/reactflow")
+    if (type) {
+      addComponent(type, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+      return
+    }
+    const file = event.dataTransfer.files?.[0]
+    if (!file) return
+    if (!/\.json$/i.test(file.name) && file.type !== "application/json") {
+      setImportError("Solte um arquivo .json no formato de Atendimento.")
+      return
+    }
+    void readFile(file)
+  }, [addComponent, readFile, screenToFlowPosition])
+
+  const importFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (file) void readFile(file)
+  }, [readFile])
+
+  const updateData = useCallback((data: JsonObject) => {
+    if (!panelId) return
+    const before = findNode(panelId)?.data.data || {}
+    const changed = [...new Set([...Object.keys(before), ...Object.keys(data)])].filter((key) => JSON.stringify(before[key]) !== JSON.stringify(data[key])).sort().join(",")
+    commit((current) => ({ ...current, nodes: current.nodes.map((node) => (node.id === panelId ? { ...node, data: { ...node.data, data } } : node)) }), `data:${panelId}:${changed}`)
+  }, [commit, findNode, panelId])
+
+  const trackDraft = useCallback((field: string, pending: boolean) => {
+    setDrafts((current) => (current[field] === pending ? current : { ...current, [field]: pending }))
+  }, [])
+
+  const removeOption = useCallback((option: number) => {
+    if (!panelId || !ensureApplied()) return
+    commit((current) => removeMenuOption(current, panelId, option))
+  }, [commit, ensureApplied, panelId])
+
+  const closePanel = useCallback(() => {
+    if (!ensureApplied()) return
+    setPanelId(null)
+    setDrafts({})
+  }, [ensureApplied])
+
+  const removePanelNode = useCallback(() => {
+    if (panelId) removeNode(panelId)
+  }, [panelId, removeNode])
+
+  const duplicate = useCallback(() => {
+    const node = findNode(panelId)
+    if (!node || !ensureApplied()) return
+    const clone = duplicateNode(node, allocateId())
+    commit((current) => ({ ...current, nodes: [...current.nodes, clone] }))
+    setPanelId(clone.id)
+    setSelectedNodes([clone.id])
+    setSelectedEdges([])
+  }, [allocateId, commit, ensureApplied, findNode, panelId])
+
+  const renameFlow = useCallback((name: string) => commit((current) => ({ ...current, name }), "name"), [commit])
+  const describeFlow = useCallback((description: string) => commit((current) => ({ ...current, description }), "description"), [commit])
+  const setServiceType = useCallback((serviceType: string) => commit((current) => ({ ...current, service_type: serviceType }), "service_type"), [commit])
+
+  const requestNewFlow = useCallback(() => {
+    if (!ensureApplied()) return
+    setSettingsOpen(false)
+    if (flowRef.current.nodes.length <= 1) reset()
+    else setConfirmReset(true)
+  }, [ensureApplied, reset])
+
+  const confirmNewFlow = useCallback(() => {
+    setConfirmReset(false)
+    reset()
+  }, [reset])
+
+  const canvasNodes = useMemo<Node<AtendimentoData>[]>(() => {
+    const selected = new Set(selectedNodes)
+    return flow.nodes.map((node) => ({
+      id: node.id,
+      type: "custom",
+      position: node.position,
+      data: node.data,
+      ...sizes[node.id],
+      selected: selected.has(node.id),
+      deletable: node.data.type !== START_TYPE && node.deletable !== false,
+    }))
+  }, [flow.nodes, selectedNodes, sizes])
+
+  const canvasEdges = useMemo<Edge[]>(() => {
+    const selected = new Set(selectedEdges)
+    return flow.edges.map((edge) => {
+      const source = nodesById.get(edge.source)
+      return {
+        id: edge.id,
+        type: "deletable",
+        source: edge.source,
+        sourceHandle: edge.sourceHandle,
+        target: edge.target,
+        targetHandle: edge.targetHandle ?? undefined,
+        selected: selected.has(edge.id),
+        ariaLabel: `Conexão de ${source ? `${getComponentLabel(source.data.type)} ${source.id} (${outputLabel(source, edge.sourceHandle)})` : edge.source} para ${edge.target}`,
+      }
+    })
+  }, [flow.edges, nodesById, selectedEdges])
+
+  const edgeActions = useMemo(() => ({ remove: (id: string) => removeEdges([id]) }), [removeEdges])
+  const canUndo = past.current.length > 0
+  const canRedo = future.current.length > 0
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-flow-bg text-flow-fg">
+      <input aria-label="Importar arquivo JSON" ref={fileInput} type="file" accept=".json,application/json" className="hidden" onChange={importFile} />
+      <div className={cn("flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2", ui.panel)}>
+        <ToolButton label="Componentes" title={showLibrary ? "Ocultar componentes" : "Mostrar componentes"} icon={showLibrary ? PanelLeftClose : PanelLeftOpen} pressed={showLibrary} onClick={() => setShowLibrary((visible) => !visible)} />
+        <span className={ui.divider} aria-hidden />
+        <ToolButton label="Diminuir zoom" icon={ZoomOut} onClick={zoomOutView} />
+        <ToolButton label="Aumentar zoom" icon={ZoomIn} onClick={zoomInView} />
+        <ToolButton label="Ajustar à tela" icon={Maximize} onClick={fitCanvas} />
+        <ToolButton label="Minimapa" title={showMinimap ? "Ocultar minimapa" : "Mostrar minimapa"} icon={MapIcon} pressed={showMinimap} onClick={() => setShowMinimap((visible) => !visible)} />
+        <span className={ui.divider} aria-hidden />
+        <ToolButton label="Desfazer" title="Desfazer (Ctrl+Z)" icon={Undo2} onClick={undo} disabled={!canUndo} />
+        <ToolButton label="Refazer" title="Refazer (Ctrl+Y)" icon={Redo2} onClick={redo} disabled={!canRedo} />
+        <span className={ui.divider} aria-hidden />
+        <input
+          aria-label="Nome do fluxo"
+          value={flow.name}
+          placeholder="Nome do fluxo"
+          spellCheck={false}
+          className="h-8 min-w-[10rem] max-w-md flex-1 truncate rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-flow-fg transition placeholder:text-flow-muted hover:border-flow-border focus-visible:border-flow-accent focus-visible:bg-flow-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/25"
+          onChange={(event) => renameFlow(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur() }}
+        />
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowIssues((open) => !open)}
+            aria-expanded={showIssues}
+            aria-controls={showIssues ? issuesId : undefined}
+            title={showIssues ? "Ocultar validação do fluxo" : errorCount ? "Ver pendências do fluxo" : "Ver validação do fluxo"}
+            className={cn(
+              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2",
+              errorCount
+                ? "border-flow-warning/40 bg-flow-warning/10 text-flow-warning hover:bg-flow-warning/15 focus-visible:ring-flow-warning/30"
+                : "border-flow-success/40 bg-flow-success/10 text-flow-success hover:bg-flow-success/15 focus-visible:ring-flow-success/30",
+            )}
+          >
+            {errorCount ? <TriangleAlert className="h-3.5 w-3.5" aria-hidden /> : <Check className="h-3.5 w-3.5" aria-hidden />}
+            {errorCount ? plural(errorCount, "pendência", "pendências") : "Fluxo validado"}
+          </button>
+          <button type="button" className={ui.button} onClick={openFile} title="Abrir um arquivo JSON de Atendimento">
+            <Upload className="h-3.5 w-3.5" aria-hidden />
+            Importar JSON
+          </button>
+          <button type="button" className={ui.button} onClick={download} title="Baixar o fluxo no formato JSON de Atendimento">
+            <Download className="h-3.5 w-3.5" aria-hidden />
+            Exportar JSON
+          </button>
+          <button type="button" className={ui.button} onClick={save} title="Salvar neste navegador (Ctrl+S)">
+            <Save className="h-3.5 w-3.5" aria-hidden />
+            Salvar
+          </button>
+          <button type="button" className={ui.primaryButton} onClick={execute} title="Validar o fluxo e abrir a prévia do atendimento">
+            <Play className="h-3.5 w-3.5" aria-hidden />
+            Prévia
+          </button>
+          <FlowSettings
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            triggerRef={settingsTrigger}
+            description={flow.description}
+            serviceType={flow.service_type}
+            onDescriptionChange={describeFlow}
+            onServiceTypeChange={setServiceType}
+            onCreateNew={requestNewFlow}
+          />
+        </div>
+      </div>
+      {recovery && (
+        <div role="alert" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-flow-warning/40 bg-flow-warning/10 px-4 py-2 text-xs text-flow-fg">
+          <TriangleAlert className="h-4 w-4 shrink-0 text-flow-warning" aria-hidden />
+          <p className="min-w-0 flex-1 leading-5">{recovery}</p>
+          <button type="button" className={ui.button} onClick={openFile}>Importar JSON</button>
+          <button type="button" className={ui.button} onClick={reset}>Criar novo fluxo</button>
+        </div>
+      )}
+      <div className="relative flex min-h-0 flex-1">
+        {showLibrary && <NodeLibrary onAdd={addComponent} />}
+        <div ref={canvas} className="flow-background relative min-w-0 flex-1 bg-flow-bg">
+          <InvalidNodesContext.Provider value={invalidNodes}>
+            <AtendimentoEdgesContext.Provider value={flow.edges}>
+              <EdgeActionsContext.Provider value={edgeActions}>
+                <ReactFlow
+                  nodes={canvasNodes}
+                  edges={canvasEdges}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
+                  onNodesChange={handleNodeChanges}
+                  onEdgesChange={handleEdgeChanges}
+                  onNodeDragStart={startDrag}
+                  onNodeDragStop={finishDrag}
+                  onSelectionDragStart={startDrag}
+                  onSelectionDragStop={finishDrag}
+                  onNodeClick={openNode}
+                  onPaneClick={closeOnPane}
+                  isValidConnection={isValidConnection}
+                  onConnect={connect}
+                  onDragOver={dragOver}
+                  onDrop={drop}
+                  onMoveEnd={moveEnd}
+                  defaultViewport={flow.viewport}
+                  minZoom={0.05}
+                  maxZoom={2}
+                  deleteKeyCode={dirty ? null : DELETE_KEYS}
+                  multiSelectionKeyCode={MULTI_SELECTION_KEYS}
+                  selectNodesOnDrag={false}
+                  connectionLineStyle={CONNECTION_LINE_STYLE}
+                  proOptions={PRO_OPTIONS}
+                  className={CANVAS_CLASS}
+                >
+                  <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="rgb(var(--flow-border))" className="[&_circle]:fill-flow-border" />
+                  {showMinimap && (
+                    <MiniMap
+                      pannable
+                      zoomable
+                      ariaLabel="Minimapa"
+                      nodeColor={minimapColor}
+                      nodeBorderRadius={16}
+                      className={MINIMAP_CLASS}
+                    />
+                  )}
+                </ReactFlow>
+              </EdgeActionsContext.Provider>
+            </AtendimentoEdgesContext.Provider>
+          </InvalidNodesContext.Provider>
+          {!showLibrary && (
+            <button
+              type="button"
+              aria-label="Mostrar componentes"
+              onClick={() => setShowLibrary(true)}
+              className="absolute left-3 top-3 z-10 inline-flex h-9 items-center gap-1.5 rounded-xl border border-flow-border bg-flow-surface px-3 text-xs font-semibold text-flow-muted-strong shadow-sm transition hover:border-flow-accent/60 hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
+            >
+              <PanelLeftOpen className="h-4 w-4" aria-hidden />
+              Componentes
+            </button>
+          )}
+          {showIssues && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
+          <CanvasStatus container={canvas} count={flow.nodes.length} start={startNode?.position} />
+        </div>
+        {panelNode && (
+          <ConfigPanel
+            key={panelNode.id}
+            node={panelNode}
+            updateData={updateData}
+            onDraft={trackDraft}
+            removeOption={removeOption}
+            onClose={closePanel}
+            onRemove={removePanelNode}
+            onDuplicate={duplicate}
+          />
+        )}
+      </div>
+      <Dialog open={Boolean(importError)} onOpenChange={(open) => { if (!open) setImportError("") }}>
+        <DialogContent className={cn(ui.dialog, "max-w-lg rounded-xl sm:rounded-xl")}>
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="flex items-center justify-center gap-2.5 text-base font-semibold text-flow-fg sm:justify-start">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-danger/15 text-flow-danger">
+                <TriangleAlert className="h-4 w-4" aria-hidden />
+              </span>
+              Não foi possível importar
+            </DialogTitle>
+            <DialogDescription className="text-sm text-flow-muted">O fluxo atual foi mantido. Importe um JSON no formato de Atendimento.</DialogDescription>
+          </DialogHeader>
+          <p role="alert" className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-flow-danger/40 bg-flow-danger/10 p-3 text-sm text-flow-danger">{importError}</p>
+          <DialogFooter>
+            <button type="button" className={ui.primaryButton} onClick={() => setImportError("")}>Entendi</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmReset} onOpenChange={setConfirmReset}>
+        <DialogContent
+          className={cn(ui.dialog, "max-w-md rounded-xl sm:rounded-xl")}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            settingsTrigger.current?.focus()
+          }}
+        >
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-base font-semibold text-flow-fg">Criar novo fluxo</DialogTitle>
+            <DialogDescription className="text-sm text-flow-muted">O fluxo atual será substituído por um fluxo em branco. Para recuperá-lo, use Desfazer.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:space-x-0">
+            <button type="button" className={ui.button} onClick={() => setConfirmReset(false)}>Cancelar</button>
+            <button type="button" className={cn(ui.primaryButton, "bg-flow-danger focus-visible:ring-flow-danger/40")} onClick={confirmNewFlow}>Criar novo fluxo</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }
 
 export default function WorkflowBuilder(props: WorkflowBuilderProps) {
-    return (
-        <ReactFlowProvider>
-            <WorkflowBuilderInner {...props} />
-        </ReactFlowProvider>
-    )
+  return (
+    <ReactFlowProvider>
+      <WorkflowBuilderInner {...props} />
+    </ReactFlowProvider>
+  )
 }

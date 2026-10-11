@@ -1,2267 +1,1046 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect, useCallback, useRef } from "react"
-import { ThemeProvider, useTheme } from "../ThemeContext"
-import ColorPanel from "../ColorPanel"
-import WorkflowBuilder from "./workflow-builder"
-import { useRouter } from "next/navigation"
-import {
-    FiSave,
-    FiPlayCircle,
-    FiPlay,
-    FiDownload,
-    FiSun,
-    FiZoomIn,
-    FiZoomOut,
-    FiMaximize,
-    FiRefreshCw,
-    FiMapPin,
-    FiLayers,
-    FiX,
-    FiMinimize2,
-    FiMaximize2,
-    FiSend,
-    FiCheckCircle,
-    FiXCircle,
-    FiImage,
-    FiCamera,
-    FiFolder,
-    FiTrash2,
-    FiNavigation,
-    FiUpload,
-    FiDroplet,
-    FiGrid,
-    FiZap,
-    FiSidebar,
-} from "react-icons/fi"
-import { BotIcon } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { Avatar } from "@/components/ui/avatar"
-import { motion, AnimatePresence } from "framer-motion"
-import html2canvas from "html2canvas"
-import IntegrationsMenu from "./integrations/IntegrationsMenu"
-import AIWorkflowDialog from "./ai-workflow-dialog"
+import dynamic from "next/dynamic"
+import Link from "next/link"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
+import { Bot, Camera, ImageIcon, Link2, Loader2, Maximize2, Minus, Moon, Palette, Play, Plug, RotateCcw, Search, SendHorizontal, Sparkles, Sun, Workflow, X, type LucideIcon } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/hooks/use-toast"
+import { cn } from "@/lib/utils"
+import { START_TYPE, getCategory, getComponentColor, getComponentLabel } from "@/lib/atendimento/catalog"
+import { behaviorSignature, exportFileName, importFlow, isObject } from "@/lib/atendimento/format"
+import { emptyPreview, replyPreview, startPreview, type PreviewState } from "@/lib/atendimento/simulator"
+import type { AtendimentoFlow } from "@/lib/atendimento/types"
+import { useTheme } from "../ThemeContext"
+import WorkflowBuilder, { type WorkflowActions } from "./workflow-builder"
+import { componentIcon, nodeSummary } from "./nodes/atendimento-node"
+import { ui } from "./ui"
 
-const FlowElegantSidebar = ({ currentGradient, theme }: { currentGradient: any; theme: string }) => {
-    return (
-        <div className="fixed left-0 top-0 h-full z-50 flex items-center pointer-events-none">
-            <div
-                className="h-[80%] w-[3px] rounded-full relative overflow-hidden panel-glow"
-                style={{
-                    background: `linear-gradient(to bottom, ${currentGradient.glow}, transparent, ${currentGradient.glow})`,
-                }}
-            >
-                <div
-                    className="absolute top-[20%] left-1/2 transform -translate-x-1/2 w-2 h-2 rounded-full panel-glow"
-                    style={{
-                        background: theme === "dark" ? currentGradient.glow : "#374151",
-                        boxShadow: theme === "dark" ? `0 0 8px ${currentGradient.glow}` : "0 0 4px rgba(0,0,0,0.3)",
-                    }}
-                />
-                <div
-                    className="absolute top-[50%] left-1/2 transform -translate-x-1/2 w-2 h-2 rounded-full panel-glow"
-                    style={{
-                        background: theme === "dark" ? currentGradient.glow : "#374151",
-                        boxShadow: theme === "dark" ? `0 0 8px ${currentGradient.glow}` : "0 0 4px rgba(0,0,0,0.3)",
-                    }}
-                />
-                <div
-                    className="absolute top-[80%] left-1/2 transform -translate-x-1/2 w-2 h-2 rounded-full panel-glow"
-                    style={{
-                        background: theme === "dark" ? currentGradient.glow : "#374151",
-                        boxShadow: theme === "dark" ? `0 0 8px ${currentGradient.glow}` : "0 0 4px rgba(0,0,0,0.3)",
-                    }}
-                />
+const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
+const IntegrationsMenu = dynamic(() => import("./integrations/IntegrationsMenu"), { ssr: false })
+const ColorPanel = dynamic(() => import("../ColorPanel"), { ssr: false })
 
-                <div
-                    className="absolute top-0 left-0 w-full h-full"
-                    style={{
-                        background:
-                            theme === "dark"
-                                ? `linear-gradient(to bottom, ${currentGradient.primary}, transparent, ${currentGradient.secondary})`
-                                : `linear-gradient(to bottom, #6B7280, transparent, #6B7280)`,
-                        opacity: theme === "dark" ? 0.2 : 0.1,
-                    }}
-                />
-            </div>
-        </div>
-    )
+const warm = (load: () => Promise<unknown>) => () => {
+  void load().catch(() => undefined)
 }
 
-const FlowStatusIndicator = ({ startPosition, mousePosition, componentCount, theme, currentGradient }: any) => {
-    const isDark = theme === "dark"
-    const [isExecuted, setIsExecuted] = useState(false)
+const warmAI = warm(() => import("./ai-workflow-dialog"))
+const warmIntegrations = warm(() => import("./integrations/IntegrationsMenu"))
+const warmColors = warm(() => import("../ColorPanel"))
 
-    useEffect(() => {
-        const executedFlow = localStorage.getItem("executedFlow")
-        setIsExecuted(executedFlow === "true")
-    }, [])
+const WORKFLOW_KEY = "workflow"
+const EXECUTED_KEY = "executedFlow"
+const BACKGROUND_KEY = "flow-background-image"
+const BACKGROUND_VARIABLE = "--flow-background-image"
+const HEADER_HEIGHT = 56
+const BOT_GAP = 16
+const SEARCH_LIMIT = 50
+const IMAGE_TIMEOUT = 15000
 
-    useEffect(() => {
-        const handleStorageChange = () => {
-            const executedFlow = localStorage.getItem("executedFlow")
-            setIsExecuted(executedFlow === "true")
-        }
+const READY_MESSAGE = "Fluxo carregado. Envie qualquer mensagem para iniciar o atendimento."
+const IDLE_MESSAGE = "Nenhuma prévia ativa. Clique em Iniciar prévia para testar o fluxo atual."
+const CHANGED_MESSAGE = "O fluxo foi alterado. Clique em Iniciar prévia para testar a versão atual."
+const INACTIVE_REPLY = "A prévia está inativa. Clique em Iniciar prévia para testar o fluxo atual."
 
-        window.addEventListener("storage", handleStorageChange)
-        const interval = setInterval(handleStorageChange, 1000)
+const ghostButton =
+  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
 
-        return () => {
-            window.removeEventListener("storage", handleStorageChange)
-            clearInterval(interval)
-        }
-    }, [])
+interface StoredWorkflow {
+  raw: string | null
+  executed: boolean
+}
 
-    return (
-        <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex items-center space-x-4 px-4 py-2 rounded-xl text-xs pointer-events-none"
-            style={{
-                background: isDark
-                    ? `linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04))`
-                    : `linear-gradient(135deg, rgba(0, 0, 0, 0.04), rgba(0, 0, 0, 0.02))`,
-                border: isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
-                color: isDark ? "#e4e4e7" : "#52525b",
-                fontFamily: "system-ui, -apple-system, sans-serif",
-            }}
+interface SearchItem {
+  id: string
+  label: string
+  detail: string
+  color: string
+  icon: LucideIcon
+  text: string
+}
+
+interface BotMessage {
+  id: string
+  role: "user" | "assistant"
+  content: string
+}
+
+const normalizeText = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+
+const cssUrl = (url: string) => `url("${url.replace(/["\\\n\r\f]/g, (character) => `\\${character.charCodeAt(0).toString(16)} `)}")`
+
+function setBackgroundVariable(url: string | null) {
+  const root = document.documentElement
+  if (url) root.style.setProperty(BACKGROUND_VARIABLE, cssUrl(url))
+  else root.style.removeProperty(BACKGROUND_VARIABLE)
+}
+
+function imageUrlFrom(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (/^data:image\/[\w.+-]+[;,]/i.test(trimmed)) return trimmed
+  const relative = trimmed.startsWith("/")
+  const candidate = relative || /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  try {
+    const parsed = new URL(candidate, window.location.href)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+    return relative ? trimmed : parsed.href
+  } catch {
+    return null
+  }
+}
+
+function loadImage(url: string) {
+  return new Promise<void>((resolve, reject) => {
+    const image = new Image()
+    const timer = window.setTimeout(() => reject(new Error("timeout")), IMAGE_TIMEOUT)
+    image.onload = () => {
+      window.clearTimeout(timer)
+      resolve()
+    }
+    image.onerror = () => {
+      window.clearTimeout(timer)
+      reject(new Error("error"))
+    }
+    image.src = url
+  })
+}
+
+function readStoredWorkflow(): StoredWorkflow {
+  try {
+    return { raw: localStorage.getItem(WORKFLOW_KEY), executed: localStorage.getItem(EXECUTED_KEY) === "true" }
+  } catch {
+    return { raw: null, executed: false }
+  }
+}
+
+function parseFlow(input: unknown): AtendimentoFlow | null {
+  try {
+    return importFlow(input)
+  } catch {
+    return null
+  }
+}
+
+function loadExecutedFlow(): AtendimentoFlow | null {
+  const stored = readStoredWorkflow()
+  return stored.executed && stored.raw ? parseFlow(stored.raw) : null
+}
+
+function storedFlowName(): string {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(WORKFLOW_KEY) || "null")
+    return isObject(parsed) && typeof parsed.name === "string" ? parsed.name : ""
+  } catch {
+    return ""
+  }
+}
+
+function solidBackground(element: Element): string | null {
+  const color = getComputedStyle(element).backgroundColor
+  return color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)" ? color : null
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function searchItems(raw: string | null): SearchItem[] {
+  const flow = raw ? parseFlow(raw) : null
+  if (!flow) return []
+  return flow.nodes.map((node) => {
+    const type = node.data.type
+    const label = getComponentLabel(type)
+    const summary = type === START_TYPE ? "Início do atendimento" : nodeSummary(node.data)
+    return {
+      id: node.id,
+      label,
+      detail: summary || getCategory(type)?.label || type,
+      color: getComponentColor(type),
+      icon: componentIcon(type),
+      text: normalizeText(`${node.id} ${label} ${type} ${summary}`),
+    }
+  })
+}
+
+function filterItems(items: SearchItem[], query: string): SearchItem[] {
+  const term = normalizeText(query.trim())
+  if (!term) return items
+  const exact = items.filter((item) => normalizeText(item.id) === term)
+  const partial = items.filter((item) => normalizeText(item.id) !== term && item.text.includes(term))
+  return [...exact, ...partial]
+}
+
+function useStoredWorkflow(): StoredWorkflow {
+  const [stored, setStored] = useState<StoredWorkflow>(readStoredWorkflow)
+
+  useEffect(() => {
+    const sync = () => {
+      const next = readStoredWorkflow()
+      setStored((current) => (current.raw === next.raw && current.executed === next.executed ? current : next))
+    }
+    sync()
+    window.addEventListener("storage", sync)
+    window.addEventListener("workflow:executed", sync)
+    return () => {
+      window.removeEventListener("storage", sync)
+      window.removeEventListener("workflow:executed", sync)
+    }
+  }, [])
+
+  return stored
+}
+
+function HeaderSearch({ raw, onSearch }: { raw: string | null; onSearch: (query: string) => void }) {
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listId = useId()
+  const items = useMemo(() => (open ? searchItems(raw) : []), [open, raw])
+  const matches = useMemo(() => filterItems(items, query), [items, query])
+  const results = matches.length > SEARCH_LIMIT ? matches.slice(0, SEARCH_LIMIT) : matches
+  const activeIndex = results.length ? Math.min(active, results.length - 1) : -1
+  const expanded = open && results.length > 0
+  const optionId = useCallback((index: number) => `${listId}-option-${index}`, [listId])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "k") return
+      const input = inputRef.current
+      if (!input || input.closest('[aria-hidden="true"], [inert]')) return
+      event.preventDefault()
+      input.focus()
+      input.select()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
+  useEffect(() => {
+    if (!expanded || activeIndex < 0) return
+    document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" })
+  }, [activeIndex, expanded, optionId])
+
+  const choose = (item: SearchItem) => {
+    setOpen(false)
+    inputRef.current?.blur()
+    onSearch(item.id)
+  }
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (expanded && activeIndex >= 0) {
+      choose(results[activeIndex])
+      return
+    }
+    if (!query.trim()) return
+    setOpen(false)
+    onSearch(query)
+  }
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      if (!open) {
+        setOpen(true)
+        setActive(0)
+        return
+      }
+      if (!results.length) return
+      const step = event.key === "ArrowDown" ? 1 : -1
+      setActive((activeIndex + step + results.length) % results.length)
+      return
+    }
+    if (event.key === "Escape") {
+      if (open) {
+        event.preventDefault()
+        setOpen(false)
+      } else if (query) {
+        event.preventDefault()
+        setQuery("")
+      }
+      return
+    }
+    if (event.key === "Tab") setOpen(false)
+  }
+
+  const announcement = !open ? "" : matches.length ? `${matches.length} ${matches.length === 1 ? "componente encontrado" : "componentes encontrados"}` : "Nenhum componente encontrado"
+
+  return (
+    <form role="search" onSubmit={submit} className="relative w-full max-w-md">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-flow-muted" aria-hidden />
+      <input
+        ref={inputRef}
+        type="text"
+        role="combobox"
+        value={query}
+        placeholder="Buscar componente…"
+        aria-label="Buscar componente no fluxo"
+        aria-autocomplete="list"
+        aria-expanded={expanded}
+        aria-controls={expanded ? listId : undefined}
+        aria-activedescendant={expanded && activeIndex >= 0 ? optionId(activeIndex) : undefined}
+        autoComplete="off"
+        spellCheck={false}
+        enterKeyHint="search"
+        onChange={(event) => {
+          setQuery(event.target.value)
+          setActive(0)
+          setOpen(Boolean(event.target.value.trim()))
+        }}
+        onFocus={() => {
+          if (query.trim()) setOpen(true)
+        }}
+        onBlur={() => setOpen(false)}
+        onKeyDown={handleKeyDown}
+        className={cn(ui.input, "pl-9", query ? "pr-9" : "md:pr-16")}
+      />
+      {query ? (
+        <button
+          type="button"
+          aria-label="Limpar busca"
+          title="Limpar busca"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setQuery("")
+            setOpen(false)
+            inputRef.current?.focus()
+          }}
+          className={cn(ghostButton, "absolute right-1 top-1/2 -translate-y-1/2")}
         >
-            <div className="flex items-center space-x-2">
-                <motion.div
-                    animate={{
-                        scale: isExecuted ? [1, 1.1, 1] : 1,
+          <X className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      ) : (
+        <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-flow-border bg-flow-soft px-1.5 py-0.5 font-sans text-[10px] font-semibold text-flow-muted md:block">
+          Ctrl K
+        </kbd>
+      )}
+      {open && (
+        <div onMouseDown={(event) => event.preventDefault()} className="absolute inset-x-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-flow-border bg-flow-surface shadow-lg">
+          {results.length ? (
+            <ul id={listId} role="listbox" aria-label="Componentes encontrados" className="max-h-80 overflow-y-auto py-1">
+              {results.map((item, index) => {
+                const Icon = item.icon
+                const selected = index === activeIndex
+                return (
+                  <li
+                    key={item.id}
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={selected}
+                    onMouseMove={() => {
+                      if (!selected) setActive(index)
                     }}
-                    transition={{ duration: 2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
-                >
-                    {isExecuted ? (
-                        <FiCheckCircle
-                            className="h-3.5 w-3.5 text-emerald-500"
-                            style={{
-                                filter: `drop-shadow(0 0 4px rgba(16, 185, 129, 0.6))`,
-                            }}
-                        />
-                    ) : (
-                        <FiXCircle
-                            className="h-3.5 w-3.5 text-rose-500"
-                            style={{
-                                filter: `drop-shadow(0 0 4px rgba(244, 63, 94, 0.6))`,
-                            }}
-                        />
-                    )}
-                </motion.div>
-                <span className="font-medium">{isExecuted ? "Ativo" : "Inativo"}</span>
-            </div>
-
-            <div
-                className="w-px h-4"
-                style={{
-                    background: isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)",
-                }}
-            />
-
-            <div className="flex items-center space-x-2">
-                <FiMapPin
-                    className="h-3.5 w-3.5"
-                    style={{
-                        color: currentGradient.glow,
-                        filter: `drop-shadow(0 0 4px ${currentGradient.glow}60)`,
-                    }}
-                />
-                <span className="font-mono text-xs">
-          START ({Math.round(startPosition.x)}, {Math.round(startPosition.y)})
-        </span>
-            </div>
-
-            <div
-                className="w-px h-4"
-                style={{
-                    background: isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)",
-                }}
-            />
-
-            <div className="flex items-center space-x-2">
-                <FiNavigation
-                    className="h-3.5 w-3.5"
-                    style={{
-                        color: currentGradient.glow,
-                        filter: `drop-shadow(0 0 4px ${currentGradient.glow}60)`,
-                    }}
-                />
-                <span className="font-mono text-xs">
-          Mouse ({Math.round(mousePosition.x)}, {Math.round(mousePosition.y)})
-        </span>
-            </div>
-
-            <div
-                className="w-px h-4"
-                style={{
-                    background: isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)",
-                }}
-            />
-
-            <div className="flex items-center space-x-2">
-                <FiLayers
-                    className="h-3.5 w-3.5"
-                    style={{
-                        color: currentGradient.glow,
-                        filter: `drop-shadow(0 0 4px ${currentGradient.glow}60)`,
-                    }}
-                />
-                <span className="font-medium">{componentCount} Componentes</span>
-            </div>
-        </motion.div>
-    )
-}
-
-const YenFlowBot = ({
-                        isOpen,
-                        onClose,
-                    }: {
-    isOpen: boolean
-    onClose: () => void
-}) => {
-    const [messages, setMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string }>>([])
-    const [input, setInput] = useState("")
-    const [currentNodeId, setCurrentNodeId] = useState<string | null>(null)
-    const [isMinimized, setIsMinimized] = useState(false)
-    const [position, setPosition] = useState({ x: 0, y: 0 })
-    const [isDragging, setIsDragging] = useState(false)
-    const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
-    const [savedFlow, setSavedFlow] = useState<{ nodes: any[]; edges: any[] } | null>(null)
-    const [isFlowExecuted, setIsFlowExecuted] = useState(false)
-    const [waitingForUserInput, setWaitingForUserInput] = useState(false)
-    const [currentOptions, setCurrentOptions] = useState<any[]>([])
-    const [currentOptionsMessage, setCurrentOptionsMessage] = useState("")
-    const messagesEndRef = useRef<HTMLDivElement>(null)
-
-    const { theme, currentGradient } = useTheme()
-
-    useEffect(() => {
-        if (isOpen) {
-            const savedWorkflow = localStorage.getItem("workflow")
-            const executedFlow = localStorage.getItem("executedFlow")
-
-            if (savedWorkflow && executedFlow === "true") {
-                try {
-                    const workflow = JSON.parse(savedWorkflow)
-                    setSavedFlow(workflow)
-                    setIsFlowExecuted(true)
-
-                    setMessages([
-                        {
-                            id: "welcome",
-                            role: "assistant",
-                            content: "Olá! Fluxo carregado e pronto para uso. Digite qualquer coisa para começar!",
-                        },
-                    ])
-                } catch (error) {
-                    console.error("Erro ao carregar fluxo:", error)
-                    setMessages([
-                        {
-                            id: "error",
-                            role: "assistant",
-                            content: "Erro ao carregar o fluxo. Por favor, execute o fluxo novamente.",
-                        },
-                    ])
-                }
-            } else {
-                setMessages([
-                    {
-                        id: "no-flow",
-                        role: "assistant",
-                        content:
-                            "Nenhum fluxo foi executado ainda. Por favor, crie um fluxo, salve e execute para que eu possa funcionar.",
-                    },
-                ])
-            }
-        }
-    }, [isOpen])
-
-    useEffect(() => {
-        const handleStorageChange = () => {
-            if (isOpen) {
-                const savedWorkflow = localStorage.getItem("workflow")
-                const executedFlow = localStorage.getItem("executedFlow")
-
-                if (savedWorkflow && executedFlow === "true") {
-                    try {
-                        const workflow = JSON.parse(savedWorkflow)
-                        setSavedFlow(workflow)
-                        setIsFlowExecuted(true)
-                    } catch (error) {
-                        console.error("Erro ao recarregar fluxo:", error)
-                    }
-                } else {
-                    setSavedFlow(null)
-                    setIsFlowExecuted(false)
-                }
-            }
-        }
-
-        window.addEventListener("storage", handleStorageChange)
-        return () => window.removeEventListener("storage", handleStorageChange)
-    }, [isOpen])
-
-    useEffect(() => {
-        if (messagesEndRef.current) {
-            messagesEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" })
-        }
-    }, [messages])
-
-    const findNextNode = (currentNodeId: string, optionIndex?: number) => {
-        if (!savedFlow) return null
-
-        const edges = savedFlow.edges
-        let targetEdge
-
-        if (optionIndex !== undefined) {
-            const nodeEdges = edges.filter((edge: any) => edge.source === currentNodeId)
-            targetEdge = nodeEdges[optionIndex]
-        } else {
-            targetEdge = edges.find((edge: any) => edge.source === currentNodeId)
-        }
-
-        if (targetEdge) {
-            return savedFlow.nodes.find((node: any) => node.id === targetEdge.target)
-        }
-
-        return null
-    }
-
-    const processNode = (node: any) => {
-        setCurrentNodeId(node.id)
-
-        if (node.type === "sendMessage") {
-            const message = node.data.message || "Mensagem não configurada"
-            setMessages((prev) => [
-                ...prev,
-                {
-                    id: Date.now().toString(),
-                    role: "assistant",
-                    content: message,
-                },
-            ])
-
-            setTimeout(() => {
-                const nextNode = findNextNode(node.id)
-                if (nextNode) {
-                    processNode(nextNode)
-                } else {
-                    setWaitingForUserInput(false)
-                    setCurrentNodeId(null)
-                }
-            }, 1000)
-        } else if (node.type === "options") {
-            const message = node.data.message || "Escolha uma opção:"
-            const options = node.data.options || []
-
-            setCurrentOptions(options)
-            setCurrentOptionsMessage(message)
-
-            let optionsText = message + "\n\n"
-            options.forEach((option: any, index: number) => {
-                optionsText += `${index + 1}. ${option.text}\n`
-            })
-
-            setMessages((prev) => [
-                ...prev,
-                {
-                    id: Date.now().toString(),
-                    role: "assistant",
-                    content: optionsText,
-                },
-            ])
-
-            setWaitingForUserInput(true)
-        } else if (node.type === "finalizar") {
-            const message = node.data.message || "Conversa finalizada. Obrigado!"
-            setMessages((prev) => [
-                ...prev,
-                {
-                    id: Date.now().toString(),
-                    role: "assistant",
-                    content: message,
-                },
-            ])
-            setCurrentNodeId(null)
-            setWaitingForUserInput(false)
-        }
-    }
-
-    const startFlow = () => {
-        if (!savedFlow) return
-
-        const startNode = savedFlow.nodes.find((node: any) => node.id === "start-node")
-        if (startNode) {
-            const firstNode = findNextNode("start-node")
-            if (firstNode) {
-                processNode(firstNode)
-            }
-        }
-    }
-
-    const repeatOptions = () => {
-        if (currentOptions.length > 0) {
-            let optionsText = currentOptionsMessage + "\n\n"
-            currentOptions.forEach((option: any, index: number) => {
-                optionsText += `${index + 1}. ${option.text}\n`
-            })
-
-            setMessages((prev) => [
-                ...prev,
-                {
-                    id: Date.now().toString(),
-                    role: "assistant",
-                    content: "Não consegui identificar essa opção. Por favor, tente novamente.\n\n" + optionsText,
-                },
-            ])
-        }
-    }
-
-    const handleSendMessage = () => {
-        if (!input.trim()) return
-
-        setMessages((prev) => [
-            ...prev,
-            {
-                id: Date.now().toString(),
-                role: "user",
-                content: input,
-            },
-        ])
-
-        const userInput = input.trim()
-        setInput("")
-
-        if (!isFlowExecuted || !savedFlow) {
-            setTimeout(() => {
-                setMessages((prev) => [
-                    ...prev,
-                    {
-                        id: Date.now().toString(),
-                        role: "assistant",
-                        content: "Por favor, execute um fluxo primeiro para que eu possa funcionar.",
-                    },
-                ])
-            }, 500)
-            return
-        }
-
-        if (!currentNodeId && !waitingForUserInput) {
-            setTimeout(() => {
-                startFlow()
-            }, 500)
-            return
-        }
-
-        if (waitingForUserInput && currentNodeId) {
-            const currentNode = savedFlow.nodes.find((node: any) => node.id === currentNodeId)
-
-            if (currentNode && currentNode.type === "options") {
-                const options = currentNode.data.options || []
-                const optionIndex = Number.parseInt(userInput) - 1
-
-                if (optionIndex >= 0 && optionIndex < options.length) {
-                    setWaitingForUserInput(false)
-                    setTimeout(() => {
-                        const nextNode = findNextNode(currentNodeId, optionIndex)
-                        if (nextNode) {
-                            processNode(nextNode)
-                        } else {
-                            setMessages((prev) => [
-                                ...prev,
-                                {
-                                    id: Date.now().toString(),
-                                    role: "assistant",
-                                    content: "Fim do fluxo. Obrigado!",
-                                },
-                            ])
-                            setCurrentNodeId(null)
-                        }
-                    }, 500)
-                } else {
-                    setTimeout(() => {
-                        repeatOptions()
-                    }, 500)
-                }
-            }
-        }
-    }
-
-    const handleMouseDown = (e: React.MouseEvent) => {
-        const target = e.target as HTMLElement
-        if (target.closest("button") && !target.closest(".drag-handle")) {
-            return
-        }
-
-        setIsDragging(true)
-        setDragStart({
-            x: e.clientX - position.x,
-            y: e.clientY - position.y,
-        })
-    }
-
-    const handleMouseMove = (e: MouseEvent) => {
-        if (!isDragging) return
-
-        const newX = e.clientX - dragStart.x
-        const newY = e.clientY - dragStart.y
-
-        const maxX = window.innerWidth - 384
-        const maxY = window.innerHeight - 500
-
-        setPosition({
-            x: Math.max(0, Math.min(newX, maxX)),
-            y: Math.max(0, Math.min(newY, maxY)),
-        })
-    }
-
-    const handleMouseUp = () => {
-        setIsDragging(false)
-    }
-
-    useEffect(() => {
-        if (isDragging) {
-            document.addEventListener("mousemove", handleMouseMove)
-            document.addEventListener("mouseup", handleMouseUp)
-            document.body.style.userSelect = "none"
-        } else {
-            document.body.style.userSelect = ""
-        }
-
-        return () => {
-            document.removeEventListener("mousemove", handleMouseMove)
-            document.removeEventListener("mouseup", handleMouseUp)
-            document.body.style.userSelect = ""
-        }
-    }, [isDragging, dragStart])
-
-    if (!isOpen) return null
-
-    const chatStyle = {
-        right: `${24 + position.x}px`,
-        bottom: `${24 + position.y}px`,
-        cursor: isDragging ? "grabbing" : "grab",
-    }
-
-    const isDark = theme === "dark"
-
-    return (
-        <AnimatePresence>
-            <motion.div
-                initial={{ opacity: 0, y: 20, height: "auto" }}
-                animate={{
-                    opacity: 1,
-                    y: 0,
-                    height: isMinimized ? "60px" : "500px",
-                }}
-                exit={{ opacity: 0, y: 20 }}
-                transition={{ duration: 0.3 }}
-                className="fixed w-full max-w-sm rounded-xl shadow-2xl overflow-hidden z-50"
-                style={{
-                    ...chatStyle,
-                    background: isDark
-                        ? `linear-gradient(135deg, rgba(9,9,11,0.98) 0%, rgba(24,24,27,0.98) 100%)`
-                        : `linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(250,250,250,0.98) 100%)`,
-                    backdropFilter: "blur(20px)",
-                    border: isDark ? `1px solid rgba(139,92,246,0.3)` : `1px solid rgba(192,132,252,0.3)`,
-                    boxShadow: isDark
-                        ? `0 20px 40px -12px rgba(0, 0, 0, 0.5),
-             0 0 0 1px rgba(139,92,246,0.2),
-             inset 0 1px 0 rgba(255, 255, 255, 0.05)`
-                        : `0 20px 40px -12px rgba(0, 0, 0, 0.15),
-             0 0 0 1px rgba(192,132,252,0.2),
-             inset 0 1px 0 rgba(255, 255, 255, 0.8)`,
-                }}
-            >
-                <div
-                    className="absolute inset-0 opacity-10 rounded-xl"
-                    style={{
-                        backgroundImage: isDark
-                            ? `radial-gradient(circle at 20% 30%, rgba(139,92,246,0.3) 0%, transparent 50%),
-               radial-gradient(circle at 80% 70%, rgba(217,70,239,0.2) 0%, transparent 50%)`
-                            : `radial-gradient(circle at 20% 30%, rgba(192,132,252,0.2) 0%, transparent 50%),
-               radial-gradient(circle at 80% 70%, rgba(232,121,249,0.15) 0%, transparent 50%)`,
-                    }}
-                />
-
-                <div
-                    className="relative z-10 p-3 flex items-center justify-between border-b drag-handle"
-                    style={{
-                        background: isDark
-                            ? `linear-gradient(135deg, rgba(139,92,246,0.15), rgba(217,70,239,0.1))`
-                            : `linear-gradient(135deg, rgba(192,132,252,0.1), rgba(232,121,249,0.08))`,
-                        borderColor: isDark ? `rgba(139,92,246,0.2)` : `rgba(192,132,252,0.2)`,
-                        boxShadow: "none",
-                    }}
-                >
-                    <div className="flex items-center space-x-3">
-                        <Avatar
-                            className="h-10 w-10"
-                            style={{
-                                background: isDark
-                                    ? `linear-gradient(135deg, ${currentGradient.primary}50, ${currentGradient.secondary}50)`
-                                    : `linear-gradient(135deg, ${currentGradient.primary}60, ${currentGradient.secondary}60)`,
-                                boxShadow: isDark ? `0 0 20px ${currentGradient.glow}40` : `0 0 20px ${currentGradient.glow}30`,
-                                border: isDark ? `1px solid ${currentGradient.glow}60` : `1px solid ${currentGradient.glow}50`,
-                            }}
-                        >
-                            <div className="flex items-center justify-center h-full w-full">
-                                <BotIcon className="h-6 w-6" style={{ color: isDark ? "#ffffff" : currentGradient.primary }} />
-                            </div>
-                        </Avatar>
-                        <div>
-                            <h3
-                                className="text-base font-bold"
-                                style={{
-                                    color: isDark ? "#f4f4f5" : "#18181b",
-                                    textShadow: "none",
-                                }}
-                            >
-                                ¥$
-                            </h3>
-                            <p
-                                className="text-xs"
-                                style={{
-                                    color: isDark ? "#a1a1aa" : "#71717a",
-                                    textShadow: "none",
-                                }}
-                            >
-                                Assistente by Lucas Lima
-                            </p>
-                        </div>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                        {isMinimized ? (
-                            <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={() => setIsMinimized(false)}
-                                className="h-8 w-8 rounded-full flex items-center justify-center"
-                                style={{
-                                    color: isDark ? currentGradient.glow : currentGradient.primary,
-                                    filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
-                                }}
-                            >
-                                <FiMaximize2 className="h-5 w-5" />
-                            </motion.button>
-                        ) : (
-                            <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={() => setIsMinimized(true)}
-                                className="h-8 w-8 rounded-full flex items-center justify-center"
-                                style={{
-                                    color: isDark ? currentGradient.glow : currentGradient.primary,
-                                    filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
-                                }}
-                            >
-                                <FiMinimize2 className="h-5 w-5" />
-                            </motion.button>
-                        )}
-                        <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={onClose}
-                            className="h-8 w-8 rounded-full flex items-center justify-center"
-                            style={{
-                                color: isDark ? currentGradient.glow : currentGradient.primary,
-                                filter: `drop-shadow(0 0 6px ${currentGradient.glow})`,
-                            }}
-                        >
-                            <FiX className="h-5 w-5" />
-                        </motion.button>
-                    </div>
-                </div>
-
-                {!isMinimized && (
-                    <>
-                        <div
-                            className="p-4 h-[360px] overflow-y-auto relative z-10"
-                            style={{
-                                background: isDark
-                                    ? `linear-gradient(135deg, rgba(0,0,0,0.6) 0%, ${currentGradient.primary}08 50%, rgba(0,0,0,0.6) 100%)`
-                                    : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.95) 100%)`,
-                                backdropFilter: "blur(10px)",
-                            }}
-                        >
-                            {messages.map((message) => (
-                                <div
-                                    key={message.id}
-                                    className={`mb-4 ${message.role === "user" ? "flex justify-end" : "flex justify-start"}`}
-                                >
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: 0.2 }}
-                                        className={`max-w-[80%] p-4 rounded-xl whitespace-pre-line relative overflow-hidden`}
-                                        style={{
-                                            background:
-                                                message.role === "user"
-                                                    ? `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`
-                                                    : isDark
-                                                        ? `linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%)`
-                                                        : `linear-gradient(135deg, rgba(0,0,0,0.04) 0%, rgba(0,0,0,0.02) 100%)`,
-                                            color: message.role === "user" ? "#ffffff" : isDark ? "#f9fafb" : "#181818",
-                                            border:
-                                                message.role === "user"
-                                                    ? `1px solid ${currentGradient.glow}60`
-                                                    : isDark
-                                                        ? `1px solid rgba(255,255,255,0.1)`
-                                                        : `1px solid rgba(0,0,0,0.08)`,
-                                            boxShadow:
-                                                message.role === "user"
-                                                    ? `0 4px 15px ${currentGradient.glow}40, 0 0 20px ${currentGradient.glow}20`
-                                                    : isDark
-                                                        ? `0 2px 8px rgba(0,0,0,0.2)`
-                                                        : `0 2px 8px rgba(0,0,0,0.08)`,
-                                            backdropFilter: "blur(10px)",
-                                            fontWeight: message.role === "user" ? "500" : "400",
-                                        }}
-                                        whileHover={{
-                                            scale: 1.02,
-                                            boxShadow:
-                                                message.role === "user"
-                                                    ? `0 6px 20px ${currentGradient.glow}50, 0 0 30px ${currentGradient.glow}30`
-                                                    : isDark
-                                                        ? `0 4px 12px rgba(0,0,0,0.3)`
-                                                        : `0 4px 12px rgba(0,0,0,0.12)`,
-                                        }}
-                                    >
-                                        <p className={`text-sm leading-relaxed ${message.role === "user" ? "font-semibold" : ""}`}>
-                                            {message.content}
-                                        </p>
-                                    </motion.div>
-                                </div>
-                            ))}
-                            <div ref={messagesEndRef} />
-                        </div>
-
-                        <form
-                            onSubmit={(e) => {
-                                e.preventDefault()
-                                handleSendMessage()
-                            }}
-                            className="p-3 border-t relative z-10"
-                            style={{
-                                background: isDark
-                                    ? `linear-gradient(135deg, rgba(0,0,0,0.6) 0%, ${currentGradient.primary}08 50%, rgba(0,0,0,0.6) 100%)`
-                                    : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${currentGradient.primary}05 50%, rgba(255,255,255,0.95) 100%)`,
-                                borderColor: isDark ? `${currentGradient.glow}20` : `${currentGradient.primary}15`,
-                                backdropFilter: "blur(10px)",
-                            }}
-                        >
-                            <div className="flex items-center space-x-2">
-                                <input
-                                    type="text"
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    placeholder="Digite sua mensagem..."
-                                    className="flex-1 rounded-full px-4 py-3 text-sm transition-all duration-300"
-                                    style={{
-                                        background: isDark
-                                            ? `linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`
-                                            : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.95) 100%)`,
-                                        border: isDark ? `1px solid rgba(255,255,255,0.1)` : `1px solid rgba(0,0,0,0.08)`,
-                                        color: isDark ? "#f9fafb" : "#111827",
-                                        boxShadow: isDark ? `0 2px 8px rgba(0,0,0,0.2)` : `0 2px 8px rgba(0,0,0,0.08)`,
-                                        backdropFilter: "blur(10px)",
-                                    }}
-                                />
-                                <motion.button
-                                    type="submit"
-                                    disabled={!input.trim()}
-                                    className="rounded-full w-12 h-12 flex items-center justify-center transition-all duration-300"
-                                    style={{
-                                        background: `linear-gradient(135deg, ${currentGradient.primary}, ${currentGradient.secondary})`,
-                                        border: `1px solid ${currentGradient.glow}60`,
-                                        boxShadow: `0 4px 15px ${currentGradient.glow}40, 0 0 20px ${currentGradient.glow}20`,
-                                    }}
-                                    whileHover={{
-                                        scale: 1.05,
-                                        boxShadow: `0 6px 20px ${currentGradient.glow}50, 0 0 30px ${currentGradient.glow}30`,
-                                    }}
-                                    whileTap={{ scale: 0.95 }}
-                                >
-                                    <FiSend className="h-5 w-5 text-white" />
-                                </motion.button>
-                            </div>
-                        </form>
-                    </>
-                )}
-            </motion.div>
-        </AnimatePresence>
-    )
-}
-
-const ImageMenu = ({ isOpen, onClose, onChangeBackground, onSaveImage, onResetBackground, theme }: any) => {
-    const { currentGradient } = useTheme()
-    const isDark = theme === "dark"
-    const primaryColor = currentGradient?.primary || "#000000"
-    const secondaryColor = currentGradient?.secondary || "#000000"
-    const accentColor = currentGradient?.accent || "#000000"
-    const glowColor = currentGradient?.glow || "#000000"
-
-    return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent
-                className="sm:max-w-[420px] p-0 bg-transparent border-0"
-                style={{
-                    background: "transparent",
-                    border: "none",
-                    boxShadow: "none",
-                }}
-            >
-                <div
-                    className="relative rounded-2xl overflow-hidden"
-                    style={{
-                        background: isDark
-                            ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${primaryColor}15 50%, rgba(0,0,0,0.95) 100%)`
-                            : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${primaryColor}10 50%, rgba(255,255,255,0.95) 100%)`,
-                        border: isDark ? `1px solid ${glowColor}40` : `1px solid ${primaryColor}30`,
-                        boxShadow: isDark
-                            ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 40px ${glowColor}30`
-                            : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 40px ${primaryColor}20`,
-                        backdropFilter: "blur(20px)",
-                    }}
-                >
-                    <div
-                        className="absolute inset-0 opacity-20 rounded-2xl"
-                        style={{
-                            backgroundImage: isDark
-                                ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%),
-                 radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
-                                : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%),
-                 radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
-                 radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
-                        }}
-                    />
-
-                    <DialogHeader
-                        className="relative z-10 p-5 border-b"
-                        style={{ borderColor: isDark ? `${glowColor}30` : `${primaryColor}20` }}
-                    >
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div
-                                    className="p-3 rounded-xl"
-                                    style={{
-                                        background: isDark
-                                            ? `linear-gradient(135deg, ${primaryColor}40, ${secondaryColor}40)`
-                                            : `linear-gradient(135deg, ${primaryColor}30, ${secondaryColor}30)`,
-                                        boxShadow: `0 8px 20px ${glowColor}40`,
-                                    }}
-                                >
-                                    <FiImage
-                                        className="w-6 h-6"
-                                        style={{
-                                            color: isDark ? "#ffffff" : primaryColor,
-                                            filter: `drop-shadow(0 0 8px ${glowColor}60)`,
-                                        }}
-                                    />
-                                </div>
-                                <div>
-                                    <DialogTitle
-                                        className="text-xl font-bold mb-1"
-                                        style={{
-                                            color: isDark ? "#ffffff" : "#111827",
-                                            textShadow: isDark ? `0 0 15px ${glowColor}60` : `0 0 8px ${primaryColor}40`,
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Opções de Imagem
-                                    </DialogTitle>
-                                    <DialogDescription
-                                        className="text-sm"
-                                        style={{
-                                            color: isDark ? "#d1d5db" : "#6b7280",
-                                            textShadow: isDark ? `0 0 5px ${glowColor}30` : "none",
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Personalize a aparência do seu fluxo de trabalho
-                                    </DialogDescription>
-                                </div>
-                            </div>
-                            <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={onClose}
-                                className="p-2 rounded-xl transition-colors"
-                                style={{
-                                    background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                    color: isDark ? "#d1d5db" : "#6b7280",
-                                }}
-                            >
-                                <FiX className="w-5 h-5" />
-                            </motion.button>
-                        </div>
-                    </DialogHeader>
-
-                    <div className="relative z-10 p-5 space-y-4">
-                        <motion.button
-                            whileHover={{ scale: 1.02, x: 4 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={onChangeBackground}
-                            className="w-full flex items-center gap-4 p-4 rounded-xl transition-all duration-200"
-                            style={{
-                                background: isDark
-                                    ? `linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))`
-                                    : `linear-gradient(135deg, rgba(0,0,0,0.04), rgba(0,0,0,0.02))`,
-                                border: isDark ? `1px solid ${glowColor}30` : `1px solid ${primaryColor}20`,
-                                boxShadow: `0 4px 15px ${glowColor}20`,
-                            }}
-                        >
-                            <div
-                                className="p-3 rounded-xl"
-                                style={{
-                                    background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                }}
-                            >
-                                <FiFolder className="w-6 h-6" style={{ color: isDark ? "#d1d5db" : "#6b7280" }} />
-                            </div>
-                            <div className="flex-1 text-left">
-                                <div
-                                    className="font-semibold text-base mb-1"
-                                    style={{
-                                        color: isDark ? "#ffffff" : "#111827",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
-                                >
-                                    Alterar Background
-                                </div>
-                                <div
-                                    className="text-sm"
-                                    style={{
-                                        color: isDark ? "#a1a1aa" : "#71717a",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
-                                >
-                                    Escolher nova imagem de fundo do fluxo
-                                </div>
-                            </div>
-                        </motion.button>
-
-                        <motion.button
-                            whileHover={{ scale: 1.02, x: 4 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={onResetBackground}
-                            className="w-full flex items-center gap-4 p-4 rounded-xl transition-all duration-200"
-                            style={{
-                                background: "rgba(239, 68, 68, 0.1)",
-                                border: "1px solid rgba(239, 68, 68, 0.3)",
-                                boxShadow: "0 4px 15px rgba(239, 68, 68, 0.2)",
-                            }}
-                        >
-                            <div
-                                className="p-3 rounded-xl"
-                                style={{
-                                    background: "rgba(239, 68, 68, 0.2)",
-                                }}
-                            >
-                                <FiTrash2 className="w-6 h-6 text-red-400" />
-                            </div>
-                            <div className="flex-1 text-left">
-                                <div
-                                    className="font-semibold text-base mb-1"
-                                    style={{
-                                        color: isDark ? "#ffffff" : "#111827",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
-                                >
-                                    Resetar Background
-                                </div>
-                                <div
-                                    className="text-sm"
-                                    style={{
-                                        color: isDark ? "#a1a1aa" : "#71717a",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
-                                >
-                                    Remover imagem de fundo e voltar ao padrão
-                                </div>
-                            </div>
-                        </motion.button>
-
-                        <motion.button
-                            whileHover={{ scale: 1.02, x: 4 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={onSaveImage}
-                            className="w-full flex items-center gap-4 p-4 rounded-xl transition-all duration-200"
-                            style={{
-                                background: "rgba(34, 197, 94, 0.1)",
-                                border: "1px solid rgba(34, 197, 94, 0.3)",
-                                boxShadow: "0 4px 15px rgba(34, 197, 94, 0.2)",
-                            }}
-                        >
-                            <div
-                                className="p-3 rounded-xl"
-                                style={{
-                                    background: "rgba(34, 197, 94, 0.2)",
-                                }}
-                            >
-                                <FiCamera className="w-6 h-6 text-green-400" />
-                            </div>
-                            <div className="flex-1 text-left">
-                                <div
-                                    className="font-semibold text-base mb-1"
-                                    style={{
-                                        color: isDark ? "#ffffff" : "#111827",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
-                                >
-                                    Salvar Imagem
-                                </div>
-                                <div
-                                    className="text-sm"
-                                    style={{
-                                        color: isDark ? "#a1a1aa" : "#71717a",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
-                                >
-                                    Capturar screenshot do fluxo atual
-                                </div>
-                            </div>
-                        </motion.button>
-                    </div>
-
-                    <div
-                        className="relative z-10 flex justify-end p-5 border-t"
-                        style={{
-                            borderColor: isDark ? `${glowColor}30` : `${primaryColor}20`,
-                        }}
-                    >
-                        <motion.button
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={onClose}
-                            className="px-6 py-2 text-sm font-medium rounded-lg transition-colors"
-                            style={{
-                                background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                color: isDark ? "#d1d5db" : "#6b7280",
-                                fontFamily: "system-ui, -apple-system, sans-serif",
-                            }}
-                        >
-                            Fechar
-                        </motion.button>
-                    </div>
-                </div>
-            </DialogContent>
-        </Dialog>
-    )
-}
-
-const FlowHeaderWithDialogs = ({
-                                   onZoomIn,
-                                   onZoomOut,
-                                   onFitView,
-                                   onSave,
-                                   onLoad,
-                                   onExecute,
-                                   onSearch,
-                                   onReset,
-                                   onDownload,
-                                   onToggleSidebar,
-                                   onOpenBot,
-                                   onOpenColorPanel,
-                                   onOpenAIDialog,
-                                   startPosition,
-                                   mousePosition,
-                                   componentCount,
-                                   workflowContainerRef,
-                               }: any) => {
-    const router = useRouter()
-    const { theme, toggleTheme, currentGradient, glowAnimation, glowEnabled, setShowColorPanel, showColorPanel } =
-        useTheme()
-    const [searchValue, setSearchValue] = useState("")
-    const [showResetDialog, setShowResetDialog] = useState(false)
-    const [showExecuteDialog, setShowExecuteDialog] = useState(false)
-    const [showImageMenu, setShowImageMenu] = useState(false)
-    const [showIntegrationsMenu, setShowIntegrationsMenu] = useState(false)
-    const [isWorkflowSaved, setIsWorkflowSaved] = useState(false)
-    const [isSearchFocused, setIsSearchFocused] = useState(false)
-    const [showSearchResults, setShowSearchResults] = useState(false)
-    const [searchResults, setSearchResults] = useState<any[]>([])
-    const [isSearchModalOpen, setIsSearchModalOpen] = useState(false)
-
-    useEffect(() => {
-        setIsWorkflowSaved(false)
-    }, [componentCount])
-
-
-    const primaryColor = currentGradient?.primary || "#000000"
-    const secondaryColor = currentGradient?.secondary || "#000000"
-    const accentColor = currentGradient?.accent || "#000000"
-    const glowColor = currentGradient?.glow || "#000000"
-
-    const handleSearch = (e: React.FormEvent) => {
-        e.preventDefault()
-
-        // Get all components from localStorage
-        const savedWorkflow = localStorage.getItem("workflow")
-        if (savedWorkflow) {
-            try {
-                const workflow = JSON.parse(savedWorkflow)
-                const components = workflow.nodes
-                    .filter((node: any) => node.id !== "start-node")
-                    .map((node: any) => ({
-                        id: node.data.customId || node.id,
-                        name: node.data.label || node.type,
-                        type: node.type,
-                    }))
-
-                setSearchResults(components)
-                setShowSearchResults(true)
-                setIsSearchModalOpen(true)
-            } catch (error) {
-                console.error("Error loading components:", error)
-            }
-        }
-    }
-
-    const handleSave = () => {
-        if (onSave) {
-            try {
-                const result = onSave()
-                setIsWorkflowSaved(result !== false) // undefined passa a contar como sucesso (igual à versão old)
-            } catch {
-                setIsWorkflowSaved(false)
-            }
-        }
-    }
-
-    const handleExecute = () => {
-        if (!isWorkflowSaved) {
-            toast({
-                title: "❌ Salve primeiro!",
-                description: "Você precisa salvar o fluxo antes de executar",
-                variant: "destructive",
-            })
-            return
-        }
-        setShowExecuteDialog(true)
-    }
-
-    const confirmExecute = () => {
-        onExecute()
-        setShowExecuteDialog(false)
-    }
-
-    const handleReset = () => {
-        setShowResetDialog(true)
-    }
-
-    const confirmReset = () => {
-        onReset()
-        setShowResetDialog(false)
-        setIsWorkflowSaved(false)
-    }
-
-    const isDark = theme === "dark"
-
-    // ADDED HANDLERS
-    const handleChangeBackground = useCallback(() => {
-        console.log("Changing background...")
-        const imageUrl = prompt("Enter image URL for background:")
-        if (imageUrl) {
-            localStorage.setItem("flow-background-image", imageUrl)
-            document.documentElement.style.setProperty("--flow-background-image", `url(${imageUrl})`)
-        }
-    }, [])
-
-    const handleSaveImage = useCallback(async () => {
-        console.log("Saving image...")
-        if (workflowContainerRef.current) {
-            try {
-                const canvas = await html2canvas(workflowContainerRef.current, {
-                    useCORS: true,
-                    backgroundColor: null,
-                    allowTaint: true,
-                })
-                const image = canvas.toDataURL("image/png")
-                const link = document.createElement("a")
-                link.download = "workflow.png"
-                link.href = image
-                link.click()
-            } catch (error) {
-                console.error("Error saving image:", error)
-                alert("Failed to save image. Please check browser console for details.")
-            }
-        }
-    }, [])
-
-    const handleResetBackground = useCallback(() => {
-        console.log("Resetting background...")
-        localStorage.removeItem("flow-background-image")
-        document.documentElement.style.setProperty("--flow-background-image", "url(/background-pattern.png)")
-    }, [])
-
-    return (
-        <>
-            <style jsx global>{`
-                @keyframes shimmer {
-                    0%,
-                    100% {
-                        text-shadow:
-                                0 0 5px rgba(255, 255, 255, 0.5),
-                                0 0 10px rgba(255, 255, 255, 0.3);
-                    }
-                    50% {
-                        text-shadow:
-                                0 0 10px rgba(255, 255, 255, 0.8),
-                                0 0 20px rgba(255, 255, 255, 0.5),
-                                0 0 30px rgba(255, 255, 255, 0.3);
-                    }
-                }
-            `}</style>
-
-            {isSearchModalOpen && showSearchResults && searchResults.length > 0 && (
-                <div
-                    className="fixed inset-0 z-[100] flex items-start justify-center pt-32"
-                    style={{
-                        backdropFilter: "blur(8px)",
-                        background: "rgba(0, 0, 0, 0.5)",
-                    }}
-                    onClick={() => {
-                        setIsSearchModalOpen(false)
-                        setShowSearchResults(false)
-                    }}
-                >
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: -20 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -20 }}
-                        className="w-full max-w-2xl mx-4 rounded-2xl shadow-2xl overflow-hidden"
-                        style={{
-                            background: isDark ? "rgba(20, 20, 30, 0.98)" : "rgba(255, 255, 255, 0.98)",
-                            border: `2px solid ${isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)"}`,
-                            backdropFilter: "blur(20px)",
-                            boxShadow: `0 20px 60px rgba(0, 0, 0, 0.4), 0 0 40px ${glowColor}30`,
-                            maxHeight: "70vh",
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* Search Header */}
-                        <div
-                            className="px-6 py-4 border-b"
-                            style={{
-                                borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
-                                background: isDark ? "rgba(30, 30, 40, 0.5)" : "rgba(250, 250, 250, 0.5)",
-                            }}
-                        >
-                            <div className="flex items-center justify-between">
-                                <h3
-                                    className="text-xl font-bold"
-                                    style={{
-                                        color: isDark ? "#ffffff" : "#1f2937",
-                                    }}
-                                >
-                                    Resultados da Busca
-                                </h3>
-                                <button
-                                    onClick={() => {
-                                        setIsSearchModalOpen(false)
-                                        setShowSearchResults(false)
-                                    }}
-                                    className="w-8 h-8 rounded-lg flex items-center justify-center transition-all hover:scale-110"
-                                    style={{
-                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        color: isDark ? "#e5e7eb" : "#6b7280",
-                                    }}
-                                >
-                                    <FiX className="w-5 h-5" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Search Results */}
-                        <div className="overflow-y-auto" style={{ maxHeight: "calc(70vh - 80px)" }}>
-                            {searchResults.map((component, index) => (
-                                <motion.div
-                                    key={index}
-                                    whileHover={{
-                                        backgroundColor: isDark ? "rgba(59, 130, 246, 0.15)" : "rgba(59, 130, 246, 0.1)",
-                                        x: 4,
-                                    }}
-                                    className="px-6 py-5 cursor-pointer border-b transition-all"
-                                    style={{
-                                        borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
-                                    }}
-                                    onClick={() => {
-                                        if (onSearch) onSearch(component.id)
-                                        setShowSearchResults(false)
-                                        setIsSearchModalOpen(false)
-                                    }}
-                                >
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex-1">
-                                            <div
-                                                className="font-semibold text-lg mb-2"
-                                                style={{
-                                                    color: isDark ? "#ffffff" : "#1f2937",
-                                                }}
-                                            >
-                                                {component.name}
-                                            </div>
-                                            <div
-                                                className="text-base flex items-center gap-2"
-                                                style={{
-                                                    color: isDark ? "#9ca3af" : "#6b7280",
-                                                }}
-                                            >
-                                                <span className="font-mono">ID: {component.id}</span>
-                                                <span
-                                                    className="px-2 py-0.5 rounded text-xs"
-                                                    style={{
-                                                        background: isDark ? "rgba(59, 130, 246, 0.2)" : "rgba(59, 130, 246, 0.1)",
-                                                        color: isDark ? "#60a5fa" : "#3b82f6",
-                                                    }}
-                                                >
-                          {component.type}
-                        </span>
-                                            </div>
-                                        </div>
-                                        <div
-                                            className="px-4 py-2 rounded-lg text-sm font-medium"
-                                            style={{
-                                                background: isDark ? "rgba(59, 130, 246, 0.2)" : "rgba(59, 130, 246, 0.1)",
-                                                color: isDark ? "#60a5fa" : "#3b82f6",
-                                            }}
-                                        >
-                                            Localizar
-                                        </div>
-                                    </div>
-                                </motion.div>
-                            ))}
-                        </div>
-                    </motion.div>
-                </div>
-            )}
-
-            <motion.header
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                className="fixed top-0 left-0 right-0 z-50 px-4 py-3"
-                style={{
-                    background: showColorPanel
-                        ? isDark
-                            ? `var(--header-bg, ${primaryColor || "#1e293b"})15`
-                            : "rgba(255, 255, 255, 0.85)"
-                        : isDark
-                            ? `var(--header-bg, ${primaryColor || "#1e293b"})10`
-                            : "rgba(255, 255, 255, 0.6)",
-                    backdropFilter: "blur(20px)",
-                    borderBottom: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)"}`,
-                    minHeight: "60px",
-                    maxHeight: "60px",
-                    transition: "all 0.3s ease",
-                    ...(glowEnabled && {
-                        boxShadow: `0 0 60px ${glowColor}60, 0 0 120px ${glowColor}30, inset 0 0 40px ${glowColor}10`,
-                        borderBottom: `1px solid ${glowColor}80`,
-                        background: isDark
-                            ? `linear-gradient(180deg, var(--header-bg, ${primaryColor || "#1e293b"})20 0%, var(--header-bg, ${primaryColor || "#1e293b"})15 100%)`
-                            : `linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(245, 245, 250, 0.9) 100%)`,
-                    }),
-                }}
-            >
-                <div className="flex items-center justify-between h-full">
-                    {/* Left Section: Zoom Controls */}
-                    <div className="flex items-center gap-3">
-                        <div
-                            className="flex items-center gap-1 px-1 py-1 rounded-full"
-                            style={{
-                                background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
-                                boxShadow: glowEnabled ? `0 0 15px ${glowColor}20` : "none",
-                            }}
-                        >
-                            {[
-                                { icon: FiZoomOut, action: onZoomOut, title: "Zoom Out" },
-                                { icon: FiZoomIn, action: onZoomIn, title: "Zoom In" },
-                                { icon: FiMaximize, action: onFitView, title: "Fit View" },
-                                { icon: FiSidebar, action: onToggleSidebar, title: "Toggle Sidebar" },
-                            ].map(({ icon: Icon, action, title }, index) => (
-                                <motion.button
-                                    key={index}
-                                    whileHover={{
-                                        scale: 1.1,
-                                        backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                    }}
-                                    whileTap={{ scale: 0.9 }}
-                                    onClick={action}
-                                    className="w-9 h-9 rounded-full flex items-center justify-center transition-colors"
-                                    style={{
-                                        color: isDark ? "#9ca3af" : "#6b7280",
-                                    }}
-                                    title={title}
-                                >
-                                    <Icon className="w-4 h-4" />
-                                </motion.button>
-                            ))}
-                        </div>
-
-                        <div
-                            className="flex items-center gap-1 px-1 py-1 rounded-full"
-                            style={{
-                                background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
-                                boxShadow: glowEnabled ? `0 0 15px ${glowColor}20` : "none",
-                            }}
-                        >
-                            <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={onOpenAIDialog}
-                                className="h-9 px-4 rounded-full flex items-center gap-2 transition-all relative overflow-hidden"
-                                style={{
-                                    background: isDark
-                                        ? `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})`
-                                        : `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})`,
-                                    border: `1px solid ${glowColor}40`,
-                                    boxShadow: `0 4px 15px ${glowColor}30, 0 0 20px ${glowColor}20`,
-                                }}
-                                title="Gerar com IA"
-                            >
-                                <FiZap className="w-4 h-4" style={{ color: isDark ? "#ffffff" : "#1f2937" }} />
-                                <span
-                                    className="text-sm font-medium relative"
-                                    style={{
-                                        color: isDark ? "#ffffff" : "#1f2937",
-                                        animation: "shimmer 2s infinite",
-                                    }}
-                                >
-                  Gerar com IA
-                </span>
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{
-                                    scale: 1.1,
-                                    boxShadow: `0 0 20px ${accentColor}60`,
-                                }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={onOpenBot}
-                                className="w-9 h-9 rounded-full flex items-center justify-center transition-all"
-                                style={{
-                                    background: isDark
-                                        ? `linear-gradient(135deg, ${accentColor}, ${secondaryColor})`
-                                        : `linear-gradient(135deg, ${accentColor}, ${secondaryColor})`,
-                                    border: `1px solid ${accentColor}40`,
-                                    boxShadow: `0 4px 15px ${accentColor}30`,
-                                }}
-                                title="Open Bot"
-                            >
-                                <BotIcon className="w-4 h-4" style={{ color: isDark ? "#ffffff" : "#1f2937" }} />
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{
-                                    scale: 1.1,
-                                    backgroundColor: "rgba(30, 58, 138, 0.3)",
-                                    boxShadow: "0 0 20px rgba(30, 58, 138, 0.6)",
-                                }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={() => setShowIntegrationsMenu(true)}
-                                className="w-9 h-9 rounded-full flex items-center justify-center transition-colors"
-                                style={{
-                                    color: isDark ? "#9ca3af" : "#6b7280",
-                                }}
-                                title="Integrations"
-                            >
-                                <FiGrid className="w-4 h-4" />
-                            </motion.button>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                            <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={onLoad}
-                                className="w-9 h-9 rounded-lg flex items-center justify-center transition-all"
-                                style={{
-                                    color: isDark ? "#60a5fa" : "#3b82f6",
-                                    background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                    border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
-                                }}
-                                title="Import Workflow"
-                            >
-                                <FiUpload className="w-4 h-4" />
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={onDownload}
-                                className="w-9 h-9 rounded-lg flex items-center justify-center transition-all"
-                                style={{
-                                    color: isDark ? "#60a5fa" : "#3b82f6",
-                                    background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                    border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
-                                }}
-                                title="Export Workflow"
-                            >
-                                <FiDownload className="w-4 h-4" />
-                            </motion.button>
-                        </div>
-                    </div>
-
-                    {/* Center Section: Search + Status */}
-                    <div className="flex-1 flex items-center justify-center gap-4 max-w-2xl">
-                        <form onSubmit={handleSearch} className="flex-1 max-w-md relative">
-                            <div
-                                className="relative rounded-full overflow-hidden transition-all"
-                                style={{
-                                    background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                    border: `1px solid ${isSearchFocused ? glowColor : isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
-                                    boxShadow: isSearchFocused ? `0 0 20px ${glowColor}30` : "none",
-                                }}
-                            >
-                                <input
-                                    type="text"
-                                    value={searchValue}
-                                    onChange={(e) => setSearchValue(e.target.value)}
-                                    onFocus={() => setIsSearchFocused(true)}
-                                    onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
-                                    placeholder="Procurar ID do Componente"
-                                    className="w-full px-4 py-2 bg-transparent outline-none text-sm"
-                                    style={{
-                                        color: isDark ? "#e5e7eb" : "#1f2937",
-                                    }}
-                                />
-                            </div>
-
-                            {showSearchResults && searchResults.length > 0 && (
-                                <motion.div
-                                    initial={{ opacity: 0, y: -10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="absolute top-full mt-2 w-full rounded-xl shadow-2xl z-50 max-h-80 overflow-y-auto"
-                                    style={{
-                                        background: isDark ? "rgba(20, 20, 30, 0.98)" : "rgba(255, 255, 255, 0.98)",
-                                        border: `2px solid ${isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)"}`,
-                                        backdropFilter: "blur(20px)",
-                                        boxShadow: `0 10px 40px rgba(0, 0, 0, 0.3), 0 0 20px ${glowColor}20`,
-                                    }}
-                                >
-                                    {searchResults.map((component, index) => (
-                                        <motion.div
-                                            key={index}
-                                            whileHover={{
-                                                backgroundColor: isDark ? "rgba(59, 130, 246, 0.15)" : "rgba(59, 130, 246, 0.1)",
-                                                x: 4,
-                                            }}
-                                            className="px-5 py-4 cursor-pointer border-b transition-all"
-                                            style={{
-                                                borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
-                                            }}
-                                            onClick={() => {
-                                                if (onSearch) onSearch(component.id)
-                                                setShowSearchResults(false)
-                                            }}
-                                        >
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <div
-                                                        className="font-semibold text-base mb-1"
-                                                        style={{
-                                                            color: isDark ? "#ffffff" : "#1f2937",
-                                                        }}
-                                                    >
-                                                        {component.name}
-                                                    </div>
-                                                    <div
-                                                        className="text-sm"
-                                                        style={{
-                                                            color: isDark ? "#9ca3af" : "#6b7280",
-                                                        }}
-                                                    >
-                                                        ID: {component.id}
-                                                    </div>
-                                                </div>
-                                                <div
-                                                    className="px-3 py-1 rounded-full text-xs font-medium"
-                                                    style={{
-                                                        background: isDark ? "rgba(59, 130, 246, 0.2)" : "rgba(59, 130, 246, 0.1)",
-                                                        color: isDark ? "#60a5fa" : "#3b82f6",
-                                                    }}
-                                                >
-                                                    Ver
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    ))}
-                                </motion.div>
-                            )}
-                        </form>
-
-                        <FlowStatusIndicator
-                            startPosition={startPosition}
-                            mousePosition={mousePosition}
-                            componentCount={componentCount}
-                            theme={theme}
-                            currentGradient={currentGradient}
-                        />
-                    </div>
-
-                    {/* Right Section: Utility Buttons + Save + Execute */}
-                    <div className="flex items-center gap-3">
-                        <motion.div
-                            className="flex items-center gap-1 px-1 py-1 rounded-full"
-                            style={{
-                                background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                                border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
-                                boxShadow: glowEnabled ? `0 0 15px ${glowColor}20` : "none",
-                            }}
-                            animate={glowEnabled ? glowAnimation : {}}
-                        >
-                            <motion.button
-                                whileHover={{
-                                    scale: 1.1,
-                                    backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={() => setShowImageMenu(true)}
-                                className="w-9 h-9 rounded-full flex items-center justify-center transition-all"
-                                style={{
-                                    color: isDark ? "#9ca3af" : "#6b7280",
-                                }}
-                                title="Background Image"
-                            >
-                                <FiImage className="w-4 h-4" />
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{
-                                    scale: 1.1,
-                                    backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={onOpenColorPanel}
-                                className="w-9 h-9 rounded-full flex items-center justify-center transition-all"
-                                style={{
-                                    color: isDark ? "#9ca3af" : "#6b7280",
-                                }}
-                                title="Cores"
-                            >
-                                <FiDroplet className="w-4 h-4" />
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{
-                                    scale: 1.1,
-                                    backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={toggleTheme}
-                                className="w-9 h-9 rounded-full flex items-center justify-center transition-all"
-                                style={{
-                                    color: isDark ? "#9ca3af" : "#6b7280",
-                                }}
-                                title="Toggle Theme"
-                            >
-                                <FiSun className="w-4 h-4" />
-                            </motion.button>
-
-                            <motion.button
-                                whileHover={{
-                                    scale: 1.1,
-                                    backgroundColor: "rgba(239, 68, 68, 0.2)",
-                                    boxShadow: "0 0 20px rgba(239, 68, 68, 0.6)",
-                                }}
-                                whileTap={{ scale: 0.9 }}
-                                onClick={handleReset}
-                                className="w-9 h-9 rounded-full flex items-center justify-center transition-all"
-                                style={{
-                                    color: isDark ? "#9ca3af" : "#6b7280",
-                                }}
-                                title="Reset Workflow"
-                            >
-                                <FiRefreshCw className="w-4 h-4" />
-                            </motion.button>
-                        </motion.div>
-
-                        {/* Save Button */}
-                        <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={handleSave}
-                            className="px-4 py-2 rounded-full flex items-center gap-2 transition-all"
-                            style={{
-                                background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.1)"}`,
-                                color: isDark ? "#e5e7eb" : "#1f2937",
-                            }}
-                        >
-                            <FiSave className="w-4 h-4" />
-                            <span className="text-sm font-medium">Save</span>
-                        </motion.button>
-
-                        {/* Execute Button */}
-                        <motion.button
-                            whileHover={isWorkflowSaved ? { scale: 1.05 } : {}}
-                            whileTap={isWorkflowSaved ? { scale: 0.95 } : {}}
-                            onClick={handleExecute}
-                            disabled={!isWorkflowSaved}
-                            className="px-4 py-2 rounded-full flex items-center gap-2 transition-all"
-                            style={{
-                                background: isWorkflowSaved
-                                    ? isDark
-                                        ? `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})`
-                                        : `linear-gradient(135deg, ${primaryColor}DD, ${secondaryColor}DD)`
-                                    : isDark
-                                        ? "rgba(255, 255, 255, 0.05)"
-                                        : "rgba(0, 0, 0, 0.03)",
-                                border: `1px solid ${isWorkflowSaved ? glowColor : isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"}`,
-                                // Always white text when enabled (works on gradient), gray when disabled
-                                color: isWorkflowSaved ? "#ffffff" : isDark ? "#6b7280" : "#9ca3af",
-                                cursor: isWorkflowSaved ? "pointer" : "not-allowed",
-                                opacity: isWorkflowSaved ? 1 : 0.5,
-                            }}
-                        >
-                            <FiPlay
-                                className="w-4 h-4"
-                                style={{ color: isWorkflowSaved ? "#ffffff" : isDark ? "#6b7280" : "#9ca3af" }}
-                            />
-                            <span className="text-sm font-medium">Execute</span>
-                        </motion.button>
-                    </div>
-                </div>
-            </motion.header>
-
-            <IntegrationsMenu
-                isOpen={showIntegrationsMenu}
-                onClose={() => setShowIntegrationsMenu(false)}
-                theme={theme}
-                currentGradient={currentGradient}
-            />
-
-            <ImageMenu
-                isOpen={showImageMenu}
-                onClose={() => setShowImageMenu(false)}
-                onChangeBackground={handleChangeBackground}
-                onSaveImage={handleSaveImage}
-                onResetBackground={handleResetBackground}
-                theme={theme}
-            />
-
-            <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
-                <DialogContent
-                    className="sm:max-w-[450px] p-0 bg-transparent border-0"
-                    style={{
-                        background: "transparent",
-                        border: "none",
-                        boxShadow: "none",
-                    }}
-                >
-                    <div
-                        className="relative rounded-2xl overflow-hidden"
-                        style={{
-                            background: isDark
-                                ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${primaryColor}15 50%, rgba(0,0,0,0.95) 100%)`
-                                : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${primaryColor}10 50%, rgba(255,255,255,0.95) 100%)`,
-                            border: isDark ? `1px solid ${glowColor}40` : `1px solid ${primaryColor}30`,
-                            boxShadow: isDark
-                                ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 40px ${glowColor}30`
-                                : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 40px ${primaryColor}20`,
-                            backdropFilter: "blur(20px)",
-                        }}
-                    >
-                        <div
-                            className="absolute inset-0 opacity-20 rounded-2xl"
-                            style={{
-                                backgroundImage: isDark
-                                    ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%),
-                   radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
-                   radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
-                                    : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%),
-                   radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
-                   radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
-                            }}
-                        />
-
-                        <DialogHeader className="relative z-10 p-6">
-                            <div className="flex items-center gap-4 mb-4">
-                                <div
-                                    className="p-4 rounded-2xl"
-                                    style={{
-                                        background: "rgba(239, 68, 68, 0.2)",
-                                        boxShadow: "0 8px 20px rgba(239, 68, 68, 0.3)",
-                                    }}
-                                >
-                                    <FiRefreshCw
-                                        className="w-8 h-8 text-red-400"
-                                        style={{
-                                            filter: `drop-shadow(0 0 8px rgba(239, 68, 68, 0.6))`,
-                                        }}
-                                    />
-                                </div>
-                                <div>
-                                    <DialogTitle
-                                        className="text-xl font-bold mb-1"
-                                        style={{
-                                            color: isDark ? "#ffffff" : "#111827",
-                                            textShadow: isDark ? `0 0 15px ${glowColor}60` : `0 0 8px ${primaryColor}40`,
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Confirmar Reset
-                                    </DialogTitle>
-                                    <DialogDescription
-                                        className="text-sm"
-                                        style={{
-                                            color: isDark ? "#d1d5db" : "#6b7280",
-                                            textShadow: isDark ? `0 0 5px ${glowColor}30` : "none",
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Tem certeza de que deseja resetar o fluxo?
-                                    </DialogDescription>
-                                </div>
-                            </div>
-                        </DialogHeader>
-
-                        <div className="relative z-10 px-6 pb-4">
-                            <div
-                                className="p-4 rounded-xl flex items-center gap-3"
-                                style={{
-                                    background: "rgba(239, 68, 68, 0.1)",
-                                    border: "1px solid rgba(239, 68, 68, 0.2)",
-                                }}
-                            >
-                                <FiX className="w-5 h-5 text-red-400" />
-                                <p
-                                    className="text-sm font-medium"
-                                    style={{
-                                        color: isDark ? "#fca5a5" : "#dc2626",
-                                        fontFamily: "system-ui, -apple-system, sans-serif",
-                                    }}
-                                >
-                                    Esta ação é irreversível e todas as alterações não salvas serão perdidas.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="relative z-10 flex justify-end gap-3 p-6 pt-0">
-                            <motion.button
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={() => setShowResetDialog(false)}
-                                className="px-6 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
-                                style={{
-                                    background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                    color: isDark ? "#d1d5db" : "#6b7280",
-                                    border: isDark ? "1px solid rgba(255, 255, 255, 0.2)" : "1px solid rgba(0, 0, 0, 0.1)",
-                                    fontFamily: "system-ui, -apple-system, sans-serif",
-                                }}
-                            >
-                                Cancelar
-                            </motion.button>
-                            <motion.button
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={confirmReset}
-                                className="px-6 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 flex items-center gap-2"
-                                style={{
-                                    background: "linear-gradient(135deg, #ef4444, #dc2626)",
-                                    color: "#ffffff",
-                                    border: "1px solid #dc2626",
-                                    boxShadow: "0 4px 12px rgba(239, 68, 68, 0.4)",
-                                    fontFamily: "system-ui, -apple-system, sans-serif",
-                                }}
-                            >
-                                <FiTrash2 className="w-4 h-4" />
-                                Resetar
-                            </motion.button>
-                        </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={showExecuteDialog} onOpenChange={setShowExecuteDialog}>
-                <DialogContent
-                    className="sm:max-w-[450px] p-0 bg-transparent border-0"
-                    style={{
-                        background: "transparent",
-                        border: "none",
-                        boxShadow: "none",
-                    }}
-                >
-                    <div
-                        className="relative rounded-2xl overflow-hidden"
-                        style={{
-                            background: isDark
-                                ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${primaryColor}15 50%, rgba(0,0,0,0.95) 100%)`
-                                : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${primaryColor}10 50%, rgba(255,255,255,0.95) 100%)`,
-                            border: isDark ? `1px solid ${glowColor}40` : `1px solid ${primaryColor}30`,
-                            boxShadow: isDark
-                                ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 40px ${glowColor}30`
-                                : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 40px ${primaryColor}20`,
-                            backdropFilter: "blur(20px)",
-                        }}
-                    >
-                        <div
-                            className="absolute inset-0 opacity-20 rounded-2xl"
-                            style={{
-                                backgroundImage: isDark
-                                    ? `radial-gradient(circle at 20% 30%, ${primaryColor}60 0%, transparent 40%),
-                   radial-gradient(circle at 80% 70%, ${secondaryColor}60 0%, transparent 40%),
-                   radial-gradient(circle at 50% 50%, ${accentColor}40 0%, transparent 60%)`
-                                    : `radial-gradient(circle at 20% 30%, ${primaryColor}40 0%, transparent 40%),
-                   radial-gradient(circle at 80% 70%, ${secondaryColor}40 0%, transparent 40%),
-                   radial-gradient(circle at 50% 50%, ${accentColor}30 0%, transparent 60%)`,
-                            }}
-                        />
-
-                        <DialogHeader className="relative z-10 p-6">
-                            <div className="flex items-center gap-4 mb-4">
-                                <div
-                                    className="p-4 rounded-2xl"
-                                    style={{
-                                        background: `linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(16, 185, 129, 0.2))`,
-                                        boxShadow: "0 8px 20px rgba(34, 197, 94, 0.4), 0 0 30px rgba(34, 197, 94, 0.2)",
-                                        border: "1px solid rgba(34, 197, 94, 0.3)",
-                                    }}
-                                >
-                                    <FiPlayCircle
-                                        className="w-8 h-8 text-green-300"
-                                        style={{
-                                            filter: `drop-shadow(0 0 12px rgba(34, 197, 94, 0.8))`,
-                                        }}
-                                    />
-                                </div>
-                                <div>
-                                    <DialogTitle
-                                        className="text-2xl font-bold mb-2"
-                                        style={{
-                                            color: isDark ? "#ffffff" : "#111827",
-                                            textShadow: isDark ? `0 0 20px ${glowColor}80` : `0 0 12px ${primaryColor}50`,
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Fluxo Executado com Sucesso!
-                                    </DialogTitle>
-                                    <DialogDescription
-                                        className="text-base"
-                                        style={{
-                                            color: isDark ? "#d1d5db" : "#6b7280",
-                                            textShadow: isDark ? `0 0 8px ${glowColor}40` : "none",
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Seu workflow está ativo e funcionando perfeitamente.
-                                    </DialogDescription>
-                                </div>
-                            </div>
-                        </DialogHeader>
-
-                        <div className="relative z-10 px-6 pb-4">
-                            <div
-                                className="p-5 rounded-xl flex items-center gap-4"
-                                style={{
-                                    background: `linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(16, 185, 129, 0.1))`,
-                                    border: "1px solid rgba(34, 197, 94, 0.3)",
-                                    boxShadow: "0 8px 20px rgba(34, 197, 94, 0.2)",
-                                }}
-                            >
-                                <div
-                                    className="p-3 rounded-full"
-                                    style={{
-                                        background: "rgba(34, 197, 94, 0.2)",
-                                        boxShadow: "0 4px 12px rgba(34, 197, 94, 0.3)",
-                                    }}
-                                >
-                                    <FiCheckCircle className="w-6 h-6 text-green-400" />
-                                </div>
-                                <div>
-                                    <p
-                                        className="text-base font-semibold mb-1"
-                                        style={{
-                                            color: isDark ? "#86efac" : "#16a34a",
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Pronto para Interação
-                                    </p>
-                                    <p
-                                        className="text-sm"
-                                        style={{
-                                            color: isDark ? "#a7f3d0" : "#059669",
-                                            fontFamily: "system-ui, -apple-system, sans-serif",
-                                        }}
-                                    >
-                                        Abra o ¥$ Bot para começar a interagir com seu fluxo executado.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="relative z-10 flex justify-end gap-3 p-6 pt-0">
-                            <motion.button
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={confirmExecute}
-                                className="px-8 py-3 text-sm font-semibold rounded-xl transition-all duration-200"
-                                style={{
-                                    background: `linear-gradient(135deg, rgba(34, 197, 94, 0.9), rgba(16, 185, 129, 0.8))`,
-                                    color: "#ffffff",
-                                    border: "1px solid rgba(34, 197, 94, 0.6)",
-                                    boxShadow: "0 6px 20px rgba(34, 197, 94, 0.4), 0 0 25px rgba(34, 197, 94, 0.2)",
-                                    fontFamily: "system-ui, -apple-system, sans-serif",
-                                }}
-                            >
-                                <FiCheckCircle className="w-4 h-4" />
-                                Perfeito!
-                            </motion.button>
-                        </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
-        </>
-    )
-}
-
-const FlowLayout = () => {
-    const { theme, setShowColorPanel, showColorPanel, currentGradient, glowEnabled } = useTheme()
-    const [mounted, setMounted] = useState(false)
-    const [workflowActions, setWorkflowActions] = useState<any>(null)
-    const [startPosition, setStartPosition] = useState({ x: 250, y: 100 })
-    const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
-    const [componentCount, setComponentCount] = useState(1)
-    const [showSidebar, setShowSidebar] = useState(true)
-    const [showBot, setShowBot] = useState(false)
-    const [flowNodes, setFlowNodes] = useState<any[]>([])
-    const [flowEdges, setFlowEdges] = useState<any[]>([])
-    const [showAIDialog, setShowAIDialog] = useState(false)
-    const workflowContainerRef = useRef<HTMLDivElement>(null)
-
-    const toggleSidebar = useCallback(() => {
-        setShowSidebar(!showSidebar)
-    }, [showSidebar])
-
-    const openBot = useCallback(() => {
-        setShowBot(true)
-    }, [])
-
-    const closeBot = useCallback(() => {
-        setShowBot(false)
-    }, [])
-
-    const handleActionsReady = useCallback((actions: any) => {
-        setWorkflowActions(actions)
-    }, [])
-
-    const handleGenerateWorkflow = useCallback(
-        (workflow: any) => {
-            console.log("Recebendo workflow gerado pela IA...")
-            console.log("Estrutura recebida:", {
-                nodes: workflow.nodes?.length || 0,
-                edges: workflow.edges?.length || 0,
-                hasNodeCounters: !!workflow.nodeCounters,
-            })
-
-            if (workflowActions?.loadWorkflow) {
-                workflowActions.loadWorkflow(workflow)
-            } else {
-                console.error("workflowActions.loadWorkflow não está disponível")
-            }
-        },
-        [workflowActions],
-    )
-
-    // Handlers for ImageMenu actions
-    const handleChangeBackground = useCallback(() => {
-        // Changed to useCallback
-        console.log("Changing background...")
-        const imageUrl = prompt("Enter image URL for background:")
-        if (imageUrl) {
-            localStorage.setItem("flow-background-image", imageUrl)
-            document.documentElement.style.setProperty("--flow-background-image", `url(${imageUrl})`)
-        }
-    }, [])
-
-    const handleSaveImage = useCallback(async () => {
-        // Changed to useCallback
-        console.log("Saving image...")
-        if (workflowContainerRef.current) {
-            try {
-                const canvas = await html2canvas(workflowContainerRef.current, {
-                    useCORS: true,
-                    backgroundColor: null, // Use transparent background
-                    allowTaint: true,
-                })
-                const image = canvas.toDataURL("image/png")
-                const link = document.createElement("a")
-                link.download = "workflow.png"
-                link.href = image
-                link.click()
-            } catch (error) {
-                console.error("Error saving image:", error)
-                alert("Failed to save image. Please check browser console for details.")
-            }
-        }
-    }, [])
-
-    const handleResetBackground = useCallback(() => {
-        // Changed to useCallback
-        console.log("Resetting background...")
-        localStorage.removeItem("flow-background-image")
-        document.documentElement.style.setProperty("--flow-background-image", "url(/background-pattern.png)") // Reset to default pattern
-    }, [])
-
-    useEffect(() => {
-        setMounted(true)
-        const savedImage = localStorage.getItem("flow-background-image")
-        if (savedImage) {
-            document.documentElement.style.setProperty("--flow-background-image", `url(${savedImage})`)
-        }
-    }, [])
-
-    if (!mounted) {
-        return (
-            <div
-                className="flex flex-col items-center justify-center h-screen relative overflow-hidden"
-                style={{
-                    background: "linear-gradient(135deg, #1e293b 0%, #0f172a 50%, #020617 100%)",
-                }}
-            >
-                <div className="absolute inset-0 overflow-hidden">
-                    <motion.div
-                        animate={{
-                            scale: [1, 1.2, 1],
-                            opacity: [0.3, 0.5, 0.3],
-                        }}
-                        transition={{
-                            duration: 4,
-                            repeat: Number.POSITIVE_INFINITY,
-                            ease: "easeInOut",
-                        }}
-                        className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full blur-3xl"
-                        style={{
-                            background: "radial-gradient(circle, rgba(168, 85, 247, 0.4) 0%, transparent 70%)",
-                        }}
-                    />
-                    <motion.div
-                        animate={{
-                            scale: [1.2, 1, 1.2],
-                            opacity: [0.3, 0.5, 0.3],
-                        }}
-                        transition={{
-                            duration: 4,
-                            repeat: Number.POSITIVE_INFINITY,
-                            ease: "easeInOut",
-                            delay: 0.5,
-                        }}
-                        className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full blur-3xl"
-                        style={{
-                            background: "radial-gradient(circle, rgba(236, 72, 153, 0.4) 0%, transparent 70%)",
-                        }}
-                    />
-                </div>
-
-                <div className="relative z-10 flex flex-col items-center space-y-8">
-                    <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{
-                            duration: 2,
-                            repeat: Number.POSITIVE_INFINITY,
-                            ease: "linear",
-                        }}
-                        className="w-16 h-16 rounded-full border-4 border-transparent"
-                        style={{
-                            borderTopColor: "#a855f7",
-                            borderRightColor: "#ec4899",
-                            boxShadow: "0 0 30px rgba(168, 85, 247, 0.5)",
-                        }}
-                    />
-
-                    <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.2 }}
-                        className="text-center space-y-2"
-                    >
-                        <h2 className="text-2xl font-bold text-white">Workflow Builder</h2>
-                        <motion.p
-                            animate={{ opacity: [0.5, 1, 0.5] }}
-                            transition={{
-                                duration: 2,
-                                repeat: Number.POSITIVE_INFINITY,
-                                ease: "easeInOut",
-                            }}
-                            className="text-sm text-gray-400"
-                        >
-                            Preparando seu ambiente...
-                        </motion.p>
-                    </motion.div>
-                </div>
-            </div>
-        )
-    }
-
-    return (
-        <div className={`flex flex-col h-screen flow-background ${theme === "dark" ? "bg-black" : "bg-gray-50"}`}>
-            <FlowElegantSidebar currentGradient={currentGradient} theme={theme} />
-
-            <FlowHeaderWithDialogs
-                onZoomIn={workflowActions?.zoomIn}
-                onZoomOut={workflowActions?.zoomOut}
-                onFitView={workflowActions?.fitView}
-                onSave={workflowActions?.save}
-                onLoad={workflowActions?.load}
-                onExecute={() => {
-                    if (workflowActions?.execute) workflowActions.execute()
-                    localStorage.setItem("executedFlow", "true")
-                }}
-                onSearch={workflowActions?.search} // This will now trigger the search in header
-                onReset={workflowActions?.reset}
-                onDownload={workflowActions?.download}
-                onToggleSidebar={toggleSidebar}
-                onOpenBot={openBot}
-                onOpenColorPanel={() => setShowColorPanel(true)}
-                onOpenAIDialog={() => setShowAIDialog(true)}
-                startPosition={startPosition}
-                mousePosition={mousePosition}
-                componentCount={componentCount}
-                workflowContainerRef={workflowContainerRef}
-            />
-
-            <main className="flex-1 overflow-hidden" ref={workflowContainerRef}>
-                <WorkflowBuilder
-                    onActionsReady={handleActionsReady}
-                    onStartPositionChange={setStartPosition}
-                    onMousePositionChange={setMousePosition}
-                    onComponentCountChange={setComponentCount}
-                    onNodesChange={setFlowNodes}
-                    onEdgesChange={setFlowEdges}
-                    showSidebar={showSidebar}
-                    onToggleSidebar={toggleSidebar}
-                    onOpenBot={openBot}
-                />
-            </main>
-
-            <YenFlowBot isOpen={showBot} onClose={closeBot} />
-
-            <AIWorkflowDialog
-                open={showAIDialog}
-                onOpenChange={setShowAIDialog}
-                onWorkflowGenerated={handleGenerateWorkflow}
-            />
-
-            {showColorPanel && <ColorPanel />}
+                    onClick={() => choose(item)}
+                    className={cn("flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors", selected && "bg-flow-accent/10")}
+                  >
+                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-soft" style={{ color: item.color }}>
+                      <Icon className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-flow-fg">{item.label}</span>
+                      <span className="block truncate text-[11px] text-flow-muted">{item.detail}</span>
+                    </span>
+                    <span className={cn(ui.chip, "shrink-0 font-mono text-[10px]")}>ID {item.id}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : null}
+          {matches.length > results.length && (
+            <p className="border-t border-flow-border px-3 py-2 text-[11px] text-flow-muted">
+              Mostrando {results.length} de {matches.length}. Refine a busca para ver os demais.
+            </p>
+          )}
+          {!results.length && (
+            <p className="px-3 py-6 text-center text-xs text-flow-muted">
+              {query.trim() ? `Nenhum componente corresponde a “${query.trim()}”.` : "O fluxo ainda não tem componentes."}
+            </p>
+          )}
         </div>
-    )
+      )}
+      <span className="sr-only" aria-live="polite">
+        {announcement}
+      </span>
+    </form>
+  )
 }
 
-const Flow = () => {
-    return (
-        <ThemeProvider>
-            <FlowLayout />
-        </ThemeProvider>
-    )
+function PreviewStatus({ active }: { active: boolean }) {
+  return (
+    <span
+      aria-live="polite"
+      title={active ? "A prévia usa a versão atual do fluxo" : "Clique em Prévia na barra do editor para testar o fluxo"}
+      className={cn(
+        "hidden h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold md:inline-flex",
+        active ? "border-flow-success/40 bg-flow-success/10 text-flow-success" : "border-flow-border bg-flow-soft text-flow-muted",
+      )}
+    >
+      <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", active ? "bg-flow-success" : "bg-flow-muted")} />
+      {active ? "Prévia ativa" : "Prévia inativa"}
+    </span>
+  )
 }
 
-export default Flow
+function MenuAction({ icon: Icon, label, description, disabled, onSelect }: { icon: LucideIcon; label: string; description: string; disabled?: boolean; onSelect: () => void }) {
+  const descriptionId = useId()
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={disabled}
+      aria-label={label}
+      aria-describedby={descriptionId}
+      className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-flow-strong focus-visible:bg-flow-strong focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
+    >
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-flow-muted" aria-hidden />
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-flow-fg">{label}</span>
+        <span id={descriptionId} className="block text-[11px] leading-4 text-flow-muted">
+          {description}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+function BackgroundMenu({ hasImage, capturing, onChange, onSave, onReset }: { hasImage: boolean; capturing: boolean; onChange: () => void; onSave: () => void; onReset: () => void }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuId = useId()
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      setOpen(false)
+      triggerRef.current?.focus()
+    }
+    window.addEventListener("pointerdown", onPointer)
+    window.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("pointerdown", onPointer)
+      window.removeEventListener("keydown", onKey)
+    }
+  }, [open])
+
+  const run = (action: () => void) => {
+    setOpen(false)
+    triggerRef.current?.focus()
+    action()
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        aria-busy={capturing || undefined}
+        aria-label="Imagem de fundo"
+        title="Imagem de fundo"
+        className={cn(ui.toolButton, open && ui.toolButtonActive)}
+      >
+        {capturing ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <ImageIcon className="h-4 w-4" aria-hidden />}
+      </button>
+      {open && (
+        <div id={menuId} role="group" aria-label="Opções da imagem de fundo" className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-flow-border bg-flow-surface py-1 shadow-lg">
+          <MenuAction icon={Link2} label="Trocar imagem" description="Aplicar uma imagem a partir de um link" onSelect={() => run(onChange)} />
+          <MenuAction icon={Camera} label="Salvar imagem do canvas" description="Baixar o canvas atual em PNG" disabled={capturing} onSelect={() => run(onSave)} />
+          <div className="my-1 border-t border-flow-border" />
+          <MenuAction
+            icon={RotateCcw}
+            label="Restaurar padrão"
+            description={hasImage ? "Remover a imagem de fundo aplicada" : "Nenhuma imagem de fundo aplicada"}
+            disabled={!hasImage}
+            onSelect={() => run(onReset)}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface FlowHeaderProps {
+  botOpen: boolean
+  capturing: boolean
+  hasBackground: boolean
+  onSearch: (query: string) => void
+  onOpenAI: () => void
+  onOpenBot: () => void
+  onOpenIntegrations: () => void
+  onChangeBackground: () => void
+  onSaveImage: () => void
+  onResetBackground: () => void
+}
+
+function FlowHeader({ botOpen, capturing, hasBackground, onSearch, onOpenAI, onOpenBot, onOpenIntegrations, onChangeBackground, onSaveImage, onResetBackground }: FlowHeaderProps) {
+  const { theme, toggleTheme, showColorPanel, setShowColorPanel } = useTheme()
+  const stored = useStoredWorkflow()
+
+  return (
+    <header className="relative z-40 flex h-14 shrink-0 items-center gap-2 border-b border-flow-border bg-flow-menu px-3 sm:gap-3 sm:px-4">
+      <h1 className="shrink-0">
+        <Link
+          href="/"
+          aria-label="WorkFlow, página inicial"
+          title="Voltar para a página inicial"
+          className="flex items-center gap-2 rounded-lg text-flow-fg transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
+        >
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-flow-accent text-white">
+            <Workflow className="h-4 w-4" aria-hidden />
+          </span>
+          <span className="hidden text-sm font-bold tracking-tight sm:inline">WorkFlow</span>
+        </Link>
+      </h1>
+      <span aria-hidden className={cn(ui.divider, "hidden sm:block")} />
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <HeaderSearch raw={stored.raw} onSearch={onSearch} />
+        <PreviewStatus active={stored.executed} />
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <button
+          type="button"
+          onClick={onOpenAI}
+          onPointerEnter={warmAI}
+          onFocus={warmAI}
+          aria-haspopup="dialog"
+          aria-label="Gerar com IA"
+          title="Gerar com IA"
+          className={cn(ui.accentButton, "px-2 md:px-3")}
+        >
+          <Sparkles className="h-4 w-4" aria-hidden />
+          <span className="hidden md:inline">Gerar com IA</span>
+        </button>
+        <span aria-hidden className={cn(ui.divider, "hidden sm:block")} />
+        <button type="button" onClick={onOpenBot} aria-label="Abrir prévia" title="Abrir prévia" className={cn(ui.toolButton, botOpen && ui.toolButtonActive)}>
+          <Bot className="h-4 w-4" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenIntegrations}
+          onPointerEnter={warmIntegrations}
+          onFocus={warmIntegrations}
+          aria-haspopup="dialog"
+          aria-label="Integrações"
+          title="Integrações"
+          className={ui.toolButton}
+        >
+          <Plug className="h-4 w-4" aria-hidden />
+        </button>
+        <BackgroundMenu hasImage={hasBackground} capturing={capturing} onChange={onChangeBackground} onSave={onSaveImage} onReset={onResetBackground} />
+        <button
+          type="button"
+          onClick={() => setShowColorPanel(!showColorPanel)}
+          onPointerEnter={warmColors}
+          onFocus={warmColors}
+          data-color-panel-trigger=""
+          aria-expanded={showColorPanel}
+          aria-label="Cores"
+          title="Cores"
+          className={cn(ui.toolButton, showColorPanel && ui.toolButtonActive)}
+        >
+          <Palette className="h-4 w-4" aria-hidden />
+        </button>
+        <button type="button" onClick={toggleTheme} aria-label="Alternar tema" title="Alternar tema" className={ui.toolButton}>
+          {theme === "dark" ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />}
+        </button>
+      </div>
+    </header>
+  )
+}
+
+function BackgroundForm({ initial, onCancel, onApply }: { initial: string; onCancel: () => void; onApply: (url: string) => void }) {
+  const [value, setValue] = useState(initial)
+  const [error, setError] = useState("")
+  const [checking, setChecking] = useState(false)
+  const activeRef = useRef(true)
+  const inputId = useId()
+  const messageId = useId()
+
+  useEffect(() => {
+    activeRef.current = true
+    return () => {
+      activeRef.current = false
+    }
+  }, [])
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const url = imageUrlFrom(value)
+    if (!url) {
+      setError("Informe um endereço de imagem válido, começando com http:// ou https://.")
+      return
+    }
+    setError("")
+    setChecking(true)
+    try {
+      await loadImage(url)
+      if (activeRef.current) onApply(url)
+    } catch {
+      if (activeRef.current) setError("Não foi possível carregar uma imagem neste endereço.")
+    } finally {
+      if (activeRef.current) setChecking(false)
+    }
+  }
+
+  return (
+    <form noValidate onSubmit={submit} className="grid gap-4">
+      <DialogHeader className="space-y-1 text-left">
+        <DialogTitle className="text-base font-semibold text-flow-fg">Trocar imagem de fundo</DialogTitle>
+        <DialogDescription className="text-sm text-flow-muted">A imagem aparece atrás do canvas e fica salva neste navegador.</DialogDescription>
+      </DialogHeader>
+      <div>
+        <label htmlFor={inputId} className={ui.label}>
+          Endereço da imagem
+        </label>
+        <input
+          id={inputId}
+          type="url"
+          inputMode="url"
+          autoComplete="url"
+          spellCheck={false}
+          value={value}
+          placeholder="https://exemplo.com/fundo.jpg"
+          aria-invalid={Boolean(error)}
+          aria-describedby={messageId}
+          onChange={(event) => {
+            setValue(event.target.value)
+            setError("")
+          }}
+          className={cn(ui.input, error && "border-flow-danger focus-visible:border-flow-danger focus-visible:ring-flow-danger/25")}
+        />
+        {error ? (
+          <p id={messageId} role="alert" className={ui.error}>
+            {error}
+          </p>
+        ) : (
+          <p id={messageId} className={ui.hint}>
+            Use um link http ou https que aponte direto para o arquivo da imagem.
+          </p>
+        )}
+      </div>
+      <DialogFooter className="gap-2 sm:space-x-0">
+        <button type="button" onClick={onCancel} className={ui.button}>
+          Cancelar
+        </button>
+        <button type="submit" disabled={checking || !value.trim()} className={ui.primaryButton}>
+          {checking && <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />}
+          {checking ? "Carregando" : "Aplicar"}
+        </button>
+      </DialogFooter>
+    </form>
+  )
+}
+
+function YenFlowBot({ isOpen, openRequest, onClose, onStart }: { isOpen: boolean; openRequest: number; onClose: () => void; onStart: () => void }) {
+  const [messages, setMessages] = useState<BotMessage[]>([])
+  const [input, setInput] = useState("")
+  const [isMinimized, setIsMinimized] = useState(false)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const [savedFlow, setSavedFlow] = useState<AtendimentoFlow | null>(null)
+  const [isFlowExecuted, setIsFlowExecuted] = useState(false)
+  const panelRef = useRef<HTMLElement>(null)
+  const logRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dragRef = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null)
+  const focusPending = useRef(false)
+  const previewRef = useRef<PreviewState>(emptyPreview())
+  const signatureRef = useRef<string | null>(null)
+  const messageCounter = useRef(0)
+
+  const nextMessageId = useCallback(() => `message-${++messageCounter.current}`, [])
+
+  const resetConversation = useCallback(
+    (flow: AtendimentoFlow | null) => {
+      setSavedFlow(flow)
+      setIsFlowExecuted(Boolean(flow))
+      previewRef.current = emptyPreview()
+      signatureRef.current = flow ? behaviorSignature(flow) : null
+      setMessages([{ id: nextMessageId(), role: "assistant", content: flow ? READY_MESSAGE : IDLE_MESSAGE }])
+    },
+    [nextMessageId],
+  )
+
+  useEffect(() => {
+    if (isOpen) resetConversation(loadExecutedFlow())
+  }, [isOpen, resetConversation])
+
+  useEffect(() => {
+    const handleExecuted = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail
+      resetConversation((detail ? parseFlow(detail) : null) ?? loadExecutedFlow())
+    }
+    const handleStorageChange = () => {
+      if (!isOpen) return
+      const flow = loadExecutedFlow()
+      if (!flow) {
+        if (signatureRef.current === null) return
+        signatureRef.current = null
+        setIsFlowExecuted(false)
+        previewRef.current = emptyPreview()
+        const notice: BotMessage = { id: nextMessageId(), role: "assistant", content: CHANGED_MESSAGE }
+        setMessages((previous) => [...previous, notice])
+        return
+      }
+      if (behaviorSignature(flow) !== signatureRef.current) resetConversation(flow)
+    }
+    window.addEventListener("workflow:executed", handleExecuted)
+    window.addEventListener("storage", handleStorageChange)
+    return () => {
+      window.removeEventListener("workflow:executed", handleExecuted)
+      window.removeEventListener("storage", handleStorageChange)
+    }
+  }, [isOpen, nextMessageId, resetConversation])
+
+  useEffect(() => {
+    if (!isOpen) return
+    focusPending.current = true
+    setIsMinimized(false)
+  }, [isOpen, openRequest])
+
+  useEffect(() => {
+    if (!focusPending.current || !inputRef.current) return
+    focusPending.current = false
+    inputRef.current.focus({ preventScroll: true })
+  })
+
+  useEffect(() => {
+    const log = logRef.current
+    if (!log) return
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    log.scrollTo({ top: log.scrollHeight, behavior: reduced ? "auto" : "smooth" })
+  }, [messages, isMinimized, isOpen])
+
+  const clampPosition = useCallback((next: { x: number; y: number }) => {
+    const panel = panelRef.current
+    if (!panel) return next
+    const maxX = Math.max(0, window.innerWidth - panel.offsetWidth - BOT_GAP * 2)
+    const maxY = Math.max(0, window.innerHeight - panel.offsetHeight - BOT_GAP * 2 - HEADER_HEIGHT)
+    return { x: Math.min(Math.max(next.x, 0), maxX), y: Math.min(Math.max(next.y, 0), maxY) }
+  }, [])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const keepInside = () =>
+      setPosition((current) => {
+        const next = clampPosition(current)
+        return next.x === current.x && next.y === current.y ? current : next
+      })
+    keepInside()
+    window.addEventListener("resize", keepInside)
+    return () => window.removeEventListener("resize", keepInside)
+  }, [isOpen, isMinimized, clampPosition])
+
+  const handleSendMessage = () => {
+    const reply = input.trim()
+    if (!reply) return
+    setInput("")
+    const next = savedFlow && isFlowExecuted
+      ? (previewRef.current.waiting ? replyPreview(savedFlow, previewRef.current, reply) : startPreview(savedFlow))
+      : { ...emptyPreview(), messages: [INACTIVE_REPLY] }
+    previewRef.current = next
+    const entries: BotMessage[] = [
+      { id: nextMessageId(), role: "user", content: reply },
+      ...next.messages.map((content) => ({ id: nextMessageId(), role: "assistant" as const, content })),
+    ]
+    setMessages((previous) => [...previous, ...entries])
+  }
+
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || (event.target as Element).closest("button")) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, originX: position.x, originY: position.y }
+    setIsDragging(true)
+  }
+
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    setPosition(clampPosition({ x: drag.originX - (event.clientX - drag.x), y: drag.originY - (event.clientY - drag.y) }))
+  }
+
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return
+    dragRef.current = null
+    setIsDragging(false)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <section
+      ref={panelRef}
+      aria-label="Assistente de prévia"
+      className={cn(ui.card, "fixed z-50 flex w-96 max-w-[calc(100vw_-_2rem)] flex-col overflow-hidden shadow-xl duration-200 animate-in fade-in-0 slide-in-from-bottom-2 motion-reduce:animate-none")}
+      style={{ right: BOT_GAP + position.x, bottom: BOT_GAP + position.y }}
+    >
+      <div
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        className={cn("flex touch-none select-none items-center justify-between gap-2 border-b border-flow-border px-3 py-2.5", isDragging ? "cursor-grabbing" : "cursor-grab", isMinimized && "border-b-0")}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-flow-soft text-flow-accent">
+            <Bot className="h-4 w-4" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-flow-fg">¥$</h2>
+            <p className="truncate text-[11px] text-flow-muted">Assistente by Lucas Lima</p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setIsMinimized((current) => !current)}
+            aria-label={isMinimized ? "Expandir prévia" : "Minimizar prévia"}
+            title={isMinimized ? "Expandir prévia" : "Minimizar prévia"}
+            className={ghostButton}
+          >
+            {isMinimized ? <Maximize2 className="h-3.5 w-3.5" aria-hidden /> : <Minus className="h-4 w-4" aria-hidden />}
+          </button>
+          <button type="button" onClick={onClose} aria-label="Fechar prévia" title="Fechar prévia" className={ghostButton}>
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+      </div>
+      {!isMinimized && (
+        <>
+          <div ref={logRef} role="log" aria-label="Prévia do atendimento" aria-live="polite" className="flex h-[min(20rem,calc(100dvh_-_16rem))] flex-col gap-2 overflow-y-auto px-3 py-3">
+            {messages.map((message) => (
+              <div key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
+                <p
+                  className={cn(
+                    "max-w-[85%] whitespace-pre-line break-words rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                    message.role === "user" ? "rounded-br-md bg-flow-accent text-white" : "rounded-bl-md border border-flow-border bg-flow-soft text-flow-fg",
+                  )}
+                >
+                  {message.content}
+                </p>
+              </div>
+            ))}
+          </div>
+          {!isFlowExecuted && (
+            <div className="flex items-center justify-between gap-2 border-t border-flow-border bg-flow-soft px-3 py-2">
+              <span className="text-xs text-flow-muted">Prévia inativa</span>
+              <button type="button" onClick={onStart} className={ui.accentButton}>
+                <Play className="h-3.5 w-3.5" aria-hidden />
+                Iniciar prévia
+              </button>
+            </div>
+          )}
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              handleSendMessage()
+            }}
+            className="flex items-center gap-2 border-t border-flow-border p-3"
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Digite sua mensagem..."
+              aria-label="Mensagem para a prévia"
+              autoComplete="off"
+              className={cn(ui.input, "min-w-0 flex-1")}
+            />
+            <button type="submit" disabled={!input.trim()} aria-label="Enviar mensagem" title="Enviar mensagem" className={cn(ui.primaryButton, "h-9 w-9 justify-center px-0")}>
+              <SendHorizontal className="h-4 w-4" aria-hidden />
+            </button>
+          </form>
+        </>
+      )}
+    </section>
+  )
+}
+
+function LoadingScreen() {
+  return (
+    <div role="status" className="flex h-dvh flex-col items-center justify-center gap-3 bg-flow-bg">
+      <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-flow-accent text-white">
+        <Workflow className="h-5 w-5" aria-hidden />
+      </span>
+      <p className="flex items-center gap-2 text-sm text-flow-muted">
+        <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        Carregando editor
+      </p>
+    </div>
+  )
+}
+
+function FlowLayout() {
+  const { showColorPanel } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  const [botOpen, setBotOpen] = useState(false)
+  const [botRequest, setBotRequest] = useState(0)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [integrationsOpen, setIntegrationsOpen] = useState(false)
+  const [loaded, setLoaded] = useState({ ai: false, integrations: false })
+  const [backgroundDialog, setBackgroundDialog] = useState(false)
+  const [background, setBackground] = useState<string | null>(null)
+  const [capturing, setCapturing] = useState(false)
+  const actionsRef = useRef<WorkflowActions | null>(null)
+  const containerRef = useRef<HTMLElement>(null)
+  const capturingRef = useRef(false)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(BACKGROUND_KEY)
+      const url = saved ? imageUrlFrom(saved) : null
+      if (url) {
+        setBackgroundVariable(url)
+        setBackground(url)
+      }
+    } catch {}
+    setMounted(true)
+  }, [])
+
+  const handleActionsReady = useCallback((actions: WorkflowActions) => {
+    actionsRef.current = actions
+  }, [])
+
+  const openBot = useCallback(() => {
+    setBotOpen(true)
+    setBotRequest((count) => count + 1)
+  }, [])
+
+  const closeBot = useCallback(() => setBotOpen(false), [])
+
+  const runPreview = useCallback(() => {
+    actionsRef.current?.execute()
+  }, [])
+
+  const searchComponent = useCallback((query: string) => {
+    actionsRef.current?.search(query)
+  }, [])
+
+  const openAI = useCallback(() => {
+    setLoaded((current) => (current.ai ? current : { ...current, ai: true }))
+    setAiOpen(true)
+  }, [])
+
+  const openIntegrations = useCallback(() => {
+    setLoaded((current) => (current.integrations ? current : { ...current, integrations: true }))
+    setIntegrationsOpen(true)
+  }, [])
+
+  const closeIntegrations = useCallback(() => setIntegrationsOpen(false), [])
+
+  const handleGenerated = useCallback((workflow: unknown) => {
+    const actions = actionsRef.current
+    if (actions) return actions.loadWorkflow(workflow)
+    toast({ title: "Editor indisponível", description: "Aguarde o editor terminar de carregar e tente novamente.", variant: "destructive" })
+    return false
+  }, [])
+
+  const openBackgroundDialog = useCallback(() => setBackgroundDialog(true), [])
+
+  const closeBackgroundDialog = useCallback(() => setBackgroundDialog(false), [])
+
+  const applyBackground = useCallback((url: string) => {
+    setBackgroundVariable(url)
+    setBackground(url)
+    setBackgroundDialog(false)
+    try {
+      localStorage.setItem(BACKGROUND_KEY, url)
+      toast({ title: "Imagem de fundo aplicada" })
+    } catch {
+      toast({ title: "Imagem aplicada só nesta sessão", description: "O navegador não permitiu guardar a imagem de fundo." })
+    }
+  }, [])
+
+  const resetBackground = useCallback(() => {
+    setBackgroundVariable(null)
+    setBackground(null)
+    try {
+      localStorage.removeItem(BACKGROUND_KEY)
+    } catch {}
+    toast({ title: "Fundo padrão restaurado" })
+  }, [])
+
+  const saveCanvasImage = useCallback(async () => {
+    const container = containerRef.current
+    if (!container || capturingRef.current) return
+    capturingRef.current = true
+    setCapturing(true)
+    try {
+      const { default: html2canvas } = await import("html2canvas")
+      const flowElement = container.querySelector<HTMLElement>(".react-flow")
+      const target = flowElement?.parentElement ?? container
+      const canvas = await html2canvas(target, {
+        backgroundColor: solidBackground(target) ?? solidBackground(container),
+        ignoreElements: (element) => element.classList.contains("react-flow__panel") || (flowElement !== null && element.parentElement === target && element !== flowElement),
+        logging: false,
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+        useCORS: true,
+      })
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
+      if (!blob) throw new Error("blob")
+      const fileName = exportFileName({ name: storedFlowName(), created_at: new Date().toISOString() })
+        .replace(/\.json$/, ".png")
+        .replace(/[<>:"/\\|?*]/g, "-")
+      downloadBlob(blob, fileName)
+      toast({ title: "Imagem do canvas salva", description: fileName })
+    } catch {
+      toast({ title: "Não foi possível salvar a imagem", description: "O navegador não conseguiu gerar o PNG do canvas. Tente novamente.", variant: "destructive" })
+    } finally {
+      capturingRef.current = false
+      setCapturing(false)
+    }
+  }, [])
+
+  const builder = useMemo(() => <WorkflowBuilder onActionsReady={handleActionsReady} onOpenBot={openBot} />, [handleActionsReady, openBot])
+
+  if (!mounted) return <LoadingScreen />
+
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden bg-flow-bg text-flow-fg">
+      <FlowHeader
+        botOpen={botOpen}
+        capturing={capturing}
+        hasBackground={Boolean(background)}
+        onSearch={searchComponent}
+        onOpenAI={openAI}
+        onOpenBot={openBot}
+        onOpenIntegrations={openIntegrations}
+        onChangeBackground={openBackgroundDialog}
+        onSaveImage={saveCanvasImage}
+        onResetBackground={resetBackground}
+      />
+      <main ref={containerRef} className="relative isolate min-h-0 flex-1 overflow-hidden bg-flow-bg">
+        {builder}
+      </main>
+      <YenFlowBot isOpen={botOpen} openRequest={botRequest} onClose={closeBot} onStart={runPreview} />
+      {loaded.ai && <AIWorkflowDialog open={aiOpen} onOpenChange={setAiOpen} onWorkflowGenerated={handleGenerated} />}
+      {loaded.integrations && <IntegrationsMenu isOpen={integrationsOpen} onClose={closeIntegrations} />}
+      {showColorPanel && <ColorPanel />}
+      <Dialog open={backgroundDialog} onOpenChange={setBackgroundDialog}>
+        <DialogContent className={cn(ui.dialog, "max-w-md rounded-xl sm:rounded-xl")}>
+          <BackgroundForm initial={background && !background.startsWith("data:") ? background : ""} onCancel={closeBackgroundDialog} onApply={applyBackground} />
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+export default FlowLayout

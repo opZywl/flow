@@ -1,530 +1,298 @@
 "use client"
 
-import type React from "react"
-import { useState } from "react"
-import {
-    Send,
-    List,
-    Settings,
-    GitBranch,
-    Code,
-    CheckCircle,
-    MousePointer2,
-    Sparkles,
-    HelpCircle,
-    ExternalLink,
-} from "lucide-react"
-import { useTheme } from "../ThemeContext"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
+import { memo, useId, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react"
+import { Info, Search, SearchX, X } from "lucide-react"
+import { START_TYPE, categories, componentCatalog } from "@/lib/atendimento/catalog"
+import type { ComponentDefinition } from "@/lib/atendimento/types"
+import { cn } from "@/lib/utils"
+import { componentIcon } from "./nodes/atendimento-node"
+import { ui } from "./ui"
 
-const nodeTypes = [
-    {
-        type: "sendMessage",
-        label: "Enviar Mensagem",
-        icon: Send,
-        description: "Envia mensagem para o usuário",
-    },
-    {
-        type: "options",
-        label: "Opções",
-        icon: List,
-        description: "Apresenta opções ao usuário",
-    },
-    {
-        type: "process",
-        label: "Processo",
-        icon: Settings,
-        description: "Processa dados",
-    },
-    {
-        type: "conditional",
-        label: "Condicional",
-        icon: GitBranch,
-        description: "Ramificação condicional",
-    },
-    {
-        type: "code",
-        label: "Código",
-        icon: Code,
-        description: "Executa código personalizado",
-    },
-    {
-        type: "finalizar",
-        label: "Finalizar",
-        icon: CheckCircle,
-        description: "Finaliza o fluxo",
-    },
-]
+const DRAG_TYPE = "application/reactflow"
+const MAIN_CATEGORIES: readonly string[] = ["messages", "routing", "conditions", "control"]
 
-export default function NodeLibrary() {
-    const { theme, currentGradient, glowEnabled, glowIntensity, glowThickness } = useTheme()
-    const [showHelpDialog, setShowHelpDialog] = useState(false)
+const tabs = [
+  { id: "main", label: "Principais" },
+  { id: "templates", label: "Templates" },
+  { id: "collection", label: "Coleta" },
+  { id: "apis", label: "APIs" },
+  { id: "ai", label: "IA" },
+  { id: "tickets", label: "Tickets" },
+  { id: "crm", label: "CRM" },
+  { id: "schedule", label: "Agenda" },
+  { id: "livechat", label: "Livechat" },
+  { id: "all", label: "Todas" },
+] as const
 
-    const onDragStart = (event: React.DragEvent<HTMLDivElement>, nodeType: string) => {
-        event.dataTransfer.setData("application/reactflow", nodeType)
-        event.dataTransfer.effectAllowed = "move"
+type TabId = (typeof tabs)[number]["id"]
+
+const VOWEL = /[aeiouáàâãéêíóôõúü]/
+const ONSETS = new Set(["bl", "br", "cl", "cr", "dr", "fl", "fr", "gl", "gr", "pl", "pr", "tl", "tr", "vr", "ch", "lh", "nh"])
+
+const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+
+function hyphenateWord(word: string) {
+  if (word.length < 11 || !/^[a-zà-ÿ]+$/i.test(word)) return word
+  const lower = word.toLowerCase()
+  const isVowel = (index: number) =>
+    VOWEL.test(lower[index]) &&
+    !(lower[index] === "u" && /[qg]/.test(lower[index - 1] ?? "") && VOWEL.test(lower[index + 1] ?? ""))
+  const cuts: number[] = []
+  let previous = -1
+  for (let index = 0; index < lower.length; index++) {
+    if (!isVowel(index)) continue
+    if (previous >= 0 && index - previous > 1) {
+      cuts.push(index - previous > 2 && ONSETS.has(lower.slice(index - 2, index)) ? index - 2 : index - 1)
     }
-
-    const isDark = theme === "dark"
-
-    // Extract primary color from gradient for solid backgrounds
-    const getPrimaryColor = () => {
-        // Extract the first color from the gradient string
-        const match = currentGradient.primary.match(/#[0-9a-fA-F]{6}/)
-        return match ? match[0] : isDark ? "#1e40af" : "#3b82f6"
-    }
-
-    const getSecondaryColor = () => {
-        // Extract secondary color or derive from primary
-        const match = currentGradient.secondary.match(/#[0-9a-fA-F]{6}/)
-        return match ? match[0] : isDark ? "#7c3aed" : "#8b5cf6"
-    }
-
-    // Generate glow styles based on current theme
-    const getGlowStyle = (intensity = 1) => {
-        if (!glowEnabled) return {}
-
-        const baseIntensity = (glowIntensity / 100) * intensity
-        const thickness = glowThickness * intensity
-
-        return {
-            filter: `drop-shadow(0 0 ${thickness}px ${getPrimaryColor()}${Math.round(baseIntensity * 80)
-                .toString(16)
-                .padStart(2, "0")}) drop-shadow(0 0 ${thickness * 2}px ${getPrimaryColor()}${Math.round(baseIntensity * 40)
-                .toString(16)
-                .padStart(2, "0")})`,
-            textShadow: `0 0 ${thickness}px ${getPrimaryColor()}${Math.round(baseIntensity * 100)
-                .toString(16)
-                .padStart(2, "0")}`,
-        }
-    }
-
-    const getContainerGlowStyle = () => {
-        if (!glowEnabled)
-            return {
-                border: isDark ? `1px solid ${getPrimaryColor()}40` : `1px solid ${getPrimaryColor()}30`,
-            }
-
-        const baseIntensity = glowIntensity / 100
-        const thickness = glowThickness
-
-        return {
-            boxShadow: `
-      0 0 ${thickness}px ${getPrimaryColor()}${Math.round(baseIntensity * 60)
-                .toString(16)
-                .padStart(2, "0")},
-      0 0 ${thickness * 2}px ${getPrimaryColor()}${Math.round(baseIntensity * 30)
-                .toString(16)
-                .padStart(2, "0")},
-      0 0 ${thickness * 3}px ${getPrimaryColor()}${Math.round(baseIntensity * 15)
-                .toString(16)
-                .padStart(2, "0")},
-      inset 0 0 ${thickness}px ${getPrimaryColor()}${Math.round(baseIntensity * 8)
-                .toString(16)
-                .padStart(2, "0")}
-    `,
-            border: `1px solid ${getPrimaryColor()}${Math.round(baseIntensity * 80)
-                .toString(16)
-                .padStart(2, "0")}`,
-        }
-    }
-
-    const getHoverGlowStyle = () => {
-        if (!glowEnabled)
-            return {
-                borderColor: isDark ? `${getPrimaryColor()}50` : `${getPrimaryColor()}40`,
-                boxShadow: isDark ? `0 4px 15px ${getPrimaryColor()}30` : `0 4px 15px ${getPrimaryColor()}20`,
-            }
-
-        const baseIntensity = glowIntensity / 100
-        const thickness = glowThickness
-
-        return {
-            boxShadow: `
-      0 0 ${thickness}px ${getPrimaryColor()}${Math.round(baseIntensity * 70)
-                .toString(16)
-                .padStart(2, "0")}, 
-      0 0 ${thickness * 2}px ${getPrimaryColor()}${Math.round(baseIntensity * 40)
-                .toString(16)
-                .padStart(2, "0")}, 
-      inset 0 0 ${thickness / 2}px ${getPrimaryColor()}${Math.round(baseIntensity * 20)
-                .toString(16)
-                .padStart(2, "0")}
-    `,
-            borderColor: `${getPrimaryColor()}${Math.round(baseIntensity * 90)
-                .toString(16)
-                .padStart(2, "0")}`,
-        }
-    }
-
-    const handleHelpClick = () => {
-        setShowHelpDialog(true)
-    }
-
-    const handleGitHubRedirect = () => {
-        window.open("https://github.com/opZywl/workflow/issues", "_blank")
-        setShowHelpDialog(false)
-    }
-
-    return (
-        <>
-            <div
-                className="h-full flex flex-col relative overflow-hidden rounded-xl"
-                style={{
-                    background: isDark
-                        ? `linear-gradient(135deg, ${getPrimaryColor()}20 0%, ${getSecondaryColor()}15 50%, ${getPrimaryColor()}20 100%)`
-                        : `linear-gradient(135deg, ${getPrimaryColor()}10 0%, ${getSecondaryColor()}08 50%, ${getPrimaryColor()}10 100%)`,
-                    backdropFilter: "blur(20px)",
-                    ...getContainerGlowStyle(),
-                }}
-            >
-                {/* Animated Background Gradient */}
-                <div
-                    className="absolute inset-0 opacity-20 animate-pulse rounded-xl"
-                    style={{
-                        background: `linear-gradient(135deg, ${getPrimaryColor()}40, ${getSecondaryColor()}40)`,
-                        filter: "blur(40px)",
-                    }}
-                />
-
-                {/* Header */}
-                <div className="relative z-10 px-4 py-4">
-                    <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                            <div
-                                className="p-2 rounded-xl transition-all duration-300"
-                                style={{
-                                    background: `linear-gradient(135deg, ${getPrimaryColor()}, ${getSecondaryColor()})`,
-                                    boxShadow: `0 4px 12px ${getPrimaryColor()}40`,
-                                    ...getGlowStyle(0.8),
-                                }}
-                            >
-                                <Sparkles className="h-4 w-4 text-white" />
-                            </div>
-                            <h3
-                                className={`text-lg font-bold ${isDark ? "text-white" : "text-gray-900"}`}
-                                style={{
-                                    ...getGlowStyle(0.6),
-                                    textShadow: isDark ? `0 0 10px ${getPrimaryColor()}60` : `0 0 5px ${getPrimaryColor()}40`,
-                                }}
-                            >
-                                Componentes
-                            </h3>
-                        </div>
-                        <MousePointer2
-                            className={`h-4 w-4 animate-pulse`}
-                            style={{
-                                ...getGlowStyle(0.3),
-                                color: isDark ? `${getPrimaryColor()}80` : `${getPrimaryColor()}60`,
-                            }}
-                        />
-                    </div>
-
-                    <p
-                        className={`text-sm font-medium`}
-                        style={{
-                            ...getGlowStyle(0.2),
-                            color: isDark ? `${getPrimaryColor()}cc` : `${getPrimaryColor()}99`,
-                        }}
-                    >
-                        Arraste os componentes para o canvas
-                    </p>
-                </div>
-
-                {/* Components List */}
-                <div className="flex-1 overflow-y-auto px-3 py-2 relative z-10">
-                    <div className="space-y-2">
-                        {nodeTypes.map((node, index) => {
-                            const IconComponent = node.icon
-                            return (
-                                <div
-                                    key={node.type}
-                                    className={`group px-4 py-3 rounded-xl cursor-grab active:cursor-grabbing transition-all duration-300 relative overflow-hidden`}
-                                    style={{
-                                        background: isDark
-                                            ? `linear-gradient(135deg, ${getPrimaryColor()}15 0%, ${getSecondaryColor()}10 50%, ${getPrimaryColor()}15 100%)`
-                                            : `linear-gradient(135deg, ${getPrimaryColor()}08 0%, ${getSecondaryColor()}05 50%, ${getPrimaryColor()}08 100%)`,
-                                        border: isDark ? `1px solid ${getPrimaryColor()}30` : `1px solid ${getPrimaryColor()}20`,
-                                        animationDelay: `${index * 100}ms`,
-                                        backdropFilter: "blur(10px)",
-                                        boxShadow: isDark ? `0 2px 8px ${getPrimaryColor()}20` : `0 2px 8px ${getPrimaryColor()}15`,
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        const hoverStyle = getHoverGlowStyle()
-                                        Object.assign(e.currentTarget.style, {
-                                            ...hoverStyle,
-                                            background: isDark
-                                                ? `linear-gradient(135deg, ${getPrimaryColor()}25 0%, ${getSecondaryColor()}20 50%, ${getPrimaryColor()}25 100%)`
-                                                : `linear-gradient(135deg, ${getPrimaryColor()}15 0%, ${getSecondaryColor()}10 50%, ${getPrimaryColor()}15 100%)`,
-                                            transform: "translateY(-2px) scale(1.02)",
-                                        })
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.background = isDark
-                                            ? `linear-gradient(135deg, ${getPrimaryColor()}15 0%, ${getSecondaryColor()}10 50%, ${getPrimaryColor()}15 100%)`
-                                            : `linear-gradient(135deg, ${getPrimaryColor()}08 0%, ${getSecondaryColor()}05 50%, ${getPrimaryColor()}08 100%)`
-                                        e.currentTarget.style.borderColor = isDark ? `${getPrimaryColor()}30` : `${getPrimaryColor()}20`
-                                        e.currentTarget.style.transform = "translateY(0) scale(1)"
-                                        e.currentTarget.style.boxShadow = isDark
-                                            ? `0 2px 8px ${getPrimaryColor()}20`
-                                            : `0 2px 8px ${getPrimaryColor()}15`
-                                    }}
-                                    draggable
-                                    onDragStart={(event) => onDragStart(event, node.type)}
-                                >
-                                    {/* Hover gradient overlay */}
-                                    <div
-                                        className="absolute inset-0 opacity-0 group-hover:opacity-30 transition-opacity duration-300 rounded-xl"
-                                        style={{
-                                            background: `linear-gradient(135deg, ${getPrimaryColor()}, ${getSecondaryColor()})`,
-                                        }}
-                                    />
-
-                                    <div className="relative z-10 flex items-center gap-4">
-                                        <div
-                                            className="p-2.5 rounded-xl transition-all duration-300 group-hover:scale-110"
-                                            style={{
-                                                background: `linear-gradient(135deg, ${getPrimaryColor()}, ${getSecondaryColor()})`,
-                                                boxShadow: `0 4px 12px ${getPrimaryColor()}40`,
-                                                ...getGlowStyle(0.4),
-                                            }}
-                                        >
-                                            <IconComponent className="h-4 w-4 text-white" />
-                                        </div>
-
-                                        <div className="flex-1 min-w-0">
-                                            <div
-                                                className={`text-sm font-semibold mb-1 group-hover:text-white transition-colors duration-300`}
-                                                style={{
-                                                    color: isDark ? "#ffffff" : "#1f2937",
-                                                    ...getGlowStyle(0.3),
-                                                    textShadow: isDark ? `0 0 8px ${getPrimaryColor()}40` : "none",
-                                                }}
-                                            >
-                                                {node.label}
-                                            </div>
-                                            <div
-                                                className={`text-xs group-hover:text-gray-200 transition-colors duration-300 truncate`}
-                                                style={{
-                                                    color: isDark ? `${getPrimaryColor()}cc` : `${getPrimaryColor()}80`,
-                                                    ...getGlowStyle(0.2),
-                                                }}
-                                            >
-                                                {node.description}
-                                            </div>
-                                        </div>
-
-                                        {/* Drag indicator */}
-                                        <div className="flex flex-col gap-1 opacity-40 group-hover:opacity-80 transition-all duration-300">
-                                            <div
-                                                className={`w-1 h-1 rounded-full`}
-                                                style={{
-                                                    backgroundColor: isDark ? `${getPrimaryColor()}80` : `${getPrimaryColor()}60`,
-                                                    ...getGlowStyle(0.2),
-                                                }}
-                                            />
-                                            <div
-                                                className={`w-1 h-1 rounded-full`}
-                                                style={{
-                                                    backgroundColor: isDark ? `${getPrimaryColor()}80` : `${getPrimaryColor()}60`,
-                                                    ...getGlowStyle(0.2),
-                                                }}
-                                            />
-                                            <div
-                                                className={`w-1 h-1 rounded-full`}
-                                                style={{
-                                                    backgroundColor: isDark ? `${getPrimaryColor()}80` : `${getPrimaryColor()}60`,
-                                                    ...getGlowStyle(0.2),
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            )
-                        })}
-                    </div>
-                </div>
-
-                {/* Footer */}
-                <div className="relative z-10 px-4 py-4">
-                    <div className="flex items-center justify-center gap-3">
-                        <div
-                            className="w-2 h-2 rounded-full animate-pulse"
-                            style={{
-                                background: `linear-gradient(135deg, ${getPrimaryColor()}, ${getSecondaryColor()})`,
-                                ...getGlowStyle(0.6),
-                            }}
-                        />
-                        <button
-                            onClick={handleHelpClick}
-                            className={`flex items-center gap-1 text-xs font-semibold transition-all duration-300 hover:scale-105 px-2 py-1 rounded-md`}
-                            style={{
-                                color: isDark ? "#ffffff" : "#1f2937",
-                                background: isDark
-                                    ? `linear-gradient(135deg, ${getPrimaryColor()}20 0%, ${getSecondaryColor()}15 100%)`
-                                    : `linear-gradient(135deg, ${getPrimaryColor()}10 0%, ${getSecondaryColor()}08 100%)`,
-                                border: isDark ? `1px solid ${getPrimaryColor()}40` : `1px solid ${getPrimaryColor()}30`,
-                                backdropFilter: "blur(10px)",
-                                boxShadow: isDark ? `0 2px 8px ${getPrimaryColor()}20` : `0 2px 8px ${getPrimaryColor()}15`,
-                                textShadow: isDark ? `0 0 8px ${getPrimaryColor()}40` : "none",
-                                ...getGlowStyle(0.2),
-                            }}
-                            onMouseEnter={(e) => {
-                                const hoverStyle = getHoverGlowStyle()
-                                Object.assign(e.currentTarget.style, {
-                                    ...hoverStyle,
-                                    background: isDark
-                                        ? `linear-gradient(135deg, ${getPrimaryColor()}30 0%, ${getSecondaryColor()}25 100%)`
-                                        : `linear-gradient(135deg, ${getPrimaryColor()}15 0%, ${getSecondaryColor()}12 100%)`,
-                                })
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.background = isDark
-                                    ? `linear-gradient(135deg, ${getPrimaryColor()}20 0%, ${getSecondaryColor()}15 100%)`
-                                    : `linear-gradient(135deg, ${getPrimaryColor()}10 0%, ${getSecondaryColor()}08 100%)`
-                                e.currentTarget.style.borderColor = isDark ? `${getPrimaryColor()}40` : `${getPrimaryColor()}30`
-                                e.currentTarget.style.boxShadow = isDark
-                                    ? `0 2px 8px ${getPrimaryColor()}20`
-                                    : `0 2px 8px ${getPrimaryColor()}15`
-                            }}
-                        >
-                            <HelpCircle className="h-3 w-3" />
-                            Precisa de ajuda?
-                        </button>
-                        <div
-                            className="w-2 h-2 rounded-full animate-pulse"
-                            style={{
-                                background: `linear-gradient(135deg, ${getPrimaryColor()}, ${getSecondaryColor()})`,
-                                ...getGlowStyle(0.6),
-                                animationDelay: "1s",
-                            }}
-                        />
-                    </div>
-                </div>
-            </div>
-
-            {/* Help Dialog */}
-            <Dialog open={showHelpDialog} onOpenChange={setShowHelpDialog}>
-                <DialogContent
-                    className={`max-w-md mx-auto rounded-xl border-0`}
-                    style={{
-                        background: isDark
-                            ? `linear-gradient(135deg, rgba(0,0,0,0.95) 0%, ${getPrimaryColor()}15 50%, rgba(0,0,0,0.95) 100%)`
-                            : `linear-gradient(135deg, rgba(255,255,255,0.95) 0%, ${getPrimaryColor()}10 50%, rgba(255,255,255,0.95) 100%)`,
-                        border: isDark ? `1px solid ${getPrimaryColor()}40` : `1px solid ${getPrimaryColor()}30`,
-                        boxShadow: isDark
-                            ? `0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 40px ${getPrimaryColor()}30`
-                            : `0 25px 50px -12px rgba(0, 0, 0, 0.3), 0 0 40px ${getPrimaryColor()}20`,
-                        backdropFilter: "blur(20px)",
-                    }}
-                >
-                    <DialogHeader className="text-center">
-                        <div className="flex items-center justify-center mb-4">
-                            <div
-                                className="p-4 rounded-xl"
-                                style={{
-                                    background: `linear-gradient(135deg, ${getPrimaryColor()}, ${getSecondaryColor()})`,
-                                    boxShadow: `0 8px 20px ${getPrimaryColor()}40`,
-                                    ...getGlowStyle(0.8),
-                                }}
-                            >
-                                <HelpCircle className="h-6 w-6 text-white" />
-                            </div>
-                        </div>
-                        <DialogTitle
-                            className={`text-xl font-bold mb-2`}
-                            style={{
-                                color: isDark ? "#ffffff" : "#111827",
-                                textShadow: isDark ? `0 0 15px ${getPrimaryColor()}60` : `0 0 8px ${getPrimaryColor()}40`,
-                                ...getGlowStyle(0.5),
-                            }}
-                        >
-                            Precisa de algum componente?
-                        </DialogTitle>
-                        <DialogDescription
-                            className={`text-sm`}
-                            style={{
-                                color: isDark ? "#d1d5db" : "#6b7280",
-                                textShadow: isDark ? `0 0 5px ${getPrimaryColor()}30` : "none",
-                                ...getGlowStyle(0.2),
-                            }}
-                        >
-                            Não encontrou o componente que precisa? Sugira novos componentes para o workflow!
-                        </DialogDescription>
-                    </DialogHeader>
-
-                    <div className="mt-6 space-y-4">
-                        <div
-                            className={`p-4 rounded-xl border`}
-                            style={{
-                                background: isDark
-                                    ? `linear-gradient(135deg, ${getPrimaryColor()}10 0%, ${getSecondaryColor()}05 100%)`
-                                    : `linear-gradient(135deg, ${getPrimaryColor()}05 0%, ${getSecondaryColor()}02 100%)`,
-                                border: isDark ? `1px solid ${getPrimaryColor()}30` : `1px solid ${getPrimaryColor()}20`,
-                                boxShadow: `0 4px 15px ${getPrimaryColor()}20`,
-                                backdropFilter: "blur(10px)",
-                            }}
-                        >
-                            <p
-                                className={`text-sm font-semibold mb-3`}
-                                style={{
-                                    color: isDark ? "#ffffff" : "#111827",
-                                    ...getGlowStyle(0.3),
-                                }}
-                            >
-                                Como sugerir um componente:
-                            </p>
-                            <ul className={`text-xs space-y-2`} style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                <li className="flex items-center gap-2">
-                                    <div className="w-1 h-1 rounded-full" style={{ background: getPrimaryColor() }} />
-                                    Descreva o tipo de componente
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <div className="w-1 h-1 rounded-full" style={{ background: getPrimaryColor() }} />
-                                    Explique como ele funcionaria
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <div className="w-1 h-1 rounded-full" style={{ background: getPrimaryColor() }} />
-                                    Dê exemplos de uso
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-
-                    <div className="flex justify-center gap-4 mt-8">
-                        <Button
-                            onClick={() => setShowHelpDialog(false)}
-                            variant="outline"
-                            className={`px-6 py-2 rounded-xl font-semibold transition-all duration-300`}
-                            style={{
-                                background: isDark
-                                    ? `linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%)`
-                                    : `linear-gradient(135deg, rgba(0, 0, 0, 0.1) 0%, rgba(0, 0, 0, 0.05) 100%)`,
-                                border: isDark ? `1px solid rgba(255, 255, 255, 0.2)` : `1px solid rgba(0, 0, 0, 0.2)`,
-                                color: isDark ? "white" : "black",
-                                backdropFilter: "blur(10px)",
-                            }}
-                        >
-                            Cancelar
-                        </Button>
-                        <Button
-                            onClick={handleGitHubRedirect}
-                            className={`flex items-center gap-2 font-semibold px-6 py-2 rounded-xl transition-all duration-300 hover:scale-105`}
-                            style={{
-                                background: `linear-gradient(135deg, ${getPrimaryColor()}, ${getSecondaryColor()})`,
-                                color: "white",
-                                border: `1px solid ${getPrimaryColor()}60`,
-                                boxShadow: `0 4px 15px ${getPrimaryColor()}40, 0 0 20px ${getPrimaryColor()}20`,
-                                ...getGlowStyle(0.4),
-                            }}
-                        >
-                            <ExternalLink className="h-4 w-4" />
-                            Gerar Sugestão
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
-        </>
-    )
+    previous = index
+  }
+  return cuts
+    .filter((cut) => cut >= 2 && word.length - cut >= 3)
+    .reduceRight((text, cut) => `${text.slice(0, cut)}\u00ad${text.slice(cut)}`, word)
 }
+
+const library = categories
+  .map((category) => ({
+    category,
+    items: componentCatalog
+      .filter((entry) => entry.category === category.id && entry.nativeType !== START_TYPE)
+      .map((entry) => ({
+        entry,
+        display: entry.label.split(" ").map(hyphenateWord).join(" "),
+        text: normalize([entry.label, category.label, entry.nativeType ?? ""].join(" ")),
+      })),
+  }))
+  .filter((group) => group.items.length > 0)
+
+const inTab = (tab: TabId, category: string) =>
+  tab === "all" || (tab === "main" ? MAIN_CATEGORIES.includes(category) : tab === category)
+
+const resultMessage = (count: number) =>
+  count === 0 ? "Nenhum resultado" : count === 1 ? "1 componente encontrado" : `${count} componentes encontrados`
+
+const tileBase =
+  "flex min-h-[3.25rem] w-full select-none flex-col items-center justify-center gap-1 overflow-hidden rounded-lg px-1 py-1.5 text-center text-[10px] font-semibold leading-[1.15] text-white shadow-sm transition focus-visible:ring-2 focus-visible:ring-flow-accent focus-visible:ring-offset-2 focus-visible:ring-offset-flow-menu"
+const tileReady = "cursor-grab hover:brightness-110 active:cursor-grabbing focus-visible:outline-none"
+const tilePending =
+  "cursor-help opacity-50 outline-dashed outline-1 outline-offset-[-4px] outline-white/80 hover:opacity-75 focus-visible:opacity-75"
+
+function NodeLibrary({ onAdd }: { onAdd: (type: string) => void }) {
+  const baseId = useId()
+  const [query, setQuery] = useState("")
+  const [tab, setTab] = useState<TabId>("main")
+  const [pending, setPending] = useState<string | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const noticeRef = useRef<HTMLDivElement>(null)
+  const originRef = useRef<HTMLButtonElement | null>(null)
+
+  const terms = useMemo(() => normalize(query).split(/\s+/).filter(Boolean), [query])
+  const searching = terms.length > 0
+  const groups = useMemo(
+    () =>
+      library
+        .map((group) => ({
+          ...group,
+          items: searching
+            ? group.items.filter((item) => terms.every((term) => item.text.includes(term)))
+            : inTab(tab, group.category.id)
+              ? group.items
+              : [],
+        }))
+        .filter((group) => group.items.length > 0),
+    [searching, tab, terms],
+  )
+  const total = groups.reduce((sum, group) => sum + group.items.length, 0)
+
+  const changeQuery = (value: string) => {
+    setQuery(value)
+    listRef.current?.scrollTo({ top: 0 })
+  }
+
+  const selectTab = (id: TabId) => {
+    setTab(id)
+    changeQuery("")
+  }
+
+  const clearQuery = () => {
+    changeQuery("")
+    searchRef.current?.focus()
+  }
+
+  const dismiss = (restoreFocus: boolean) => {
+    const origin = originRef.current
+    originRef.current = null
+    setPending(null)
+    if (!restoreFocus) return
+    if (origin?.isConnected) origin.focus()
+    else searchRef.current?.focus()
+  }
+
+  const choose = (event: MouseEvent<HTMLButtonElement>, entry: ComponentDefinition) => {
+    if (entry.nativeType) {
+      originRef.current = null
+      setPending(null)
+      onAdd(entry.nativeType)
+      return
+    }
+    originRef.current = event.currentTarget
+    setPending(entry.label)
+  }
+
+  const startDrag = (event: DragEvent<HTMLButtonElement>, type: string) => {
+    event.dataTransfer.setData(DRAG_TYPE, type)
+    event.dataTransfer.effectAllowed = "copyMove"
+  }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Escape" || !pending) return
+    event.stopPropagation()
+    dismiss(Boolean(noticeRef.current?.contains(document.activeElement)))
+  }
+
+  return (
+    <aside
+      aria-label="Biblioteca de componentes"
+      onKeyDown={handleKeyDown}
+      className={cn("flex h-full min-h-0 w-64 shrink-0 flex-col border-r", ui.panel)}
+    >
+      <div className="shrink-0 px-3 pb-2 pt-3">
+        <h2 className="px-1 text-sm font-bold text-flow-fg">Componentes</h2>
+        <div className="relative mt-2.5">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-flow-muted"
+            aria-hidden
+          />
+          <input
+            ref={searchRef}
+            type="search"
+            value={query}
+            onChange={(event) => changeQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || !query) return
+              event.stopPropagation()
+              changeQuery("")
+            }}
+            placeholder="Pesquisar componentes"
+            aria-label="Pesquisar componentes"
+            autoComplete="off"
+            spellCheck={false}
+            className={cn(ui.input, "h-9 pl-8 pr-8 text-xs [&::-webkit-search-cancel-button]:hidden")}
+          />
+          {query ? (
+            <button
+              type="button"
+              onClick={clearQuery}
+              aria-label="Limpar busca"
+              title="Limpar busca"
+              className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          ) : null}
+        </div>
+        <p className="sr-only" aria-live="polite">
+          {searching ? resultMessage(total) : ""}
+        </p>
+        <div role="group" aria-label="Categorias" className="mt-2.5 flex flex-wrap gap-1">
+          {tabs.map((item) => {
+            const active = !searching && tab === item.id
+            return (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => selectTab(item.id)}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-4 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30",
+                  active
+                    ? "border-flow-accent bg-flow-accent text-white shadow-sm"
+                    : "border-flow-border bg-flow-surface text-flow-muted-strong hover:border-flow-accent/50 hover:text-flow-fg",
+                )}
+              >
+                {item.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-1">
+        {groups.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            {groups.map((group) => {
+              const headingId = `${baseId}-${group.category.id}`
+              return (
+                <section key={group.category.id}>
+                  <h3 id={headingId} className={cn(ui.sectionTitle, "px-1 pb-1.5")}>
+                    {group.category.label}
+                  </h3>
+                  <ul aria-labelledby={headingId} className="grid grid-cols-3 gap-1.5">
+                    {group.items.map(({ entry, display }) => {
+                      const type = entry.nativeType
+                      const Icon = componentIcon(type ?? "")
+                      return (
+                        <li key={entry.id} className="flex">
+                          <button
+                            type="button"
+                            aria-label={entry.label}
+                            draggable={Boolean(type)}
+                            onDragStart={type ? (event) => startDrag(event, type) : undefined}
+                            onClick={(event) => choose(event, entry)}
+                            title={type ? undefined : "Requer um JSON exportado da plataforma"}
+                            className={cn(tileBase, type ? tileReady : tilePending)}
+                            style={{ backgroundColor: group.category.color }}
+                          >
+                            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            <span className="max-w-full hyphens-auto break-words">{display}</span>
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </section>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="mx-1 mt-2 rounded-xl border border-dashed border-flow-border bg-flow-surface px-3 py-6 text-center">
+            <SearchX className="mx-auto h-5 w-5 text-flow-muted" aria-hidden />
+            <p className="mt-2 text-sm font-semibold text-flow-fg">Nenhum componente encontrado</p>
+            <p className="mt-1 break-words text-xs leading-5 text-flow-muted">
+              Nada corresponde a “{query.trim()}”. Revise o termo ou escolha uma categoria.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="shrink-0 border-t border-flow-border px-3 py-2">
+        <div ref={noticeRef} role="status">
+          {pending ? (
+            <div className="mb-2 rounded-lg border border-flow-warning/40 bg-flow-warning/10 p-3">
+              <div className="flex items-start gap-2">
+                <Info className="mt-px h-4 w-4 shrink-0 text-flow-warning" aria-hidden />
+                <div className="min-w-0">
+                  <p className="break-words text-xs font-semibold text-flow-fg">{pending}</p>
+                  <p className="mt-1 text-[11px] leading-4 text-flow-muted-strong">
+                    Ainda não há um exemplo deste componente no formato de Atendimento. Envie um JSON exportado da
+                    plataforma com este componente configurado para habilitá-lo.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={(event) => dismiss(event.detail === 0)}
+                    className={cn(ui.button, "mt-2 h-7")}
+                  >
+                    Entendi
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <p className="text-center text-[11px] text-flow-muted">Clique ou arraste para adicionar</p>
+      </div>
+    </aside>
+  )
+}
+
+export default memo(NodeLibrary)

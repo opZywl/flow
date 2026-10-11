@@ -1,4 +1,3 @@
-// API Real do BliP
 export interface BlipCommandResponse<T> {
     success: boolean
     data?: T
@@ -33,7 +32,7 @@ export class BlipAPI {
     }
 
     private generateId(): string {
-        return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+        return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
     }
 
     private async makeRequest<T>(
@@ -93,7 +92,7 @@ export class BlipAPI {
                 if (error.name === "AbortError") {
                     return {
                         success: false,
-                        error: "Timeout: A requisição demorou muito para responder",
+                        error: "Tempo esgotado: o BliP não respondeu em 30 segundos.",
                     }
                 }
                 return {
@@ -108,18 +107,15 @@ export class BlipAPI {
         }
     }
 
-    // Validar API Key
     async validateApiKey(): Promise<BlipCommandResponse<BlipAccount>> {
         const result = await this.makeRequest<BlipAccount>("GET", "/account")
         return result
     }
 
-    // Listar fluxos
     async getFlows(): Promise<BlipCommandResponse<FlowInfo[]>> {
         const result = await this.makeRequest<any>("GET", "/flows")
 
         if (result.success && result.data) {
-            // Converter formato BliP para nosso formato
             const flows: FlowInfo[] = Object.entries(result.data).map(([id, flow]: [string, any]) => ({
                 id,
                 name: flow.name || id,
@@ -137,20 +133,17 @@ export class BlipAPI {
         return result
     }
 
-    // Obter fluxo específico
     async getFlow(flowId: string): Promise<BlipCommandResponse<any>> {
         const result = await this.makeRequest<any>("GET", `/flows/${flowId}`)
         return result
     }
 
-    // Criar ou atualizar fluxo
     async createOrUpdateFlow(flowId: string, flowData: any): Promise<BlipCommandResponse<any>> {
         const blipFlow = this.convertToBlipFormat(flowData)
         const result = await this.makeRequest<any>("PUT", `/flows/${flowId}`, blipFlow)
         return result
     }
 
-    // Configurar webhook
     async setupWebhook(webhookUrl: string): Promise<BlipCommandResponse<any>> {
         const result = await this.makeRequest<any>("PUT", "/webhook", {
             url: webhookUrl,
@@ -159,12 +152,13 @@ export class BlipAPI {
         return result
     }
 
-    // Converter formato interno para BliP
     convertToBlipFormat(flowData: any): any {
+        if (flowData.nodes?.some((node: any) => node.type === "custom" && node.data?.type)) {
+            throw new Error("O envio direto ao BliP ainda não possui mapeamento para os componentes de Atendimento. Use Exportar JSON para preservar o fluxo completo.")
+        }
         const states: any = {}
         const transitions: any = {}
 
-        // Converter nós para estados
         flowData.nodes?.forEach((node: any) => {
             const stateId = node.id
 
@@ -266,7 +260,6 @@ export class BlipAPI {
             }
         })
 
-        // Converter arestas para transições
         flowData.edges?.forEach((edge: any) => {
             const sourceState = states[edge.source]
             if (sourceState) {
@@ -291,13 +284,11 @@ export class BlipAPI {
         }
     }
 
-    // Converter formato BliP para interno
     convertFromBlipFormat(blipFlow: any): any {
         const nodes: any[] = []
         const edges: any[] = []
         let nodeIndex = 0
 
-        // Converter estados para nós
         Object.entries(blipFlow.states || {}).forEach(([stateId, state]: [string, any]) => {
             const position = {
                 x: Math.random() * 800 + 100,
@@ -310,7 +301,6 @@ export class BlipAPI {
                 customId: `#B${nodeIndex + 1}`,
             }
 
-            // Determinar tipo baseado nas saídas
             if (state.root) {
                 nodeType = "start"
                 nodeData = {
@@ -352,7 +342,6 @@ export class BlipAPI {
             nodeIndex++
         })
 
-        // Converter transições para arestas
         Object.entries(blipFlow.transitions || {}).forEach(([sourceId, transitions]: [string, any]) => {
             if (Array.isArray(transitions)) {
                 transitions.forEach((transition: any, index: number) => {

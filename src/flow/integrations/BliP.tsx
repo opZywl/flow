@@ -1,794 +1,444 @@
 "use client"
 
-import type React from "react"
-import { useState, useCallback, useEffect } from "react"
-import { motion } from "framer-motion"
-import { toast } from "@/components/ui/use-toast"
-import {
-    FiMessageSquare,
-    FiX,
-    FiKey,
-    FiCheck,
-    FiExternalLink,
-    FiInfo,
-    FiZap,
-    FiUpload,
-    FiFile,
-    FiAlertCircle,
-    FiLoader,
-    FiCopy,
-    FiRefreshCw,
-} from "react-icons/fi"
-import { BlipAPI, type FlowInfo, type BlipAccount } from "../../lib/blip-api"
-import Image from "next/image"
-import blipIcon from "@/public/icons/blip.png"
+import { useCallback, useEffect, useId, useState } from "react"
+import { Copy, Download, Loader2, RefreshCw, Upload, Workflow } from "lucide-react"
+import { toast } from "@/hooks/use-toast"
+import { importFlow } from "@/lib/atendimento/format"
+import { cn } from "@/lib/utils"
+import { BlipAPI, type BlipAccount, type FlowInfo } from "../../lib/blip-api"
+import { ui } from "../ui"
+import { IntegrationAction, IntegrationField, IntegrationNotice, IntegrationStatus, IntegrationSubmit } from "./IntegrationsMenu"
 
 interface BlipIntegrationProps {
-    isOpen: boolean
-    onClose: () => void
-    theme: string
-    currentGradient: any
+  onClose: () => void
 }
 
-const BlipIntegration: React.FC<BlipIntegrationProps> = ({ isOpen, onClose, theme, currentGradient }) => {
-    const [apiKey, setApiKey] = useState("")
-    const [botId, setBotId] = useState("")
-    const [isConnected, setIsConnected] = useState(false)
-    const [isConnecting, setIsConnecting] = useState(false)
-    const [accountInfo, setAccountInfo] = useState<BlipAccount | null>(null)
-    const [flows, setFlows] = useState<FlowInfo[]>([])
-    const [isLoadingFlows, setIsLoadingFlows] = useState(false)
-    const [webhookUrl, setWebhookUrl] = useState("")
+const API_KEY_STORAGE = "blip_api_key"
+const BOT_ID_STORAGE = "blip_bot_id"
 
-    const isDark = theme === "dark"
+function errorText(value: unknown, fallback: string): string {
+  if (typeof value === "string" && value.trim()) return value
+  if (value instanceof Error && value.message) return value.message
+  if (value && typeof value === "object" && "description" in value && typeof value.description === "string" && value.description.trim()) {
+    return value.description
+  }
+  return fallback
+}
 
-    // Gerar URL do webhook automaticamente
-    useEffect(() => {
-        if (typeof window !== "undefined") {
-            setWebhookUrl(`${window.location.origin}/api/webhook/blip`)
-        }
-    }, [])
+function countLabel(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}
 
-    // Verificar se há credenciais salvas
-    useEffect(() => {
-        const savedApiKey = localStorage.getItem("blip_api_key")
-        const savedBotId = localStorage.getItem("blip_bot_id")
+function accountName(account: BlipAccount | null): string {
+  return account?.fullName || account?.email || ""
+}
 
-        if (savedApiKey && savedBotId) {
-            setApiKey(savedApiKey)
-            setBotId(savedBotId)
-            handleValidateConnection(savedApiKey, savedBotId)
-        }
-    }, [])
+export default function BlipIntegration({ onClose }: BlipIntegrationProps) {
+  const [apiKey, setApiKey] = useState("")
+  const [botId, setBotId] = useState("")
+  const [isConnected, setIsConnected] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [accountInfo, setAccountInfo] = useState<BlipAccount | null>(null)
+  const [flows, setFlows] = useState<FlowInfo[]>([])
+  const [isLoadingFlows, setIsLoadingFlows] = useState(false)
+  const [webhookUrl, setWebhookUrl] = useState("")
+  const [importingId, setImportingId] = useState<string | null>(null)
+  const [isExporting, setIsExporting] = useState(false)
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false)
+  const webhookId = useId()
 
-    const handleValidateConnection = useCallback(async (key: string, id: string) => {
-        if (!key || !id) return
+  const handleValidateConnection = useCallback(async (key: string, id: string) => {
+    if (!key || !id) return
 
-        setIsConnecting(true)
+    setIsConnecting(true)
+    try {
+      const blipAPI = new BlipAPI(key)
+      const result = await blipAPI.validateApiKey()
+
+      if (result.success && result.data) {
+        setIsConnected(true)
+        setAccountInfo(result.data)
         try {
-            const blipAPI = new BlipAPI(key)
-            const result = await blipAPI.validateApiKey()
-
-            if (result.success && result.data) {
-                setIsConnected(true)
-                setAccountInfo(result.data)
-                localStorage.setItem("blip_api_key", key)
-                localStorage.setItem("blip_bot_id", id)
-
-                // Carregar fluxos disponíveis
-                setIsLoadingFlows(true)
-                const flowsResult = await blipAPI.getFlows()
-                if (flowsResult.success && flowsResult.data) {
-                    setFlows(flowsResult.data)
-                }
-                setIsLoadingFlows(false)
-
-                toast({
-                    title: "✅ Conectado com sucesso!",
-                    description: `Conectado como ${result.data.fullName || result.data.email}`,
-                })
-            } else {
-                toast({
-                    title: "❌ Credenciais inválidas",
-                    description: result.error || "Verifique sua API Key e Bot ID",
-                    variant: "destructive",
-                })
-                localStorage.removeItem("blip_api_key")
-                localStorage.removeItem("blip_bot_id")
-            }
-        } catch (error) {
-            toast({
-                title: "❌ Erro na conexão",
-                description: error instanceof Error ? error.message : "Erro desconhecido",
-                variant: "destructive",
-            })
-        } finally {
-            setIsConnecting(false)
-        }
-    }, [])
-
-    const handleConnect = useCallback(async () => {
-        if (!apiKey || !botId) {
-            toast({
-                title: "❌ Campos obrigatórios",
-                description: "Por favor, preencha a API Key e o Bot ID.",
-                variant: "destructive",
-            })
-            return
-        }
-
-        await handleValidateConnection(apiKey, botId)
-    }, [apiKey, botId, handleValidateConnection])
-
-    const handleDisconnect = useCallback(() => {
-        setIsConnected(false)
-        setApiKey("")
-        setBotId("")
-        setAccountInfo(null)
-        setFlows([])
-        localStorage.removeItem("blip_api_key")
-        localStorage.removeItem("blip_bot_id")
-        toast({
-            title: "🔌 Desconectado",
-            description: "Integração com BliP foi removida.",
-        })
-    }, [])
-
-    const handleRefreshFlows = useCallback(async () => {
-        if (!apiKey) return
+          localStorage.setItem(API_KEY_STORAGE, key)
+          localStorage.setItem(BOT_ID_STORAGE, id)
+        } catch {}
 
         setIsLoadingFlows(true)
         try {
-            const blipAPI = new BlipAPI(apiKey)
-            const result = await blipAPI.getFlows()
-
-            if (result.success && result.data) {
-                setFlows(result.data)
-                toast({
-                    title: "✅ Fluxos atualizados",
-                    description: `${result.data.length} fluxos encontrados`,
-                })
-            } else {
-                toast({
-                    title: "❌ Erro ao carregar fluxos",
-                    description: result.error || "Erro desconhecido",
-                    variant: "destructive",
-                })
-            }
-        } catch (error) {
-            toast({
-                title: "❌ Erro ao carregar fluxos",
-                description: error instanceof Error ? error.message : "Erro desconhecido",
-                variant: "destructive",
-            })
+          const flowsResult = await blipAPI.getFlows()
+          if (flowsResult.success && flowsResult.data) setFlows(flowsResult.data)
         } finally {
-            setIsLoadingFlows(false)
+          setIsLoadingFlows(false)
         }
-    }, [apiKey])
 
-    const handleImportFlow = useCallback(
-        async (flowId: string, flowName: string) => {
-            if (!apiKey) return
-
-            try {
-                toast({
-                    title: "🔄 Importando...",
-                    description: `Importando fluxo ${flowName} do BliP...`,
-                })
-
-                const blipAPI = new BlipAPI(apiKey)
-                const result = await blipAPI.getFlow(flowId)
-
-                if (result.success && result.data) {
-                    const convertedFlow = blipAPI.convertFromBlipFormat(result.data)
-                    localStorage.setItem("workflow", JSON.stringify(convertedFlow))
-                    localStorage.removeItem("executedFlow")
-                    window.dispatchEvent(new Event("storage"))
-
-                    toast({
-                        title: "✅ Fluxo importado!",
-                        description: `${flowName} foi importado com sucesso. ${convertedFlow.nodes?.length || 0} nós criados.`,
-                    })
-                    onClose()
-                } else {
-                    toast({
-                        title: "❌ Erro na importação",
-                        description: result.error || "Erro ao importar fluxo",
-                        variant: "destructive",
-                    })
-                }
-            } catch (error) {
-                toast({
-                    title: "❌ Erro na importação",
-                    description: error instanceof Error ? error.message : "Erro desconhecido",
-                    variant: "destructive",
-                })
-            }
-        },
-        [apiKey, onClose],
-    )
-
-    const handleExportFlow = useCallback(async () => {
-        if (!apiKey) return
-
-        try {
-            const currentFlow = localStorage.getItem("workflow")
-            if (!currentFlow) {
-                toast({
-                    title: "❌ Nenhum fluxo encontrado",
-                    description: "Crie um fluxo antes de exportar.",
-                    variant: "destructive",
-                })
-                return
-            }
-
-            const flowData = JSON.parse(currentFlow)
-            const flowId = `exported-${Date.now()}`
-
-            toast({
-                title: "🔄 Exportando...",
-                description: "Enviando fluxo para o BliP...",
-            })
-
-            const blipAPI = new BlipAPI(apiKey)
-            const result = await blipAPI.createOrUpdateFlow(flowId, flowData)
-
-            if (result.success) {
-                toast({
-                    title: "✅ Fluxo exportado!",
-                    description: `Fluxo ${flowData.name || "Sem nome"} foi enviado para o BliP.`,
-                })
-
-                // Atualizar lista de fluxos
-                await handleRefreshFlows()
-            } else {
-                toast({
-                    title: "❌ Erro na exportação",
-                    description: result.error || "Erro ao exportar fluxo",
-                    variant: "destructive",
-                })
-            }
-        } catch (error) {
-            toast({
-                title: "❌ Erro na exportação",
-                description: error instanceof Error ? error.message : "Erro desconhecido",
-                variant: "destructive",
-            })
-        }
-    }, [apiKey, handleRefreshFlows])
-
-    const handleSetupWebhook = useCallback(async () => {
-        if (!apiKey || !webhookUrl) return
-
-        try {
-            toast({
-                title: "🔄 Configurando webhook...",
-                description: "Configurando URL do webhook no BliP...",
-            })
-
-            const blipAPI = new BlipAPI(apiKey)
-            const result = await blipAPI.setupWebhook(webhookUrl)
-
-            if (result.success) {
-                toast({
-                    title: "✅ Webhook configurado!",
-                    description: "URL do webhook foi configurada no BliP.",
-                })
-            } else {
-                toast({
-                    title: "❌ Erro no webhook",
-                    description: result.error || "Erro ao configurar webhook",
-                    variant: "destructive",
-                })
-            }
-        } catch (error) {
-            toast({
-                title: "❌ Erro no webhook",
-                description: error instanceof Error ? error.message : "Erro desconhecido",
-                variant: "destructive",
-            })
-        }
-    }, [apiKey, webhookUrl])
-
-    const copyWebhookUrl = useCallback(() => {
-        navigator.clipboard.writeText(webhookUrl)
+        const name = accountName(result.data)
+        toast({ title: "Conectado ao BliP", description: name ? `Conta: ${name}` : "Credenciais validadas." })
+      } else {
         toast({
-            title: "📋 URL copiada!",
-            description: "URL do webhook foi copiada para a área de transferência.",
+          title: "Credenciais inválidas",
+          description: errorText(result.error, "Verifique a chave de API e o ID do bot."),
+          variant: "destructive",
         })
-    }, [webhookUrl])
+        try {
+          localStorage.removeItem(API_KEY_STORAGE)
+          localStorage.removeItem(BOT_ID_STORAGE)
+        } catch {}
+      }
+    } catch (error) {
+      toast({ title: "Falha na conexão", description: errorText(error, "Erro desconhecido."), variant: "destructive" })
+    } finally {
+      setIsConnecting(false)
+    }
+  }, [])
 
-    if (!isOpen) return null
+  useEffect(() => {
+    setWebhookUrl(`${window.location.origin}/api/webhook/blip`)
+  }, [])
 
+  useEffect(() => {
+    let savedApiKey: string | null = null
+    let savedBotId: string | null = null
+    try {
+      savedApiKey = localStorage.getItem(API_KEY_STORAGE)
+      savedBotId = localStorage.getItem(BOT_ID_STORAGE)
+    } catch {}
+
+    if (savedApiKey && savedBotId) {
+      setApiKey(savedApiKey)
+      setBotId(savedBotId)
+      void handleValidateConnection(savedApiKey, savedBotId)
+    }
+  }, [handleValidateConnection])
+
+  const handleConnect = useCallback(async () => {
+    const key = apiKey.trim()
+    const id = botId.trim()
+    if (!key || !id) {
+      toast({ title: "Campos obrigatórios", description: "Preencha a chave de API e o ID do bot.", variant: "destructive" })
+      return
+    }
+
+    setApiKey(key)
+    setBotId(id)
+    await handleValidateConnection(key, id)
+  }, [apiKey, botId, handleValidateConnection])
+
+  const handleDisconnect = useCallback(() => {
+    setIsConnected(false)
+    setApiKey("")
+    setBotId("")
+    setAccountInfo(null)
+    setFlows([])
+    try {
+      localStorage.removeItem(API_KEY_STORAGE)
+      localStorage.removeItem(BOT_ID_STORAGE)
+    } catch {}
+    toast({ title: "BliP desconectado", description: "As credenciais foram removidas deste navegador." })
+  }, [])
+
+  const handleRefreshFlows = useCallback(
+    async (notify = true) => {
+      if (!apiKey) return
+
+      setIsLoadingFlows(true)
+      try {
+        const blipAPI = new BlipAPI(apiKey)
+        const result = await blipAPI.getFlows()
+
+        if (result.success && result.data) {
+          setFlows(result.data)
+          if (notify) {
+            toast({ title: "Lista de fluxos atualizada", description: `${countLabel(result.data.length, "fluxo encontrado", "fluxos encontrados")}.` })
+          }
+        } else {
+          toast({
+            title: "Não foi possível carregar os fluxos",
+            description: errorText(result.error, "Erro desconhecido."),
+            variant: "destructive",
+          })
+        }
+      } catch (error) {
+        toast({ title: "Não foi possível carregar os fluxos", description: errorText(error, "Erro desconhecido."), variant: "destructive" })
+      } finally {
+        setIsLoadingFlows(false)
+      }
+    },
+    [apiKey],
+  )
+
+  const handleImportFlow = useCallback(
+    async (flowId: string, flowName: string) => {
+      if (!apiKey) return
+
+      setImportingId(flowId)
+      try {
+        toast({ title: "Importando fluxo", description: `Buscando ${flowName} no BliP.` })
+
+        const blipAPI = new BlipAPI(apiKey)
+        const result = await blipAPI.getFlow(flowId)
+
+        if (result.success && result.data) {
+          const convertedFlow = importFlow(blipAPI.convertFromBlipFormat(result.data))
+          const request = { input: convertedFlow, accepted: false }
+          window.dispatchEvent(new CustomEvent("workflow:import", { detail: request }))
+
+          if (request.accepted) {
+            toast({
+              title: "Fluxo importado",
+              description: `${flowName} foi carregado no editor com ${countLabel(convertedFlow.nodes.length, "componente", "componentes")}.`,
+            })
+            onClose()
+          }
+        } else {
+          toast({
+            title: "Não foi possível importar",
+            description: errorText(result.error, "Erro ao importar o fluxo."),
+            variant: "destructive",
+          })
+        }
+      } catch (error) {
+        toast({ title: "Não foi possível importar", description: errorText(error, "Erro desconhecido."), variant: "destructive" })
+      } finally {
+        setImportingId(null)
+      }
+    },
+    [apiKey, onClose],
+  )
+
+  const handleExportFlow = useCallback(async () => {
+    if (!apiKey) return
+
+    setIsExporting(true)
+    try {
+      const currentFlow = localStorage.getItem("workflow")
+      if (!currentFlow) {
+        toast({ title: "Nenhum fluxo encontrado", description: "Crie um fluxo antes de enviar ao BliP.", variant: "destructive" })
+        return
+      }
+
+      const flowData = JSON.parse(currentFlow)
+      const flowId = `exported-${Date.now()}`
+
+      toast({ title: "Enviando fluxo", description: "Aguardando a resposta do BliP." })
+
+      const blipAPI = new BlipAPI(apiKey)
+      const result = await blipAPI.createOrUpdateFlow(flowId, flowData)
+
+      if (result.success) {
+        toast({ title: "Fluxo enviado", description: `${flowData.name || "Fluxo sem nome"} foi enviado ao BliP.` })
+        await handleRefreshFlows(false)
+      } else {
+        toast({ title: "Não foi possível enviar", description: errorText(result.error, "Erro ao enviar o fluxo."), variant: "destructive" })
+      }
+    } catch (error) {
+      toast({ title: "Não foi possível enviar", description: errorText(error, "Erro desconhecido."), variant: "destructive" })
+    } finally {
+      setIsExporting(false)
+    }
+  }, [apiKey, handleRefreshFlows])
+
+  const handleSetupWebhook = useCallback(async () => {
+    const url = webhookUrl.trim()
+    if (!apiKey || !url) return
+
+    setIsSavingWebhook(true)
+    try {
+      toast({ title: "Configurando webhook", description: "Registrando a URL do webhook no BliP." })
+
+      const blipAPI = new BlipAPI(apiKey)
+      const result = await blipAPI.setupWebhook(url)
+
+      if (result.success) {
+        toast({ title: "Webhook configurado", description: "A URL do webhook foi registrada no BliP." })
+      } else {
+        toast({
+          title: "Não foi possível configurar o webhook",
+          description: errorText(result.error, "Erro ao configurar o webhook."),
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({ title: "Não foi possível configurar o webhook", description: errorText(error, "Erro desconhecido."), variant: "destructive" })
+    } finally {
+      setIsSavingWebhook(false)
+    }
+  }, [apiKey, webhookUrl])
+
+  const copyWebhookUrl = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(webhookUrl)
+      toast({ title: "URL copiada", description: "A URL do webhook está na área de transferência." })
+    } catch {
+      toast({ title: "Não foi possível copiar", description: "Selecione a URL e copie manualmente.", variant: "destructive" })
+    }
+  }, [webhookUrl])
+
+  if (!isConnected) {
     return (
-        <>
-            {/* Overlay */}
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[10000]" onClick={onClose} />
+      <form
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault()
+          void handleConnect()
+        }}
+        className="space-y-4"
+      >
+        <IntegrationNotice title="Como conectar" link={{ href: "https://portal.blip.ai", label: "Abrir portal do BliP" }}>
+          <ol className="list-decimal space-y-0.5 pl-4">
+            <li>Acesse o portal do BliP e abra o bot.</li>
+            <li>Em Configurações, abra Conexões e copie a chave de API e o ID do bot.</li>
+            <li>Cole as credenciais abaixo e clique em Conectar.</li>
+          </ol>
+        </IntegrationNotice>
 
-            {/* Modal */}
-            <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4">
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                    transition={{ duration: 0.2 }}
-                    className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl"
-                    style={{
-                        background: isDark
-                            ? `linear-gradient(135deg, rgba(0,0,0,0.98) 0%, rgba(15,15,15,0.98) 50%, rgba(0,0,0,0.98) 100%)`
-                            : `linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 50%, rgba(255,255,255,0.98) 100%)`,
-                        border: isDark ? `2px solid #00D4FF60` : `2px solid #00D4FF40`,
-                        boxShadow: isDark
-                            ? `0 25px 50px -12px rgba(0, 0, 0, 0.9), 0 0 60px #00D4FF40, inset 0 1px 0 rgba(255,255,255,0.1)`
-                            : `0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 60px #00D4FF30, inset 0 1px 0 rgba(255,255,255,0.8)`,
-                        backdropFilter: "blur(25px)",
-                    }}
-                >
-                    {/* Header */}
-                    <div
-                        className="relative z-10 p-6 border-b"
-                        style={{
-                            borderColor: isDark ? "#00D4FF40" : "#00D4FF30",
-                            background: isDark
-                                ? `linear-gradient(135deg, rgba(0,0,0,0.8), rgba(15,15,15,0.6))`
-                                : `linear-gradient(135deg, rgba(255,255,255,0.8), rgba(248,250,252,0.6))`,
-                        }}
-                    >
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div
-                                    className="p-3 rounded-xl"
-                                    style={{
-                                        background: `linear-gradient(135deg, #00D4FF, #0099CC)`,
-                                        boxShadow: `0 8px 20px #00D4FF40`,
-                                    }}
-                                >
-                                    <Image
-                                        src={blipIcon}
-                                        alt="Blip"
-                                        width={24}
-                                        height={24}
-                                    />
-                                </div>
-                                <div>
-                                    <h2
-                                        className="text-2xl font-bold mb-1"
-                                        style={{
-                                            color: isDark ? "#ffffff" : "#111827",
-                                            textShadow: isDark ? `0 0 15px #00D4FF60` : `0 0 8px #00D4FF40`,
-                                        }}
-                                    >
-                                        Integração BliP
-                                    </h2>
-                                    <p
-                                        className="text-sm"
-                                        style={{
-                                            color: isDark ? "#e5e7eb" : "#4b5563",
-                                        }}
-                                    >
-                                        Conecte com a API oficial do BliP
-                                    </p>
-                                </div>
-                            </div>
-                            <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={onClose}
-                                className="p-2 rounded-xl transition-colors"
-                                style={{
-                                    background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                    color: isDark ? "#e5e7eb" : "#4b5563",
-                                }}
-                            >
-                                <FiX className="w-5 h-5" />
-                            </motion.button>
-                        </div>
-                    </div>
+        <IntegrationField
+          label="Chave de API"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          required
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+          placeholder="Cole a chave de API do bot"
+        />
+        <IntegrationField
+          label="ID do bot"
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          required
+          value={botId}
+          onChange={(event) => setBotId(event.target.value)}
+          placeholder="Identificador do bot no BliP"
+        />
 
-                    {/* Content */}
-                    <div className="relative z-10 p-6 max-h-[60vh] overflow-y-auto">
-                        {!isConnected ? (
-                            <div className="space-y-6">
-                                {/* Info Card */}
-                                <div
-                                    className="p-4 rounded-xl border"
-                                    style={{
-                                        background: isDark ? "rgba(0, 212, 255, 0.1)" : "rgba(0, 212, 255, 0.05)",
-                                        borderColor: "#00D4FF40",
-                                    }}
-                                >
-                                    <div className="flex items-start gap-3">
-                                        <FiInfo className="w-5 h-5 text-[#00D4FF] mt-0.5" />
-                                        <div>
-                                            <h3 className="font-semibold text-[#00D4FF] mb-1">Configuração Real da API</h3>
-                                            <p className="text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                                Esta integração usa a API oficial do BliP (http.msging.net)
-                                                <br />
-                                                1. Acesse o portal do BliP e vá em Configurações
-                                                <br />
-                                                2. Copie sua API Key e Bot ID
-                                                <br />
-                                                3. Cole as credenciais aqui para conectar
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Form */}
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2" style={{ color: isDark ? "#ffffff" : "#111827" }}>
-                                            <FiKey className="inline w-4 h-4 mr-2" />
-                                            API Key *
-                                        </label>
-                                        <input
-                                            type="password"
-                                            value={apiKey}
-                                            onChange={(e) => setApiKey(e.target.value)}
-                                            placeholder="Insira sua API Key do BliP"
-                                            className="w-full px-4 py-3 rounded-lg border transition-colors"
-                                            style={{
-                                                background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                                borderColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.1)",
-                                                color: isDark ? "#ffffff" : "#111827",
-                                            }}
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2" style={{ color: isDark ? "#ffffff" : "#111827" }}>
-                                            <FiMessageSquare className="inline w-4 h-4 mr-2" />
-                                            Bot ID *
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={botId}
-                                            onChange={(e) => setBotId(e.target.value)}
-                                            placeholder="Insira o ID do seu bot"
-                                            className="w-full px-4 py-3 rounded-lg border transition-colors"
-                                            style={{
-                                                background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                                borderColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.1)",
-                                                color: isDark ? "#ffffff" : "#111827",
-                                            }}
-                                        />
-                                    </div>
-
-                                    <div
-                                        className="p-4 rounded-lg border"
-                                        style={{
-                                            background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.02)",
-                                            borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        }}
-                                    >
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <FiExternalLink className="w-4 h-4 text-[#00D4FF]" />
-                                            <span className="font-medium" style={{ color: isDark ? "#ffffff" : "#111827" }}>
-                        Como obter as credenciais
-                      </span>
-                                        </div>
-                                        <p className="text-sm mb-3" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                            1. Acesse o portal do BliP (portal.blip.ai)
-                                            <br />
-                                            2. Selecione seu bot
-                                            <br />
-                                            3. Vá em Configurações → Conexões → API Key
-                                            <br />
-                                            4. Copie a API Key e o Bot ID
-                                        </p>
-                                        <motion.a
-                                            href="https://portal.blip.ai"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            whileHover={{ scale: 1.02 }}
-                                            className="inline-flex items-center gap-2 text-sm font-medium text-[#00D4FF] hover:underline"
-                                        >
-                                            <FiExternalLink className="w-3 h-3" />
-                                            Acessar portal do BliP
-                                        </motion.a>
-                                    </div>
-                                </div>
-
-                                {/* Warning */}
-                                <div
-                                    className="p-4 rounded-xl border"
-                                    style={{
-                                        background: isDark ? "rgba(245, 158, 11, 0.1)" : "rgba(245, 158, 11, 0.05)",
-                                        borderColor: "#f59e0b40",
-                                    }}
-                                >
-                                    <div className="flex items-start gap-3">
-                                        <FiAlertCircle className="w-5 h-5 text-yellow-500 mt-0.5" />
-                                        <div>
-                                            <h3 className="font-semibold text-yellow-500 mb-1">Importante</h3>
-                                            <p className="text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                                Esta é uma integração real com a API do BliP. Certifique-se de que suas credenciais estão
-                                                corretas e que o bot tem as permissões necessárias.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="space-y-6">
-                                {/* Success Card */}
-                                <div
-                                    className="p-6 rounded-xl border text-center"
-                                    style={{
-                                        background: isDark ? "rgba(16, 185, 129, 0.1)" : "rgba(16, 185, 129, 0.05)",
-                                        borderColor: "#10B98140",
-                                    }}
-                                >
-                                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500 flex items-center justify-center">
-                                        <FiCheck className="w-8 h-8 text-white" />
-                                    </div>
-                                    <h3 className="text-xl font-bold text-green-500 mb-2">Conectado com BliP!</h3>
-                                    <p className="text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                        Integração ativa com a API oficial do BliP
-                                    </p>
-                                    {accountInfo && (
-                                        <div className="mt-4 text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                            <strong>Conta:</strong> {accountInfo.fullName || accountInfo.email}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Actions */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <motion.button
-                                        whileHover={{ scale: 1.02 }}
-                                        whileTap={{ scale: 0.98 }}
-                                        onClick={handleExportFlow}
-                                        className="p-4 rounded-xl border text-left"
-                                        style={{
-                                            background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.02)",
-                                            borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        }}
-                                    >
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className="p-2 rounded-lg bg-[#00D4FF]">
-                                                <FiUpload className="w-4 h-4 text-white" />
-                                            </div>
-                                            <span className="font-medium" style={{ color: isDark ? "#ffffff" : "#111827" }}>
-                        Exportar para BliP
-                      </span>
-                                        </div>
-                                        <p className="text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                            Envia o fluxo atual para o BliP como um novo fluxo
-                                        </p>
-                                    </motion.button>
-
-                                    <motion.button
-                                        whileHover={{ scale: 1.02 }}
-                                        whileTap={{ scale: 0.98 }}
-                                        onClick={handleRefreshFlows}
-                                        disabled={isLoadingFlows}
-                                        className="p-4 rounded-xl border text-left"
-                                        style={{
-                                            background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.02)",
-                                            borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        }}
-                                    >
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className="p-2 rounded-lg bg-[#00D4FF]">
-                                                {isLoadingFlows ? (
-                                                    <FiLoader className="w-4 h-4 text-white animate-spin" />
-                                                ) : (
-                                                    <FiRefreshCw className="w-4 h-4 text-white" />
-                                                )}
-                                            </div>
-                                            <span className="font-medium" style={{ color: isDark ? "#ffffff" : "#111827" }}>
-                        Atualizar Fluxos
-                      </span>
-                                        </div>
-                                        <p className="text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                            Recarrega a lista de fluxos do BliP
-                                        </p>
-                                    </motion.button>
-                                </div>
-
-                                {/* Webhook Configuration */}
-                                <div
-                                    className="p-4 rounded-xl border"
-                                    style={{
-                                        background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.02)",
-                                        borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                    }}
-                                >
-                                    <h3 className="font-semibold mb-3" style={{ color: isDark ? "#ffffff" : "#111827" }}>
-                                        <FiZap className="inline w-4 h-4 mr-2" />
-                                        Configuração do Webhook
-                                    </h3>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="url"
-                                            value={webhookUrl}
-                                            onChange={(e) => setWebhookUrl(e.target.value)}
-                                            placeholder="URL do webhook"
-                                            className="flex-1 px-3 py-2 rounded-lg border text-sm"
-                                            style={{
-                                                background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                                borderColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.1)",
-                                                color: isDark ? "#ffffff" : "#111827",
-                                            }}
-                                        />
-                                        <motion.button
-                                            whileHover={{ scale: 1.02 }}
-                                            whileTap={{ scale: 0.98 }}
-                                            onClick={copyWebhookUrl}
-                                            className="px-3 py-2 rounded-lg border"
-                                            style={{
-                                                background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                                borderColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.1)",
-                                                color: isDark ? "#ffffff" : "#111827",
-                                            }}
-                                        >
-                                            <FiCopy className="w-4 h-4" />
-                                        </motion.button>
-                                        <motion.button
-                                            whileHover={{ scale: 1.02 }}
-                                            whileTap={{ scale: 0.98 }}
-                                            onClick={handleSetupWebhook}
-                                            className="px-4 py-2 text-sm font-medium rounded-lg"
-                                            style={{
-                                                background: "#00D4FF",
-                                                color: "white",
-                                            }}
-                                        >
-                                            Configurar
-                                        </motion.button>
-                                    </div>
-                                </div>
-
-                                {/* Flows List */}
-                                <div>
-                                    <div className="flex items-center justify-between mb-3">
-                                        <h3 className="font-semibold" style={{ color: isDark ? "#ffffff" : "#111827" }}>
-                                            <FiFile className="inline w-4 h-4 mr-2" />
-                                            Fluxos do BliP
-                                        </h3>
-                                        <span className="text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                      {flows.length} fluxos
-                    </span>
-                                    </div>
-
-                                    {isLoadingFlows ? (
-                                        <div className="flex items-center justify-center p-8">
-                                            <FiLoader className="w-6 h-6 animate-spin text-[#00D4FF]" />
-                                        </div>
-                                    ) : flows.length > 0 ? (
-                                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                                            {flows.map((flow) => (
-                                                <motion.div
-                                                    key={flow.id}
-                                                    whileHover={{ scale: 1.01 }}
-                                                    className="flex items-center justify-between p-3 rounded-lg border"
-                                                    style={{
-                                                        background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.02)",
-                                                        borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                                    }}
-                                                >
-                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                                                        <div className="p-2 rounded bg-[#00D4FF] flex-shrink-0">
-                                                            <FiMessageSquare className="w-3 h-3 text-white" />
-                                                        </div>
-                                                        <div className="min-w-0 flex-1">
-                                                            <p
-                                                                className="font-medium text-sm truncate"
-                                                                style={{ color: isDark ? "#ffffff" : "#111827" }}
-                                                            >
-                                                                {flow.name}
-                                                            </p>
-                                                            <p className="text-xs truncate" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                                                                {flow.description || `ID: ${flow.id}`}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <motion.button
-                                                        whileHover={{ scale: 1.05 }}
-                                                        whileTap={{ scale: 0.95 }}
-                                                        onClick={() => handleImportFlow(flow.id, flow.name)}
-                                                        className="px-3 py-1 text-xs font-medium rounded-lg flex-shrink-0 ml-3"
-                                                        style={{
-                                                            background: "#00D4FF",
-                                                            color: "white",
-                                                        }}
-                                                    >
-                                                        Importar
-                                                    </motion.button>
-                                                </motion.div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div
-                                            className="text-center p-8 rounded-lg border"
-                                            style={{
-                                                background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.02)",
-                                                borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                                color: isDark ? "#d1d5db" : "#6b7280",
-                                            }}
-                                        >
-                                            <FiFile className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                                            <p>Nenhum fluxo encontrado</p>
-                                            <p className="text-xs mt-1">Crie fluxos no portal do BliP ou clique em "Atualizar Fluxos"</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Footer */}
-                    <div
-                        className="relative z-10 flex justify-between items-center p-6 border-t"
-                        style={{
-                            borderColor: isDark ? "#00D4FF40" : "#00D4FF30",
-                            background: isDark
-                                ? `linear-gradient(135deg, rgba(0,0,0,0.8), rgba(15,15,15,0.6))`
-                                : `linear-gradient(135deg, rgba(255,255,255,0.8), rgba(248,250,252,0.6))`,
-                        }}
-                    >
-                        <div className="flex items-center gap-2 text-sm" style={{ color: isDark ? "#d1d5db" : "#6b7280" }}>
-                            <FiZap className="w-4 h-4" />
-                            <span>API Oficial BliP</span>
-                        </div>
-                        <div className="flex gap-3">
-                            {isConnected && (
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={handleDisconnect}
-                                    className="px-4 py-2 text-sm font-medium rounded-lg transition-colors"
-                                    style={{
-                                        background: "rgba(239, 68, 68, 0.1)",
-                                        color: "#ef4444",
-                                        border: "1px solid rgba(239, 68, 68, 0.2)",
-                                    }}
-                                >
-                                    Desconectar
-                                </motion.button>
-                            )}
-                            {!isConnected ? (
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={handleConnect}
-                                    disabled={isConnecting}
-                                    className="px-6 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
-                                    style={{
-                                        background: isConnecting ? "#00D4FF80" : "#00D4FF",
-                                        color: "white",
-                                    }}
-                                >
-                                    {isConnecting ? (
-                                        <>
-                                            <FiLoader className="w-4 h-4 animate-spin" />
-                                            Conectando...
-                                        </>
-                                    ) : (
-                                        "Conectar"
-                                    )}
-                                </motion.button>
-                            ) : (
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={onClose}
-                                    className="px-6 py-2 text-sm font-medium rounded-lg transition-colors"
-                                    style={{
-                                        background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-                                        color: isDark ? "#e5e7eb" : "#4b5563",
-                                    }}
-                                >
-                                    Fechar
-                                </motion.button>
-                            )}
-                        </div>
-                    </div>
-                </motion.div>
-            </div>
-        </>
+        <IntegrationSubmit
+          label="Conectar"
+          busyLabel="Conectando..."
+          busy={isConnecting}
+          hint="A conexão usa a API oficial do BliP (http.msging.net). As credenciais ficam salvas apenas neste navegador."
+        />
+      </form>
     )
-}
+  }
 
-export default BlipIntegration
+  const name = accountName(accountInfo)
+
+  return (
+    <div className="space-y-5">
+      <IntegrationStatus title="Conectado ao BliP" detail={name ? `Conta: ${name}` : undefined} onDisconnect={handleDisconnect} />
+
+      <div>
+        <h3 className={ui.sectionTitle}>Ações</h3>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <IntegrationAction
+            icon={Upload}
+            title="Enviar fluxo atual"
+            description="Envia o fluxo do editor ao BliP como um novo fluxo."
+            busy={isExporting}
+            onClick={() => void handleExportFlow()}
+          />
+          <IntegrationAction
+            icon={RefreshCw}
+            title="Atualizar lista"
+            description="Recarrega os fluxos disponíveis no BliP."
+            busy={isLoadingFlows}
+            onClick={() => void handleRefreshFlows()}
+          />
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className={ui.sectionTitle}>Fluxos do BliP</h3>
+          {isLoadingFlows ? null : <span className="text-[11px] text-flow-muted">{countLabel(flows.length, "fluxo", "fluxos")}</span>}
+        </div>
+
+        {isLoadingFlows ? (
+          <div
+            role="status"
+            className="mt-2 flex items-center justify-center gap-2 rounded-xl border border-flow-border px-3 py-6 text-xs text-flow-muted"
+          >
+            <Loader2 className="h-4 w-4 animate-spin text-flow-accent" />
+            Carregando fluxos...
+          </div>
+        ) : flows.length > 0 ? (
+          <ul className="mt-2 divide-y divide-flow-border overflow-hidden rounded-xl border border-flow-border">
+            {flows.map((flow) => {
+              const importing = importingId === flow.id
+              return (
+                <li key={flow.id} className="flex items-center gap-3 bg-flow-surface px-3 py-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-soft text-flow-muted-strong">
+                    <Workflow className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-flow-fg">{flow.name}</p>
+                    <p className="truncate text-xs text-flow-muted">{flow.description || `ID: ${flow.id}`}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleImportFlow(flow.id, flow.name)}
+                    disabled={importingId !== null}
+                    aria-busy={importing || undefined}
+                    className={ui.button}
+                  >
+                    {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    {importing ? "Importando..." : "Importar"}
+                    <span className="sr-only">{` ${flow.name}`}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <div className="mt-2 rounded-xl border border-dashed border-flow-border px-3 py-6 text-center">
+            <p className="text-sm font-semibold text-flow-fg">Nenhum fluxo encontrado</p>
+            <p className="mt-1 text-xs leading-5 text-flow-muted">Crie fluxos no portal do BliP e clique em Atualizar lista.</p>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h3 className={ui.sectionTitle}>Webhook</h3>
+        <label htmlFor={webhookId} className={cn(ui.label, "mt-2")}>
+          URL do webhook
+        </label>
+        <div className="flex gap-2">
+          <input
+            id={webhookId}
+            type="url"
+            value={webhookUrl}
+            onChange={(event) => setWebhookUrl(event.target.value)}
+            placeholder="https://"
+            spellCheck={false}
+            aria-describedby={`${webhookId}-hint`}
+            className={cn(ui.input, "min-w-0 flex-1")}
+          />
+          <button
+            type="button"
+            onClick={() => void copyWebhookUrl()}
+            disabled={!webhookUrl}
+            aria-label="Copiar URL do webhook"
+            title="Copiar URL"
+            className={cn(ui.toolButton, "h-9 w-9")}
+          >
+            <Copy className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSetupWebhook()}
+            disabled={!webhookUrl.trim() || isSavingWebhook}
+            aria-busy={isSavingWebhook || undefined}
+            className={cn(ui.button, "h-9")}
+          >
+            {isSavingWebhook ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Configurar
+          </button>
+        </div>
+        <p id={`${webhookId}-hint`} className={ui.hint}>
+          O BliP enviará os eventos do bot para esta URL.
+        </p>
+      </div>
+    </div>
+  )
+}
