@@ -2,7 +2,7 @@
 
 import { createContext, memo, useContext, useEffect, useMemo, type CSSProperties } from "react"
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "reactflow"
-import { AlertTriangle, Clock, Code2, FileQuestion, Hash, Hourglass, IdCard, ListOrdered, MessageSquare, Play, Power, Tag, Users, Workflow, type LucideIcon } from "lucide-react"
+import { AlertTriangle, Clock, Code2, FileQuestion, Hash, Hourglass, IdCard, ListOrdered, MessageSquare, Play, Power, Tag, Users, Workflow, X, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { START_TYPE, getCategory, getComponentColor, getComponentLabel, getDefinition, weekDayOptions } from "@/lib/atendimento/catalog"
 import { isObject, outputHandles, outputLabel } from "@/lib/atendimento/format"
@@ -11,6 +11,7 @@ import { ui } from "../ui"
 
 export const AtendimentoEdgesContext = createContext<AtendimentoEdge[]>([])
 export const InvalidNodesContext = createContext<ReadonlySet<string>>(new Set<string>())
+export const NodeActionsContext = createContext<{ remove: (id: string) => void } | null>(null)
 
 const icons: Record<string, LucideIcon> = {
   trigger_message: Play,
@@ -69,6 +70,10 @@ const SUCCESS_COLOR = "rgb(var(--flow-success))"
 const HANDLE = "!h-3 !w-3 !border-2 !border-flow-surface"
 const TARGET_HANDLE = `${HANDLE} !-left-2 !top-[30px] !bg-flow-muted-strong`
 const SOURCE_HANDLE = `${HANDLE} !-right-1.5`
+const REVEAL = "group-hover:opacity-100 group-focus-within:opacity-100 [.react-flow__node:focus-visible_&]:opacity-100"
+const REMOVE_BUTTON = "nodrag nopan absolute -right-2.5 -top-2.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,rgb(var(--flow-danger))_85%,black)] text-white shadow-md ring-2 ring-flow-bg transition duration-150 ease-out hover:brightness-110 focus-visible:outline-none focus-visible:ring-flow-accent motion-reduce:transition-none"
+const REMOVE_HIDDEN = `pointer-events-none scale-90 opacity-0 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:pointer-events-auto group-focus-within:scale-100 [.react-flow__node:focus-visible_&]:scale-100 ${REVEAL}`
+const ID_CHIP = `mr-1 mt-0.5 max-w-[6rem] shrink-0 translate-y-0.5 truncate rounded-md bg-flow-soft px-1.5 py-0.5 font-mono text-[10px] leading-none text-flow-muted opacity-0 transition duration-200 ease-out group-hover:translate-y-0 group-focus-within:translate-y-0 [.react-flow__node:focus-visible_&]:translate-y-0 motion-reduce:transition-none ${REVEAL}`
 
 function summarize(data: AtendimentoData): Summary {
   if (data.type === "timeConditions") {
@@ -102,6 +107,7 @@ function handleTone(start: boolean, twoWay: boolean, handle: string): string {
 export const AtendimentoNode = memo(function AtendimentoNode({ id, data, selected, isConnectable }: NodeProps<AtendimentoData>) {
   const edges = useContext(AtendimentoEdgesContext)
   const invalidNodes = useContext(InvalidNodesContext)
+  const actions = useContext(NodeActionsContext)
   const updateInternals = useUpdateNodeInternals()
   const { type } = data
 
@@ -161,6 +167,21 @@ export const AtendimentoNode = memo(function AtendimentoNode({ id, data, selecte
       )}
       style={cardStyle}
     >
+      {actions && !start && (
+        <button
+          type="button"
+          aria-label="Remover componente"
+          title="Remover componente"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            actions.remove(id)
+          }}
+          className={cn(REMOVE_BUTTON, selected ? "scale-100 opacity-100" : REMOVE_HIDDEN)}
+        >
+          <X className="h-3.5 w-3.5" strokeWidth={2.75} aria-hidden />
+        </button>
+      )}
       {!start && (
         <>
           <Handle type="target" position={Position.Left} isConnectable={isConnectable} className={TARGET_HANDLE} />
@@ -180,7 +201,7 @@ export const AtendimentoNode = memo(function AtendimentoNode({ id, data, selecte
           <div className="min-w-0 flex-1 pt-0.5">
             <div className="flex items-start gap-2">
               <p className="line-clamp-2 min-w-0 flex-1 break-words text-sm font-semibold leading-tight text-flow-fg">{title}</p>
-              <span className="mt-px max-w-[6rem] shrink-0 truncate rounded-md bg-flow-soft px-1.5 py-0.5 font-mono text-[10px] leading-none text-flow-muted" title={`ID ${id}`}>
+              <span className={ID_CHIP} title={`ID ${id}`}>
                 ID {id}
               </span>
             </div>

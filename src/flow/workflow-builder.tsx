@@ -15,7 +15,7 @@ import type { AtendimentoData, AtendimentoFlow, AtendimentoNode, FlowIssue, Json
 import NodeLibrary from "./node-library"
 import NodeConfigPanel from "./node-config-panel"
 import CustomEdge, { EdgeActionsContext } from "./custom-edge"
-import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, nodeSummary } from "./nodes/atendimento-node"
+import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
 export interface WorkflowActions {
@@ -926,6 +926,14 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [flow.edges, nodesById, selectedEdges])
 
   const edgeActions = useMemo(() => ({ remove: (id: string) => removeEdges([id]) }), [removeEdges])
+  const nodeActions = useMemo(() => ({
+    remove: (id: string) => {
+      const active = document.activeElement
+      const fromNode = active instanceof HTMLElement && active.closest(".react-flow__node")?.getAttribute("data-id") === id
+      removeNode(id)
+      if (fromNode) requestAnimationFrame(() => canvas.current?.focus({ preventScroll: true }))
+    },
+  }), [removeNode])
   const canUndo = past.current.length > 0
   const canRedo = future.current.length > 0
 
@@ -1007,51 +1015,53 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       )}
       <div className="relative flex min-h-0 flex-1">
         {showLibrary && <NodeLibrary onAdd={addComponent} />}
-        <div ref={canvas} className="flow-background relative min-w-0 flex-1 bg-flow-bg">
+        <div ref={canvas} tabIndex={-1} className="flow-background relative min-w-0 flex-1 bg-flow-bg focus:outline-none">
           <InvalidNodesContext.Provider value={invalidNodes}>
             <AtendimentoEdgesContext.Provider value={flow.edges}>
               <EdgeActionsContext.Provider value={edgeActions}>
-                <ReactFlow
-                  nodes={canvasNodes}
-                  edges={canvasEdges}
-                  nodeTypes={nodeTypes}
-                  edgeTypes={edgeTypes}
-                  onNodesChange={handleNodeChanges}
-                  onEdgesChange={handleEdgeChanges}
-                  onNodeDragStart={startDrag}
-                  onNodeDragStop={finishDrag}
-                  onSelectionDragStart={startDrag}
-                  onSelectionDragStop={finishDrag}
-                  onNodeClick={openNode}
-                  onPaneClick={closeOnPane}
-                  isValidConnection={isValidConnection}
-                  onConnect={connect}
-                  onDragOver={dragOver}
-                  onDrop={drop}
-                  onMoveEnd={moveEnd}
-                  defaultViewport={flow.viewport}
-                  minZoom={0.05}
-                  maxZoom={2}
-                  deleteKeyCode={dirty ? null : DELETE_KEYS}
-                  multiSelectionKeyCode={MULTI_SELECTION_KEYS}
-                  selectNodesOnDrag={false}
-                  connectionLineStyle={CONNECTION_LINE_STYLE}
-                  proOptions={PRO_OPTIONS}
-                  className={CANVAS_CLASS}
-                >
-                  <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="rgb(var(--flow-border))" className="[&_circle]:fill-flow-border" />
-                  {showMinimap && (
-                    <MiniMap
-                      pannable
-                      zoomable
-                      ariaLabel="Minimapa"
-                      nodeColor={minimapColor}
-                      nodeClassName={minimapClass}
-                      nodeBorderRadius={16}
-                      className={MINIMAP_CLASS}
-                    />
-                  )}
-                </ReactFlow>
+                <NodeActionsContext.Provider value={nodeActions}>
+                  <ReactFlow
+                    nodes={canvasNodes}
+                    edges={canvasEdges}
+                    nodeTypes={nodeTypes}
+                    edgeTypes={edgeTypes}
+                    onNodesChange={handleNodeChanges}
+                    onEdgesChange={handleEdgeChanges}
+                    onNodeDragStart={startDrag}
+                    onNodeDragStop={finishDrag}
+                    onSelectionDragStart={startDrag}
+                    onSelectionDragStop={finishDrag}
+                    onNodeClick={openNode}
+                    onPaneClick={closeOnPane}
+                    isValidConnection={isValidConnection}
+                    onConnect={connect}
+                    onDragOver={dragOver}
+                    onDrop={drop}
+                    onMoveEnd={moveEnd}
+                    defaultViewport={flow.viewport}
+                    minZoom={0.05}
+                    maxZoom={2}
+                    deleteKeyCode={dirty ? null : DELETE_KEYS}
+                    multiSelectionKeyCode={MULTI_SELECTION_KEYS}
+                    selectNodesOnDrag={false}
+                    connectionLineStyle={CONNECTION_LINE_STYLE}
+                    proOptions={PRO_OPTIONS}
+                    className={CANVAS_CLASS}
+                  >
+                    <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="rgb(var(--flow-border))" className="[&_circle]:fill-flow-border" />
+                    {showMinimap && (
+                      <MiniMap
+                        pannable
+                        zoomable
+                        ariaLabel="Minimapa"
+                        nodeColor={minimapColor}
+                        nodeClassName={minimapClass}
+                        nodeBorderRadius={16}
+                        className={MINIMAP_CLASS}
+                      />
+                    )}
+                  </ReactFlow>
+                </NodeActionsContext.Provider>
               </EdgeActionsContext.Provider>
             </AtendimentoEdgesContext.Provider>
           </InvalidNodesContext.Provider>
