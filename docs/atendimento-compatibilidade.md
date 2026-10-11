@@ -34,10 +34,10 @@ Campos desconhecidos, metadados e tipos de valor do arquivo importado são manti
 | Consulta API | `consulta_api` | `output-0` Falha, `output-1` Sucesso |
 | Aguardando Mensagem | `waitForAnswer` | 1 |
 
-O significado das saídas duplas vem do conteúdo da referência:
+O significado das saídas duplas vem do conteúdo do arquivo exportado:
 
-- Nó 5 (Condições de Tempo): `output-0` leva a "Olá! No momento estamos fora do horário…" e `output-1` segue o atendimento.
-- Nós 11, 21 e 34 (Solicitar Dados) e 42 (Consulta API): `output-0` trata a falha ("Não localizamos esse número de chamado…", transferência para Onboarding, tag "S/ Movidesk" seguida de "Não encontramos o seu cadastro…" e "Não conseguimos abrir o seu chamado…") e `output-1` segue o caminho de sucesso.
+- Condições de Tempo: `output-0` leva à mensagem de fora do horário e `output-1` segue o atendimento.
+- Solicitar Dados e Consulta API: `output-0` trata a falha (mensagem de erro, transferência ou tag) e `output-1` segue o caminho de sucesso.
 
 ## Conexões e validação
 
@@ -60,16 +60,16 @@ Os 50 itens abaixo aparecem na biblioteca, mas não existem no arquivo de refer�
 
 - **Mensagens**: Enviar Arquivo, Enviar Imagem.
 - **Templates**: Mensagem Template, Template Interativo, Enviar Formulário, Cobrança PIX.
-- **Roteamento e transferência**: Transferir para… (outro destino), Transferir para Agente, Voltar ao Agente.
-- **Agendamentos**: Escolher Serviço, Identificar Cliente…, Escolher Local, Escolher Profissional, Escolher Horário, Dados do Cliente…, Confirmar Agendamento.
+- **Roteamento e transferência**: Transferir para Outro Destino, Transferir para Agente, Voltar ao Agente.
+- **Agendamentos**: Escolher Serviço, Identificar Cliente, Escolher Local, Escolher Profissional, Escolher Horário, Dados do Cliente, Confirmar Agendamento.
 - **Tickets**: Consultar Chamados, Abrir Chamado, Detalhe do Chamado.
-- **CRM**: Identificar Cliente, Criar/Atualizar Contato, Capturar Lead, Qualificar Lead, Agendar Follow-up, Inscrever em…, Remover da….
-- **Livechat**: Continuar no Chat….
-- **Controle de fluxo**: Nota, Retornar Menu.
+- **CRM**: Identificar Cliente, Criar/Atualizar Contato, Capturar Lead, Qualificar Lead, Agendar Follow-up, Inscrever em Lista, Remover da Lista.
+- **Livechat**: Continuar no Chat.
+- **Controle de fluxo**: Nota, Retornar ao Menu.
 - **Condições**: Randomizador (teste A/B), Idioma, Veio do anúncio?, Tempo de Espera.
-- **Inteligência artificial (IA)**: Agente de IA (com…), Agentes de IA.
-- **APIs**: Google Planilhas…, RD Station: registrar…, HubSpot: criar/atualizar…, Múltipla Condição…, Entrada de Dados…, API de Mensagem…, Condicional, Enviar para DataStore, DataStore Local, Enviar Boletos, Menu de Opções API.
-- **Coleta de dados**: Consentimento, Enviar conversão, Registrar Evento, Tabulação.
+- **Inteligência artificial (IA)**: Agente de IA, Agentes de IA.
+- **APIs**: Google Planilhas, Registrar no RD Station, Criar/Atualizar no HubSpot, Múltipla Condição, Entrada de Dados, API de Mensagem, Condicional, Enviar para DataStore, DataStore Local, Enviar Boletos, Menu de Opções API.
+- **Coleta de dados**: Consentimento, Enviar Conversão, Registrar Evento, Tabulação.
 
 Para habilitar um deles, basta um JSON exportado da plataforma com o componente configurado e todas as saídas conectadas (um exemplo por variação).
 

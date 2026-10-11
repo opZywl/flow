@@ -1,188 +1,187 @@
-# 🚀 Aura Flow Builder
+<div align="center">
 
-Um construtor de workflows visual e interativo desenvolvido com React, Next.js e TypeScript. Permite criar, editar e executar fluxos de trabalho através de uma interface drag-and-drop intuitiva.
+<img src="app/icon.svg" alt="WorkFlow" width="120" />
 
-## ✨ Funcionalidadesx
+# WorkFlow
 
-- 🎨 **Interface Visual**: Construa workflows arrastando e soltando componentes
-- 🔄 **Execução em Tempo Real**: Execute workflows e veja os resultados instantaneamente
-- 💾 **Persistência Local**: Salve seus workflows no navegador
-- 🎯 **Validação Inteligente**: Validação automática de conectividade entre nós
-- 🌙 **Tema Escuro/Claro**: Suporte completo a temas
-- 📱 **Responsivo**: Funciona perfeitamente em desktop e mobile
-- 🤖 **Bot Integrado**: Aura Flow Bot para interação e execução de workflows
+### A visual editor for customer service flows that exports straight into the platform's JSON.
 
-## 🛠️ Tecnologias Utilizadas
+[![Next.js](https://img.shields.io/badge/Next.js_15-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-0F172A?style=for-the-badge&logo=tailwindcss&logoColor=38BDF8)](https://tailwindcss.com/)
+[![Website](https://img.shields.io/badge/Website-flow--yzy.vercel.app-3B82F6?style=for-the-badge&logo=vercel&logoColor=white)](https://flow-yzy.vercel.app/flow)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/3XRFGeqEYD)
 
-- **React 18** - Biblioteca principal
-- **Next.js 14** - Framework React com App Router
-- **TypeScript** - Tipagem estática
-- **Tailwind CSS** - Estilização utilitária
-- **shadcn/ui** - Componentes de interface
-- **Lucide React** - Ícones
-- **HTML5 Drag & Drop API** - Funcionalidade nativa de arrastar e soltar
-- **Local Storage** - Persistência de dados
-- **SVG** - Renderização de conexões visuais
+[![CI](https://github.com/opZywl/flow/actions/workflows/ci.yml/badge.svg)](https://github.com/opZywl/flow/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/opZywl/flow/actions/workflows/codeql.yml/badge.svg)](https://github.com/opZywl/flow/actions/workflows/codeql.yml)
 
-## 🚀 Como Executar
+[opZywl](https://github.com/opZywl) · [flow-yzy.vercel.app](https://flow-yzy.vercel.app/flow) · [lucas-lima.xyz](https://lucas-lima.xyz) · [LinkedIn](https://www.linkedin.com/in/lucsp-lima/)
 
-### Pré-requisitos
-- Node.js 18+ 
-- npm ou yarn
+**English** · [Português](README.pt-BR.md)
 
-### Instalação
+</div>
 
-1. Clone o repositório:
-\`\`\`bash
-git clone https://github.com/opZywl/workflow.git
-cd workflow
-\`\`\`
+## What it does
 
-2. Instale as dependências:
-\`\`\`bash
-npm install
-# ou
-yarn install
-\`\`\`
+You draw the conversation: drag components onto the canvas, wire their
+outputs and fill in each step in a side panel. The editor checks the flow while
+you work and exports a JSON file that the Atendimento platform imports as is.
 
-3. Execute o projeto:
-\`\`\`bash
-npm run dev
-# ou
-yarn dev
-\`\`\`
+It is a true round trip. Import a file exported by the platform, export it
+again and you get the same file back, byte for byte, with only the export date
+refreshed. Everything you create follows the same structure, the same IDs and
+the same connection pattern.
 
-4. Abra [http://localhost:3000](http://localhost:3000) no seu navegador
+The interface is in Brazilian Portuguese, like the platform it targets.
 
-## 📁 Estrutura do Projeto
+## Screenshots
 
-\`\`\`
-├── app/                    # App Router do Next.js
-│   ├── components/         # Componentes da aplicação
-│   ├── flow/              # Página do construtor de workflows
-│   └── globals.css        # Estilos globais
-├── components/            # Componentes shadcn/ui
-├── src/                   # Código fonte principal
-│   └── flow/              # Lógica do workflow builder
-│       ├── nodes/         # Tipos de nós disponíveis
-│       ├── utils/         # Utilitários e tipos
-│       └── workflow-builder.tsx # Componente principal
-├── lib/                   # Utilitários e configurações
-└── public/               # Arquivos estáticos
-\`\`\`
+<table>
+  <tr>
+    <td><img src="docs/screenshots/editor-dark.png" alt="Editor with a sample flow in the dark theme"></td>
+    <td><img src="docs/screenshots/panel-dark.png" alt="Configuration panel of an options menu"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/preview-dark.png" alt="Conversation preview running the sample flow"></td>
+    <td><img src="docs/screenshots/editor-light.png" alt="Editor in the light theme"></td>
+  </tr>
+</table>
 
-## 🎯 Tipos de Nós Disponíveis
+## The editor
 
-- **Start Node**: Ponto de início do workflow
-- **Process Node**: Processamento de dados
-- **Input Node**: Entrada de dados do usuário
-- **Output Node**: Exibição de resultados
-- **Conditional Node**: Lógica condicional
-- **Code Node**: Execução de código personalizado
-- **Send Message Node**: Envio de mensagens
-- **Options Node**: Seleção de opções
-- **Finalizar Node**: Finalização do workflow
+| On screen | What it does |
+|---|---|
+| library | every platform component by category, with search; click or drag to add |
+| canvas | rule-checked connections (one input per component, one target per output), multi-select, undo and redo, minimap |
+| components | a summary of each step, labeled outputs and a remove button on hover |
+| panel | the fields of each component, menu options, business hours, technical fields and the full JSON |
+| validation | live issues, each one jumps to the component that needs attention |
+| preview | a simulated conversation with menus, answers, API results and business hours, without calling the platform |
+| import | Atendimento JSON, older flows from this editor and AI generation |
+| theme | light or dark, with the accent color you pick in Cores |
 
-## 🔧 Funcionalidades Principais
+`Ctrl+Z` undoes, `Ctrl+Y` redoes, `Ctrl+S` saves, `Ctrl+K` searches the flow
+and `Delete` removes the selection. Dropping a `.json` file on the canvas
+imports it.
 
-### Construtor Visual
-- Arraste nós da biblioteca para o canvas
-- Conecte nós visualmente
-- Configure propriedades de cada nó
-- Validação automática de conectividade
+## Atendimento JSON compatibility
 
-### Execução de Workflows
-- Execute workflows completos
-- Acompanhe o progresso em tempo real
-- Interaja com nós de entrada
-- Visualize resultados
+The format comes from a file exported by the platform itself, and that file is
+the only source the editor follows:
 
-### Persistência
-- Salve workflows automaticamente
-- Carregue workflows salvos
-- Exporte workflows em JSON
-- Importe workflows existentes
+- envelope with `name`, `description`, `service_type`, `created_at`, `nodes`, `edges` and `viewport`
+- components as `type: "custom"` with `data.type`, `data.data` and `data.html`; the start is always `inicio` and every other component gets a sequential numeric ID
+- `deletable` connections with `sourceHandle: "output-N"` and the id `xy-edge__<source><handle>-<target>`
+- `created_at` stamped at export time, with the same serialization the platform uses
 
-## 🤖 Aura Flow Bot
+Twelve components have a real example in that file and are created with
+exactly the same fields: Iniciar Fluxo, Menu de Opções, Enviar Mensagem,
+Transferir para Departamento, Aplicar Tag, Transferir para Fluxo, Encerrar
+Conversa, Condições de Tempo, Solicitar Dados, Protocolo, Consulta API and
+Aguardando Mensagem.
 
-O bot integrado permite:
-- Executar workflows através de chat
-- Interagir com nós de entrada
-- Receber feedback em tempo real
-- Salvar conversas
+The other fifty show up in the library as "sem JSON" and start working as soon
+as there is a platform export with each one configured. Rules, output meanings
+and the full list are in
+[docs/atendimento-compatibilidade.md](docs/atendimento-compatibilidade.md).
 
-## 🎨 Personalização
+## Run it yourself
 
-O projeto utiliza Tailwind CSS e suporta:
-- Temas claro e escuro
-- Cores personalizáveis
-- Layout responsivo
-- Animações suaves
+WorkFlow is a Next.js app. It needs Node 20.9 or newer and pnpm 10.
 
-## 📝 Como Contribuir
+```sh
+git clone https://github.com/opZywl/flow
+cd flow
+pnpm install
+pnpm dev     # editor at http://localhost:3000/flow
+pnpm build   # production build
+pnpm start   # serve the build on port 3000
+```
 
-1. Faça um fork do projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
+AI generation runs on your own OpenAI key, typed into the dialog. The key is
+sent only with the generation request and is not stored by the server.
 
-## 📄 Licença
+## Commands
 
-Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+| Command | What it does |
+|---|---|
+| `pnpm dev` | development server on port 3000 |
+| `pnpm build` and `pnpm start` | production build and server |
+| `pnpm typecheck` | type checking |
+| `pnpm lint` | ESLint |
+| `pnpm test` | format and preview unit tests |
+| `pnpm check:reference -- "<file>"` | checks the round trip of a JSON exported by the platform |
+| `pnpm test:e2e` | production build plus Playwright browser tests |
 
-## 👨‍💻 Autor
+Point `FLOW_REFERENCE` at a JSON exported by the platform and the unit and
+browser tests also validate that file:
 
-**Lucas Lima** - Full Stack Developer
+```sh
+FLOW_REFERENCE="path/to/Atendimento.json" pnpm test
+FLOW_REFERENCE="path/to/Atendimento.json" pnpm test:e2e
+```
 
-- GitHub: [@opZywl](https://github.com/opZywl)
-- Projeto: [Workflow Builder](https://github.com/opZywl/workflow)
+## What's inside
 
-## 🙏 Agradecimentos
+```text
+app/                Next.js routes and the AI generation API
+src/flow/           the editor: canvas, components, library, panel and preview
+lib/atendimento/    the format: import, validation, export and simulation
+components/ui/      interface primitives
+tests/              unit and browser tests
+docs/               Atendimento JSON compatibility
+scripts/            checks for exported files
+.github/            CI, CodeQL, dependency review and Dependabot
+```
 
-- shadcn/ui pela biblioteca de componentes
-- Lucide pela biblioteca de ícones
-- Vercel pelo hosting e ferramentas de desenvolvimento
-- Comunidade React/Next.js pelo suporte
+Every push runs type checking, lint, unit tests, the production build and the
+browser tests, plus a CodeQL scan. Production deploys on Vercel from `main`.
 
----
+## Issues
 
-⭐ Se este projeto te ajudou, considere dar uma estrela no repositório!
-\`\`\`
+If you notice a bug or a missing feature, let me know by opening an
+[issue](https://github.com/opZywl/flow/issues). Never attach a real export with
+customer data, tokens or internal URLs; security reports go through a
+[private advisory](https://github.com/opZywl/flow/security/advisories/new).
 
-\`\`\`tsx file="src/flow/Flow.tsx"
-[v0-no-op-code-block-prefix]import React from 'react';
-import { useRouter } from 'next/router';
-import Link from 'next/link';
+## License
 
-const Flow = () => {
-  const router = useRouter();
+This project is subject to the [GNU General Public License v3.0](LICENSE). The
+license covers the source code in this repository. Dependencies keep their own
+licenses.
 
-  const handleGoBack = () => {
-    router.push('/'); // Changed from '/panel' to '/'
-  };
+For those who are unfamiliar with the license, here is a summary of its main
+points. This is by no means legal advice nor legally binding.
 
-  return (
-    <div>
-      <h1>Flow Component</h1>
-      <p>This is the flow component content.</p>
+You are allowed to
 
-      {/* Example using router.push */}
-      <button onClick={handleGoBack}>Voltar para a Página Inicial</button>
+- use
+- share
+- modify
 
-      {/* Example using Link */}
-      <Link href="/">
-        <a>Voltar para a Página Inicial (Link)</a> {/* Changed from '/panel' to '/' */}
-      </Link>
+this project entirely or partially for free and even commercially. However,
+please consider the following:
 
-      {/* Another example using Link */}
-      <div>
-        <Link href="/" passHref>
-          <button>Voltar para a Página Inicial (Link Button)</button> {/* Changed from '/panel' to '/' */}
-        </Link>
-      </div>
-    </div>
-  );
-};
+- **You must disclose the source code of your modified work and the source code you took from this project. This means you are not allowed to use code from this project (even partially) in a closed-source or obfuscated application.**
+- **Your modified application must also be licensed under the GPL.**
 
-export default Flow;
+Do the above and share your source code with everyone, just like this project
+does.
+
+## Icons
+
+Icons come from [Lucide](https://lucide.dev).
+
+## Contributing
+
+Contributions are welcome. Fork the repository, make your change and open a
+pull request; the template lists the checks to run before you send it.
+
+## Commits
+
+`type: (scope) subject`, lowercase, no trailing period.
+
+`feat` `fix` `refactor` `chore` `docs` `test`
+
+Add a short body when the subject alone leaves the next reader guessing.
