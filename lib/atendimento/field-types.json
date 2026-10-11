@@ -1,0 +1,242 @@
+{
+  "trigger_message": {
+    "title": [
+      "string"
+    ],
+    "buttons": [
+      "string"
+    ]
+  },
+  "protocolo": {
+    "url_api": [
+      "string"
+    ],
+    "opt": [
+      "string"
+    ],
+    "text": [
+      "string"
+    ]
+  },
+  "envio_mensagem": {
+    "message": [
+      "string"
+    ],
+    "buttons": [
+      "string"
+    ],
+    "df-channel": [
+      "string"
+    ],
+    "opt-1": [
+      "string"
+    ],
+    "text-1": [
+      "string"
+    ],
+    "description-1": [
+      "string"
+    ],
+    "title": [
+      "string"
+    ],
+    "opt-2": [
+      "string"
+    ],
+    "text-2": [
+      "string"
+    ],
+    "description-2": [
+      "string"
+    ],
+    "opt-3": [
+      "string"
+    ],
+    "text-3": [
+      "string"
+    ],
+    "description-3": [
+      "string"
+    ],
+    "opt-4": [
+      "string"
+    ],
+    "text-4": [
+      "string"
+    ],
+    "description-4": [
+      "string"
+    ]
+  },
+  "timeConditions": {
+    "timeConditions": [
+      "string"
+    ],
+    "timeRules": [
+      "array"
+    ]
+  },
+  "envio_pergunta": {
+    "envio_pergunta": [
+      "string"
+    ],
+    "template": [
+      "string"
+    ]
+  },
+  "finalizar": {
+    "message": [
+      "string"
+    ],
+    "df-channel": [
+      "string"
+    ]
+  },
+  "waitForAnswer": {
+    "mask": [
+      "string"
+    ],
+    "customfields": [
+      "string"
+    ],
+    "customFields": [
+      "string"
+    ],
+    "logToActivity": [
+      "boolean"
+    ],
+    "autoSaveContact": [
+      "boolean"
+    ]
+  },
+  "solicitar_dados": {
+    "channel": [
+      "string"
+    ],
+    "url_api": [
+      "string"
+    ],
+    "curl": [
+      "string"
+    ],
+    "method": [
+      "string"
+    ],
+    "body_value": [
+      "string"
+    ],
+    "text": [
+      "string"
+    ],
+    "error": [
+      "string"
+    ],
+    "parsed_body": [
+      "object"
+    ],
+    "parameterExplanations": [
+      "object"
+    ],
+    "tentativas": [
+      "string"
+    ],
+    "isApiValidated": [
+      "boolean"
+    ],
+    "validated_signature": [
+      "string"
+    ],
+    "headers": [
+      "array"
+    ],
+    "response_map": [
+      "array"
+    ]
+  },
+  "departamentos": {
+    "departamentos": [
+      "string"
+    ],
+    "df-channel": [
+      "string"
+    ],
+    "id": [
+      "string"
+    ],
+    "departamento": [
+      "string"
+    ],
+    "name": [
+      "string"
+    ],
+    "enabled": [
+      "boolean"
+    ],
+    "userManager": [
+      "null"
+    ]
+  },
+  "consulta_api": {
+    "url_api": [
+      "string"
+    ],
+    "method": [
+      "string"
+    ],
+    "text": [
+      "string"
+    ],
+    "curl": [
+      "string"
+    ],
+    "body_value": [
+      "string"
+    ],
+    "parsed_body": [
+      "object"
+    ],
+    "parameterExplanations": [
+      "object"
+    ],
+    "headers": [
+      "array"
+    ],
+    "api_test_values": [
+      "object"
+    ],
+    "isApiValidated": [
+      "boolean"
+    ],
+    "validated_signature": [
+      "string"
+    ],
+    "response_map": [
+      "array"
+    ]
+  },
+  "tags": {
+    "id": [
+      "string"
+    ],
+    "tags": [
+      "string"
+    ],
+    "selectedTag": [
+      "string"
+    ]
+  },
+  "flow": {
+    "id": [
+      "string"
+    ],
+    "targetFlow": [
+      "string"
+    ],
+    "flowName": [
+      "string"
+    ],
+    "flowDescription": [
+      "string"
+    ]
+  }
+}
