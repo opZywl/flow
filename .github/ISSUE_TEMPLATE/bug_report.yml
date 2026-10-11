@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in the editor or in the exported JSON is not working as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Import ...
+        2. Connect ...
+        3. Export ...
+    validations:
+      required: true
+  - type: textarea
+    id: json
+    attributes:
+      label: Flow JSON (optional)
+      description: Remove customer data, tokens and internal URLs before pasting.
+      render: json
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Chrome 130

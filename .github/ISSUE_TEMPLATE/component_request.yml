@@ -1,0 +1,24 @@
+name: Component support
+description: Enable a palette component that is still marked as "sem JSON"
+labels: [component]
+body:
+  - type: input
+    id: component
+    attributes:
+      label: Component
+      placeholder: Enviar Arquivo
+    validations:
+      required: true
+  - type: textarea
+    id: export
+    attributes:
+      label: Exported example
+      description: A flow exported by the platform with this component configured and every output connected. Remove customer data, tokens and internal URLs.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected behavior
+      description: What each output means and which fields the user fills in.
