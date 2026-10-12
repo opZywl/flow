@@ -294,9 +294,9 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   condicional_api: {
     does: "Compara uma variável com um valor, por igualdade ou diferença.",
-    required: ["key", "condition", "value"],
+    required: ["key", "condition"],
     outputs: ["a comparação é falsa", "a comparação é verdadeira"],
-    rules: ["key é o nome da variável, sem {{ }}."],
+    rules: ["key é o nome da variável, sem {{ }}.", "value vazio compara com texto vazio: \"Diferente de\" com value vazio confere se a variável foi preenchida."],
   },
   Send_DataStore: {
     does: "Envia os dados do atendimento para uma API de DataStore.",

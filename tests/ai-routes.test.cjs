@@ -447,6 +447,16 @@ test('RI sem componentes em todas as rodadas falha com mensagem clara', async ()
   assert.deepEqual(data, { success: false, code: 'invalid_output', error: 'O modelo não gerou nenhum componente para esta descrição.', details: 'Descreva as etapas do atendimento e gere novamente.', field: 'prompt' })
 })
 
+test('RI só com o início ou só com notas falha como resposta sem componentes', async () => {
+  for (const nodes of [[{ id: 'inicio', type: 'trigger_message', config: [] }], [{ id: 'nota', type: 'note', config: [{ key: 'text', value: 'Revisar.' }] }]]) {
+    responder = () => reply.google(JSON.stringify({ name: 'Sem componentes', description: '', nodes, edges: [] }))
+    const { response, data } = await run(payload('google', { prompt: 'asdf qwer' }))
+    assert.equal(response.status, 422)
+    assert.equal(data.code, 'invalid_output')
+    assert.equal(data.error, 'O modelo não gerou nenhum componente para esta descrição.')
+  }
+})
+
 test('RI vazia numa rodada e completa na correção devolve o fluxo completo', async () => {
   responder = (call, index) => reply.google(JSON.stringify(index === 0 ? { name: 'Vazio', description: '', nodes: [], edges: [] } : RI))
   const { response, data } = await run(payload('google'))

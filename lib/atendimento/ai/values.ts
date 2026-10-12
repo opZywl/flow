@@ -343,13 +343,18 @@ function timeRulesOf(raw: string, context: ConfigContext, notes: ValueNote[]): J
     const startTime = timeOf(pickValue(item, ["startTime", "start", "inicio", "from", "de", "abertura"]))
     const endTime = timeOf(pickValue(item, ["endTime", "end", "fim", "to", "ate", "fechamento"]))
     if (!weekDays || !weekDays.length || !startTime || !endTime) return undefined
-    if (startTime <= endTime) {
-      rules.push({ id: context.ruleId(), weekDays, startTime, endTime })
-      continue
-    }
     if (endTime === "00:00") {
       rules.push({ id: context.ruleId(), weekDays, startTime, endTime: "23:59" })
       notes.push({ level: "hint", message: `A regra das ${startTime} às 00:00 passou a terminar às 23:59.` })
+      continue
+    }
+    if (startTime === endTime) {
+      rules.push({ id: context.ruleId(), weekDays, startTime, endTime })
+      notes.push({ level: "warning", message: `A regra das ${startTime} às ${endTime} começa e termina no mesmo horário; informe o horário de fim.` })
+      continue
+    }
+    if (startTime < endTime) {
+      rules.push({ id: context.ruleId(), weekDays, startTime, endTime })
       continue
     }
     const following = DAY_ORDER.filter((day) => weekDays.includes(DAY_ORDER[(DAY_ORDER.indexOf(day) + DAY_ORDER.length - 1) % DAY_ORDER.length]))
@@ -485,15 +490,27 @@ function objectListOf(field: FieldSpec, raw: string, notes: ValueNote[]): JsonOb
   return items
 }
 
+const pathLike = (candidate: string) => /[.[]/.test(candidate)
+const responseKeysOnly = (value: Record<string, unknown>) => Object.keys(value).every((name) => RESPONSE_KEYS.has(name.toLowerCase()))
+
 function responseMapOf(value: Record<string, unknown>): unknown {
-  if (Object.keys(value).some((name) => RESPONSE_KEYS.has(name.toLowerCase()))) return [value]
-  const entries = Object.entries(value)
-  if (!entries.length || !entries.every(([, entry]) => typeof entry === "string")) return [value]
-  return entries.map(([name, entry]) => {
-    const text = String(entry)
-    const pathLike = (candidate: string) => /[.[]/.test(candidate)
-    return pathLike(text) || !pathLike(name) ? { path: text, variable: name } : { path: name, variable: text }
-  })
+  const names = Object.keys(value).map((name) => name.toLowerCase())
+  const has = (aliases: readonly string[]) => aliases.some((alias) => names.includes(alias.toLowerCase()))
+  if (!names.length || responseKeysOnly(value) || (has(RESPONSE_ALIASES.path) && has(RESPONSE_ALIASES.variable))) return [value]
+  const items: unknown[] = []
+  const walk = (name: string, entry: unknown): boolean => {
+    if (typeof entry === "string") {
+      items.push(pathLike(entry) || !pathLike(name) ? { path: entry, variable: name } : { path: name, variable: entry })
+      return true
+    }
+    if (!isRecord(entry) || !Object.keys(entry).length) return false
+    if (responseKeysOnly(entry)) {
+      items.push({ variable: name, ...entry })
+      return true
+    }
+    return Object.entries(entry).every(([key, inner]) => walk(`${name}.${key}`, inner))
+  }
+  return Object.entries(value).every(([name, entry]) => walk(name, entry)) ? items : [value]
 }
 
 function jsonOf(type: string, key: string, raw: string, notes: ValueNote[]): JsonValue | undefined {

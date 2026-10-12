@@ -4,6 +4,7 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createXai } from "@ai-sdk/xai"
+import { NOTE_TYPE, START_ID } from "@/lib/atendimento/catalog"
 import { stampExport } from "@/lib/atendimento/format"
 import { assembleFlow } from "@/lib/atendimento/ai/assemble"
 import { COUNT_LIMITS, GENERATION_SIZES, LIMITS, MAX_ROUNDS } from "@/lib/atendimento/ai/contracts"
@@ -539,7 +540,7 @@ async function runGeneration(input: GenerationInput, abort: Abort, progress: Pro
     progress({ stage: "corrigindo", round: round + 1, maxRounds: MAX_ROUNDS, pending: issues.filter((issue) => issue.scope === "ia").length })
   }
   if (!best) throw new Error("Nenhuma rodada produziu um fluxo.")
-  if (best.ri.nodes.length === 0) throw new EmptyFlowError()
+  if (!best.assembled.flow.nodes.some((node) => node.id !== START_ID && node.data.type !== NOTE_TYPE)) throw new EmptyFlowError()
   const { workflow, issues } = concludeGeneration(best)
   return {
     success: true,

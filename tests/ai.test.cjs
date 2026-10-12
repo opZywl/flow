@@ -1077,6 +1077,82 @@ test('a menu option linked to the menu itself becomes Retornar ao Menu', () => {
   assert.ok(!final.flow.nodes.some(entry => entry.data.type === 'finalizar' && entry.id !== byRi(final, 'fim').id))
 })
 
+test('without a start link the start reaches the main flow even when the menu is in a cycle', () => {
+  const assembled = assemble(flowOf([
+    node('menu', 'envio_mensagem', { title: 'Escolha', options: '["Vendas","Encerrar"]' }),
+    node('vendas', 'envio_pergunta', { template: 'Falando de vendas.' }),
+    node('sobra', 'finalizar'),
+    node('tchau', 'finalizar'),
+  ], [edge('menu', 'Vendas', 'vendas'), edge('vendas', '', 'menu'), edge('menu', 'Encerrar', 'tchau')]))
+  assert.equal(linkOf(assembled, 'inicio', 'menu')?.sourceHandle, 'output-0')
+  assert.ok(noteMessages(assembled).includes('O início não estava ligado e foi ligado a “menu”, o componente que alcança mais passos. Revise.'))
+  const final = finalizeFlow(assembled)
+  const reachable = new Set([START_ID])
+  for (const id of reachable) for (const entry of final.flow.edges) if (entry.source === id) reachable.add(entry.target)
+  for (const id of ['menu', 'vendas', 'tchau']) assert.ok(reachable.has(byRi(final, id).id), id)
+})
+
+test('Retornar ao Menu follows the final menu title after the long message is split or filled', () => {
+  const notice = 'Aviso importante sobre o atendimento. '.repeat(30).trim()
+  const final = finalizeFlow(assemble(flowOf([
+    node('menu', 'envio_mensagem', { title: `${notice}\n\nEscolha uma opção:`, options: '["Horários","Ver de novo"]' }),
+    node('horarios', 'envio_pergunta', { template: 'Das 8h às 18h.' }),
+    node('fim', 'finalizar'),
+  ], [edge('inicio', '', 'menu'), edge('menu', 'Horários', 'horarios'), edge('menu', 'Ver de novo', 'menu'), edge('horarios', '', 'fim')])))
+  const back = final.flow.nodes.find(entry => entry.data.type === 'voltar')
+  assert.equal(byRi(final, 'menu').data.data.title, 'Escolha uma opção:')
+  assert.equal(back.data.data.targetNodeName, 'Escolha uma opção:')
+  assert.deepEqual(back.data.data.availableNodes.map(entry => entry.name), ['Escolha uma opção:'])
+  assert.deepEqual(errorsOf(final.flow), [])
+
+  const filled = finalizeFlow(assemble(flowOf([node('menu', 'envio_mensagem', { options: '["A","Ver de novo"]' }), node('fim', 'finalizar')], [edge('inicio', '', 'menu'), edge('menu', 'A', 'fim'), edge('menu', 'Ver de novo', 'menu')])))
+  assert.equal(filled.flow.nodes.find(entry => entry.data.type === 'voltar').data.data.targetNodeName, 'Escolha uma opção.')
+})
+
+test('a long menu message without a safe cut goes whole to the message before the menu', () => {
+  for (const title of [`Leia: https://exemplo.com/${'x'.repeat(1300)}`, `${'😀'.repeat(600)}.`]) {
+    const final = finalizeFlow(assemble(flowOf([node('menu', 'envio_mensagem', { title, options: '["A"]' }), node('fim', 'finalizar')], [edge('inicio', '', 'menu'), edge('menu', 'A', 'fim')])))
+    const lead = final.flow.nodes.find(entry => entry.data.type === 'envio_pergunta')
+    assert.equal(lead.data.data.template, title)
+    assert.equal(byRi(final, 'menu').data.data.title, 'Escolha uma opção.')
+    assert.ok(noteMessages(final).includes('A mensagem do menu passava de 1024 caracteres e foi inteira para um Enviar Mensagem antes do menu; o menu ficou com um texto provisório. Revise.'))
+    assert.deepEqual(errorsOf(final.flow), [])
+  }
+})
+
+test('a Condicional with an empty value is a valid filled check and needs no correction', () => {
+  const evaluation = evaluateRi(flowOf([
+    node('tem', 'condicional_api', { key: 'cpf', condition: 'Diferente de', value: '' }),
+    node('sim', 'finalizar'),
+    node('nao', 'finalizar'),
+  ], [edge('inicio', '', 'tem'), edge('tem', 'Verdadeiro', 'sim'), edge('tem', 'Falso', 'nao')]), { now: NOW })
+  assert.deepEqual(evaluation.pending, [])
+  assert.equal(needsCorrection(evaluation), false)
+  assert.ok(!COMPONENT_GUIDE.condicional_api.required.includes('value'))
+})
+
+test('response_map maps variables named like aliases and nested objects, and odd time rules are handled', () => {
+  const api = { url_api: 'https://example.com/pagamentos' }
+  const pix = configure('consulta_api', { ...api, response_map: JSON.stringify({ chave: 'pagamento.pix.chave', valor: 'pagamento.valor' }) })
+  assert.deepEqual(pix.data.response_map, [
+    { path: 'pagamento.pix.chave', key: '', sample: '', variable: 'chave' },
+    { path: 'pagamento.valor', key: '', sample: '', variable: 'valor' },
+  ])
+  assert.deepEqual(pix.notes, [])
+  const nested = configure('consulta_api', { ...api, response_map: JSON.stringify({ cliente: { nome: 'nome_cliente' }, status_pedido: { path: 'pedido.status', exemplo: 'entregue' } }) })
+  assert.deepEqual(nested.data.response_map, [
+    { path: 'cliente.nome', key: '', sample: '', variable: 'nome_cliente' },
+    { path: 'pedido.status', key: '', sample: 'entregue', variable: 'status_pedido' },
+  ])
+  assert.deepEqual(nested.notes, [])
+
+  const allDay = configure('timeConditions', { timeRules: JSON.stringify([{ weekDays: 'todos', startTime: '00:00', endTime: '00:00' }]) })
+  assert.deepEqual(allDay.data.timeRules.map(rule => [rule.startTime, rule.endTime]), [['00:00', '23:59']])
+  assert.deepEqual(allDay.notes, [{ level: 'hint', message: 'A regra das 00:00 às 00:00 passou a terminar às 23:59.' }])
+  const same = configure('timeConditions', { timeRules: JSON.stringify([{ weekDays: ['monday'], startTime: '08:00', endTime: '08:00' }]) })
+  assert.deepEqual(same.notes, [{ level: 'warning', message: 'A regra das 08:00 às 08:00 começa e termina no mesmo horário; informe o horário de fim.' }])
+})
+
 test('repairRiText fixes fences, non text values, config maps and type names', () => {
   const text = '```json\n' + JSON.stringify({
     name: 'Fluxo',

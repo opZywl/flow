@@ -40,6 +40,7 @@ const FALLBACK_NAME = "Fluxo gerado por IA"
 const PROTOCOL_TYPE = "protocolo"
 const MESSAGE_TYPE = "envio_pergunta"
 const MENU_TITLE_LIMIT = 1024
+const MENU_PLACEHOLDER = "Escolha uma opção."
 const UNCHECKED_KINDS = new Set(["menuOptions", "conditionPairs", "menuNode"])
 
 const labelKey = (value: string) => foldText(value).replace(/^["'“”‘’]+|["'“”‘’.]+$/g, "").trim()
@@ -214,16 +215,20 @@ function linkStart(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, no
   const roots = candidates.filter((node) => !entered.has(node.id))
   let first: AtendimentoNode | undefined
   let best = -1
-  for (const node of roots.length ? roots : candidates) {
-    const size = descendants(flow.edges, node.id).size
-    if (size > best) {
+  let rooted = false
+  for (const node of candidates) {
+    const reach = descendants(flow.edges, node.id)
+    reach.delete(node.id)
+    const root = !entered.has(node.id)
+    if (reach.size > best || (reach.size === best && root && !rooted)) {
       first = node
-      best = size
+      best = reach.size
+      rooted = root
     }
   }
   if (!first) return
   flow.edges.unshift(createEdge(flow.edges, START_ID, "output-0", first.id))
-  if (roots.length === 1) return
+  if (roots.length === 1 && roots[0] === first) return
   const origin = riIds.get(first.id)
   notes.push({
     level: "warning",
@@ -474,7 +479,7 @@ function fillRequired(node: AtendimentoNode): string[] {
   const filled: string[] = []
   if (node.data.type === MENU_TYPE) {
     if (blank(data.title)) {
-      data.title = "Escolha uma opção."
+      data.title = MENU_PLACEHOLDER
       filled.push("a mensagem do menu")
     }
     optionIndices(data).forEach((option, position) => {
@@ -511,7 +516,7 @@ function titleCut(title: string): number {
     const found = ends(pattern)
     if (found.length) return found[found.length - 1]
   }
-  return ends(/\s+/g)[0] ?? floor
+  return ends(/\s+/g)[0] ?? title.length
 }
 
 function splitLongMenus(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, notes: AssemblyNote[]): void {
@@ -520,8 +525,9 @@ function splitLongMenus(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string
     if (title.length <= MENU_TITLE_LIMIT) continue
     const cut = titleCut(title)
     const lead = newNode(MESSAGE_TYPE, { x: 0, y: 0 }, nextNodeId(flow.nodes))
+    const whole = cut >= title.length
     lead.data.data.template = title.slice(0, cut).trim()
-    menu.data.data.title = title.slice(cut).trim()
+    menu.data.data.title = whole ? MENU_PLACEHOLDER : title.slice(cut).trim()
     flow.nodes.push(lead)
     for (const edge of flow.edges.filter((entry) => entry.target === menu.id)) retarget(flow, edge, lead.id)
     flow.edges.push(createEdge(flow.edges, lead.id, "output-0", menu.id))
@@ -529,7 +535,9 @@ function splitLongMenus(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string
     notes.push({
       level: "warning",
       scope: "ajuste",
-      message: `A mensagem do menu passava de ${MENU_TITLE_LIMIT} caracteres; o começo foi para um Enviar Mensagem antes do menu. Revise.`,
+      message: whole
+        ? `A mensagem do menu passava de ${MENU_TITLE_LIMIT} caracteres e foi inteira para um Enviar Mensagem antes do menu; o menu ficou com um texto provisório. Revise.`
+        : `A mensagem do menu passava de ${MENU_TITLE_LIMIT} caracteres; o começo foi para um Enviar Mensagem antes do menu. Revise.`,
       nodeId: lead.id,
       ...(origin ? { riId: origin } : {}),
       type: MESSAGE_TYPE,
@@ -574,6 +582,7 @@ export function finalizeFlow(assembled: AssembledFlow): AssembledFlow {
     })
   }
   splitLongMenus(flow, riIds, notes)
+  settleReturns(flow)
   detachUnreachable(flow, riIds, notes)
   const reachable = new Set([START_ID, ...descendants(flow.edges, START_ID)])
   for (const node of [...flow.nodes]) {
