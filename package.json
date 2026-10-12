@@ -34,7 +34,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "2.0.106",
     "@ai-sdk/google": "2.0.99",
-    "@ai-sdk/openai": "2.0.130",
+    "@ai-sdk/openai": "4.0.91",
     "@ai-sdk/xai": "2.0.97",
     "@radix-ui/react-accordion": "latest",
     "@radix-ui/react-alert-dialog": "latest",
