@@ -556,6 +556,58 @@ test('the panel shows blocking problems in red and warnings in yellow with the v
   await expect(variable).not.toHaveAttribute('aria-invalid')
   await expect(await describedBy(page, variable, 'Informe a variável.')).toHaveClass(/text-flow-warning/)
 
+  const invalidUrl = 'Informe uma URL válida, iniciada por http:// ou https://.'
+  await library.getByRole('button', { name: 'Consulta API', exact: true }).click()
+  const address = page.getByLabel('URL da API', { exact: true })
+  await expect(address).not.toHaveAttribute('aria-invalid')
+  await expect(await describedBy(page, address, 'Informe a URL da API.')).toHaveClass(/text-flow-warning/)
+  await address.fill('exemplo.com/api')
+  await expect(address).toHaveAttribute('aria-invalid', 'true')
+  await expect(address).toHaveClass(/border-flow-danger/)
+  await expect(await describedBy(page, address, invalidUrl)).toHaveClass(/text-flow-danger/)
+  await expect(page.getByText('Informe a URL da API.', { exact: true })).toHaveCount(0)
+  await address.fill('https://exemplo.com/api')
+  await expect(address).not.toHaveAttribute('aria-invalid')
+  await expect(page.getByText(invalidUrl, { exact: true })).toHaveCount(0)
+
+  await library.getByRole('button', { name: 'Enviar Mensagem', exact: true }).click()
+  const template = page.getByLabel('Mensagem', { exact: true })
+  await expect(template).toHaveAttribute('aria-invalid', 'true')
+  await expect(await describedBy(page, template, 'Preencha a mensagem.')).toHaveClass(/text-flow-danger/)
+  await template.fill('Mensagem criada no editor')
+  await expect(template).not.toHaveAttribute('aria-invalid')
+  await expect(page.getByText('Preencha a mensagem.', { exact: true })).toHaveCount(0)
+
+  await library.getByRole('button', { name: 'DataStore Local', exact: true }).click()
+  const store = page.getByLabel('Base de dados', { exact: true })
+  await expect(store).not.toHaveAttribute('aria-invalid')
+  await expect(store).toHaveClass(/border-flow-warning/)
+  await expect(await describedBy(page, store, 'Escolha a base de dados.')).toHaveClass(/text-flow-warning/)
+
+  await library.getByRole('button', { name: 'Confirmar Agendamento', exact: true }).click()
+  const confirmation = page.getByLabel('Mensagem de confirmação', { exact: true })
+  await expect(confirmation).not.toHaveAttribute('aria-invalid')
+  await expect(await describedBy(page, confirmation, 'Preencha a mensagem de confirmação.')).toHaveClass(/text-flow-warning/)
+
+  const choice = 'Selecione ao menos um dado para pedir ao cliente.'
+  await library.getByRole('button', { name: 'Dados do Cliente', exact: true }).click()
+  await page.getByLabel('Pedir nome', { exact: true }).uncheck()
+  for (const label of ['Pedir nome', 'Pedir e-mail', 'Pedir observações']) {
+    const option = page.getByLabel(label, { exact: true })
+    await expect(option).not.toHaveAttribute('aria-invalid')
+    await expect(await describedBy(page, option, choice)).toHaveClass(/text-flow-warning/)
+  }
+  await page.getByLabel('Pedir e-mail', { exact: true }).check()
+  await expect(page.getByText(choice, { exact: true })).toHaveCount(0)
+
+  await library.getByRole('button', { name: 'Escolher Serviço', exact: true }).click()
+  await page.getByRole('button', { name: 'Adicionar ID', exact: true }).click()
+  const service = page.getByLabel('ID 1 de serviços oferecidos', { exact: true })
+  await service.fill('servico-1')
+  await service.fill('')
+  await expect(service).toHaveClass(/border-flow-warning/)
+  await expect(await describedBy(page, service, 'Cada item de Serviços oferecidos deve ser um ID em texto.')).toHaveClass(/text-flow-warning/)
+
   await library.getByRole('button', { name: 'Condições de Tempo', exact: true }).click()
   const monday = page.getByRole('button', { name: 'Segunda-feira', exact: true })
   await expect(monday).toHaveAttribute('aria-pressed', 'true')

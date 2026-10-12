@@ -11,6 +11,7 @@ const {
   expectedFieldTypes, outputTone, START_ID, START_TYPE,
 } = require('../lib/atendimento/catalog.ts')
 const { cleanNumberText, numberMessage, numberRule, numericText } = require('../lib/atendimento/numbers.ts')
+const { placeIssues, technicalKeys } = require('../lib/atendimento/field-issues.ts')
 const fieldTypes = require('../lib/atendimento/field-types.json')
 const templates = require('../lib/atendimento/templates.json')
 
@@ -1555,8 +1556,8 @@ test('references keep id mirrored and warn when it diverges or the name is missi
   flow.nodes[2] = newNode('departamentos', { x: 0, y: 0 }, '3')
   Object.assign(flow.nodes[2].data.data, { id: 'a', departamento: 'b' })
   assert.deepEqual(validateFlow(flow), [
-    { severity: 'warning', message: 'O campo id deve ser igual ao ID do departamento.', nodeId: '3' },
-    { severity: 'warning', message: 'Informe o nome do departamento.', nodeId: '3' },
+    { severity: 'warning', message: 'O campo id deve ser igual ao ID do departamento.', nodeId: '3', fields: ['id'] },
+    { severity: 'warning', message: 'Informe o nome do departamento.', nodeId: '3', fields: ['name'] },
   ])
   const tag = basic(); tag.nodes[2] = newNode('tags', { x: 0, y: 0 }, '3')
   tag.nodes.push(newNode('finalizar', { x: 0, y: 0 }, '4')); link(tag, '3', '4')
@@ -1655,6 +1656,118 @@ test('required list item fields use the validator severity when left empty', () 
     }
   }
   assert.deepEqual(checked, ['randomizer.paths.label:warning', 'aiAgentBlock.exits.name:error', 'aiAgentBlock.exits.when:warning', 'googleSheetsAppend.columns.header:warning', 'multiple_condicional_api.conditions.var:warning'])
+})
+
+const COMPONENT_ISSUES = [
+  /^Componente sem conexões; ele não será executado\.$/, /^Componente desconectado do início\.$/, /^Conecte a saída “.*”\.$/, /^A saída .* (não existe neste componente|tem mais de um destino)\.$/,
+  /^O componente (recebe mais de uma conexão|não pode se conectar a ele mesmo)/, /^Este componente (não pode receber conexões|é gravado pela plataforma com type)/, /^Notas não podem ser conectadas\.$/,
+  /^Tipo preservado do arquivo/, /^O ID deste componente deve ser/, /^API não validada: valide na plataforma depois de importar\.$/,
+]
+const issueFields = (type, patch) => validateFlow(single(type, patched(type, patch))).filter(issue => issue.nodeId === '2').map(issue => [issue.message, issue.fields])
+const placementOf = (flow, nodeId) => {
+  const node = flow.nodes.find(entry => entry.id === nodeId)
+  const { fields } = getDefinition(node.data.type)
+  return placeIssues(fields, technicalKeys(fields, node.data.data), validateFlow(flow).filter(issue => issue.nodeId === nodeId), 'campo')
+}
+const spotOf = spot => spot && { shown: spot.shown.map(problem => `${problem.severity}: ${problem.message}`), marked: spot.marked.map(problem => `${problem.severity}: ${problem.message}`) }
+
+test('emptying a required field reports an issue that names that field', () => {
+  let checked = 0
+  for (const [type, spec] of Object.entries(SPEC)) {
+    for (const key of Object.keys(spec.blank ?? {})) {
+      const issues = validateFlow(single(type, blanked(type, key))).filter(issue => issue.nodeId === subjectOf(type))
+      assert.equal(issues.length, 1, `${type}.${key}`)
+      assert.ok(issues[0].fields?.includes(key), `${type}.${key}: ${JSON.stringify(issues[0].fields)}`)
+      checked++
+    }
+  }
+  assert.ok(checked >= 90, `${checked} campos`)
+})
+
+test('issues name every field involved, list items by position, and connection problems stay on the component', () => {
+  assert.deepEqual(issueFields('consulta_api', { url_api: 'exemplo.com/api' }), [[INVALID_URL, ['url_api']]])
+  assert.deepEqual(issueFields('solicitar_dados', { url_api: 'exemplo.com/api' }), [[INVALID_URL, ['url_api']]])
+  assert.deepEqual(issueFields('External_Message_Http', { url_api: 'exemplo.com/api' }), [[INVALID_URL, ['url_api']]])
+  assert.deepEqual(issueFields('Send_DataStore', { url_api: 'exemplo.com/api' }), [[INVALID_URL, ['url_api']]])
+  assert.deepEqual(issueFields('envio_boletos', { url_list: 'boletos', url_send: 'envio' }), [[INVALID_URL, ['url_list', 'url_send']]])
+  assert.deepEqual(issueFields('api_options_menu', { apiUrl: 'opcoes', postUrl: API_URL }), [[INVALID_URL, ['apiUrl']]])
+  assert.deepEqual(issueFields('protocolo', { opt: 'URL' }), [['Informe a URL da API de protocolo.', ['url_api']]])
+  assert.deepEqual(issueFields('envio_arquivo', { url: 'arquivo.pdf' }), [[INVALID_URL, ['url']]])
+  assert.deepEqual(issueFields('consulta_api', { url_api: 7 }), [['Campo url_api: esperado texto, recebido número.', ['url_api']], ['Informe a URL da API.', ['url_api']]])
+  assert.deepEqual(issueFields('consulta_api', { isApiValidated: false }), [['API não validada: valide na plataforma depois de importar.', undefined]])
+  assert.deepEqual(issueFields('envio_arquivo', { voice_note: true }), [['Mensagem de voz exige um arquivo de áudio.', ['mime_type', 'voice_note']]])
+  assert.deepEqual(issueFields('apptCustomerIntake', { askName: false, askEmail: false, askNotes: false }), [['Selecione ao menos um dado para pedir ao cliente.', ['askName', 'askEmail', 'askNotes']]])
+  assert.deepEqual(issueFields('crmLeadUpdate', { setStatus: '', addTags: '', setValue: '' }), [['Defina ao menos uma alteração: status, tags ou valor.', ['setStatus', 'addTags', 'setValue']]])
+  assert.deepEqual(issueFields('crmActivity', { leadVar: 'lead id', contactVar: 'contato id' }), [['O nome da variável não pode ter espaços.', ['leadVar', 'contactVar']]])
+  assert.deepEqual(issueFields('whatsappFlow', { formId: '', metaFlowId: '' }), [['Informe o ID do formulário ou o ID do Flow na Meta.', ['formId', 'metaFlowId']]])
+  assert.deepEqual(issueFields('ticketCreate', { formId: '', fallbackQuestion: '' }), [['Informe o formulário ou a pergunta alternativa.', ['formId', 'fallbackQuestion']]])
+  assert.deepEqual(issueFields('sequenceUnenroll', { sequenceId: '', allSequences: false }), [['Informe o ID da lista ou marque Remover de todas as listas.', ['sequenceId', 'allSequences']]])
+  assert.deepEqual(issueFields('departamentos', { id: 'outro' }), [['O campo id deve ser igual ao ID do departamento.', ['id']]])
+  assert.deepEqual(issueFields('tabulation', { tabulation: 'outra' }), [['Os campos id e tabulation devem ser iguais ao ID da tabulação.', ['tabulation']]])
+  assert.deepEqual(issueFields('apptService', { selectedIds: ['servico-1', '', 'servico-3', 4] }), [['Cada item de Serviços oferecidos deve ser um ID em texto.', ['selectedIds.1', 'selectedIds.3']]])
+  assert.deepEqual(issueFields('randomizer', { paths: [{ label: '', weight: 50 }, { label: 'B', weight: 'x' }] }), [['Caminho 1: informe o nome.', ['paths.0.label']], ['Caminho 2: informe um peso numérico.', ['paths.1.weight']]])
+  assert.deepEqual(issueFields('randomizer', { paths: [{ label: 'A', weight: 0 }, { label: 'B', weight: 0 }] }), [['A soma dos pesos deve ser maior que zero.', ['paths']]])
+  assert.deepEqual(issueFields('randomizer', { paths: [{ label: 'A', weight: 33.33 }, { label: 'B', weight: 33.33 }, { label: 'C', weight: 33.33 }] }), [['Os pesos somam 99,99; o total esperado é 100.', ['paths']]])
+  assert.deepEqual(issueFields('aiAgentBlock', { exits: [exit('Resolvido'), exit('resolvido ')] }), [['O nome de saída resolvido está repetido.', ['exits.0.name', 'exits.1.name']]])
+  assert.deepEqual(issueFields('aiAgentBlock', { exits: ['Resolvido'] }), [['Saída 1 do agente inválida: nome e condição devem ser texto e a exigência de campos, verdadeiro ou falso.', ['exits.0']]])
+  assert.deepEqual(issueFields('googleSheetsAppend', { columns: [{ header: '', value: '{{nome}}' }, { header: 'Data' }] }), [['Coluna 1: informe o nome.', ['columns.0.header']], ['Coluna 2 inválida: informe nome e valor.', ['columns.1']]])
+  assert.deepEqual(issueFields('envio_mensagem', { 'opt-3': '3', 'text-3': 'Terceira', 'description-3': '' }), [['As opções devem usar chaves consecutivas (text-1, text-2…).', ['options']]])
+  assert.deepEqual(issueFields('envio_mensagem', { 'opt-9': '9' }), [['Campo opt-9 sem a opção correspondente text-9.', ['opt-9']]])
+  assert.deepEqual(issueFields('multiple_condicional_api', data => { delete data['value-1'] }), [['Campo var-1 sem o valor value-1.', ['value-1']]])
+  assert.deepEqual(issueFields('multiple_condicional_api', data => { delete data['var-1']; delete data['value-1'] }), [['Cadastre ao menos uma condição.', ['conditions']]])
+  const menu = menuFlow()
+  Object.assign(menu.nodes[1].data.data, { 'opt-1': '1', 'opt-2': '1', 'opt-3': '1' })
+  assert.deepEqual(validateFlow(menu).map(issue => issue.fields), [['opt-1', 'opt-2', 'opt-3']])
+  assert.deepEqual(validateFlow(timeFlow([{ id: 'r', weekDays: ['monday'], startTime: '18:00', endTime: '08:00' }])).map(issue => issue.fields), [['timeRules.0.startTime', 'timeRules.0.endTime']])
+  const loose = single('envio_pergunta', configuredData('envio_pergunta'))
+  loose.edges = loose.edges.filter(edge => edge.source !== '2')
+  assert.deepEqual(validateFlow(loose).filter(issue => issue.nodeId === '2').map(issue => [issue.message, issue.fields]), [['Conecte a saída “Próximo”.', undefined]])
+})
+
+test('the panel shows each issue under the last field it names, marks every field involved and keeps the validator severity', () => {
+  const intake = placementOf(single('apptCustomerIntake', patched('apptCustomerIntake', { askName: false, askEmail: false, askNotes: false })), '2')
+  const choice = 'warning: Selecione ao menos um dado para pedir ao cliente.'
+  assert.deepEqual(['askName', 'askEmail', 'askNotes', 'introMessage'].map(key => spotOf(intake.fields.get(key))), [{ shown: [], marked: [choice] }, { shown: [], marked: [choice] }, { shown: [choice], marked: [choice] }, undefined])
+  const api = placementOf(single('consulta_api', patched('consulta_api', { url_api: 'exemplo.com/api' })), '2')
+  assert.deepEqual(spotOf(api.fields.get('url_api')), { shown: [`error: ${INVALID_URL}`], marked: [`error: ${INVALID_URL}`] })
+  const file = placementOf(single('envio_arquivo', patched('envio_arquivo', { url: 'arquivo.pdf' })), '2')
+  assert.deepEqual(spotOf(file.fields.get('url')), { shown: [`warning: ${INVALID_URL}`], marked: [`warning: ${INVALID_URL}`] })
+  const department = placementOf(single('departamentos', patched('departamentos', { id: 'outro', enabled: 'sim' })), '2')
+  assert.deepEqual(spotOf(department.fields.get('departamento')), { shown: ['warning: O campo id deve ser igual ao ID do departamento.'], marked: ['warning: O campo id deve ser igual ao ID do departamento.'] })
+  assert.deepEqual(spotOf(department.technical.get('enabled')), { shown: ['error: Campo enabled: esperado verdadeiro ou falso, recebido texto.'], marked: ['error: Campo enabled: esperado verdadeiro ou falso, recebido texto.'] })
+  const agent = placementOf(single('aiAgentBlock', patched('aiAgentBlock', { exits: [exit('Resolvido'), exit('resolvido ')] })), '2')
+  assert.deepEqual(spotOf(agent.fields.get('exits')), { shown: ['warning: O nome de saída resolvido está repetido.'], marked: ['warning: O nome de saída resolvido está repetido.'] })
+  const image = placementOf(single('envio_imagem', patched('envio_imagem', { imagem: '', url: '' })), '2')
+  assert.deepEqual(spotOf(image.fields.get('imagem')), { shown: ['warning: Informe a URL da imagem.'], marked: ['warning: Informe a URL da imagem.'] })
+  const menu = placementOf(single('envio_mensagem', patched('envio_mensagem', { 'opt-9': '9', title: '' })), '2')
+  assert.deepEqual(spotOf(menu.fields.get('options')), { shown: ['error: Campo opt-9 sem a opção correspondente text-9.'], marked: ['error: Campo opt-9 sem a opção correspondente text-9.'] })
+  assert.deepEqual(spotOf(menu.fields.get('title')), { shown: ['error: Preencha a mensagem do menu.'], marked: ['error: Preencha a mensagem do menu.'] })
+  const ids = [...menu.fields.values()].flatMap(spot => spot.shown.map(problem => problem.id))
+  assert.equal(new Set(ids).size, ids.length)
+  assert.ok(ids.every(id => id.startsWith('campo-problem-')))
+  const unknown = placeIssues([], ['extra'], [{ severity: 'error', message: 'Campo extra: esperado texto, recebido número.', nodeId: '2', fields: ['extra'] }, { severity: 'warning', message: 'Sem lugar.', nodeId: '2', fields: ['ausente'] }, { severity: 'warning', message: 'Do componente.', nodeId: '2' }], 'campo')
+  assert.deepEqual(spotOf(unknown.technical.get('extra')), { shown: ['error: Campo extra: esperado texto, recebido número.'], marked: ['error: Campo extra: esperado texto, recebido número.'] })
+  assert.deepEqual(unknown.loose.map(problem => problem.message), ['Sem lugar.'])
+})
+
+test('every issue about a field of a known component has a place in the configuration panel', () => {
+  let placed = 0
+  for (const flow of invalidSamples()) {
+    const nodes = new Map(flow.nodes.map(node => [node.id, node]))
+    for (const issue of validateFlow(flow)) {
+      const node = issue.nodeId ? nodes.get(issue.nodeId) : undefined
+      const definition = node && getDefinition(node.data.type)
+      if (!definition || node.data.type === START_TYPE) continue
+      if (!issue.fields) {
+        assert.ok(COMPONENT_ISSUES.some(pattern => pattern.test(issue.message)), `${node.data.type}: ${issue.message}`)
+        continue
+      }
+      const placement = placeIssues(definition.fields, technicalKeys(definition.fields, node.data.data), [issue], 'campo')
+      assert.deepEqual(placement.loose, [], `${node.data.type}: ${issue.message}`)
+      placed++
+    }
+  }
+  assert.ok(placed > 150, `${placed} pendências`)
 })
 
 test('behavior signature ignores layout, viewport and metadata', () => {

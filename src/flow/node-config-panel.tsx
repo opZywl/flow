@@ -4,9 +4,10 @@ import { useEffect, useId, useMemo, useRef, useState, type MouseEvent, type Reac
 import { useStore, type ReactFlowState } from "reactflow"
 import { AlertTriangle, ChevronRight, Copy, Plus, Trash2, X } from "lucide-react"
 import { API_TYPES, MENU_TYPE, NOTE_TYPE, START_TYPE, expectedFieldTypes, getComponentColor, getComponentLabel, getDefinition, mirrorKeys, newTimeRule, weekDayOptions } from "@/lib/atendimento/catalog"
+import { pairPattern, placeIssues, technicalKeys, type FieldProblem, type ProblemSpot } from "@/lib/atendimento/field-issues"
 import { isObject, nextOptionDigit, optionIndices } from "@/lib/atendimento/format"
-import { cleanNumberText, numberMessage, numberRule, numericText, parseNumber, type NumberRule } from "@/lib/atendimento/numbers"
-import type { AtendimentoNode, ComponentDefinition, FieldSeverity, FieldSpec, ItemFieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
+import { cleanNumberText, numberMessage, numberRule, parseNumber, type NumberRule } from "@/lib/atendimento/numbers"
+import type { AtendimentoNode, ComponentDefinition, FieldSeverity, FieldSpec, FlowIssue, ItemFieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
 import { FlowSelect } from "./flow-select"
 import { categoryTint, componentIcon, noteColor } from "./nodes/atendimento-node"
@@ -47,7 +48,6 @@ const dayNames: Record<string, string> = {
 }
 
 const API_KEYS = ["url_api", "method", "body_value", "headers"]
-const OPTION_KEY = /^(opt|text|description)-(\d+)$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 const MAX_OPTIONS = 10
 const MENU_PREVIEW = 48
@@ -60,6 +60,8 @@ const TEXT_LIST_NOUNS: Record<string, string> = { selectedIds: "ID" }
 const MIRROR_FALLBACK: ReadonlySet<string> = new Set(["envio_imagem.imagem"])
 const FILE_NAME_SOURCES: Record<string, string[]> = { envio_arquivo: ["url"], envio_imagem: ["imagem", "url"] }
 const CARD_KINDS: ReadonlySet<string> = new Set(["menuOptions", "conditionPairs", "weightedPaths", "objectList"])
+const NO_PROBLEMS: ProblemSpot = { shown: [], marked: [] }
+const NO_ISSUES: FlowIssue[] = []
 
 const iconButton =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
@@ -71,6 +73,7 @@ const invalidField = "border-flow-danger hover:border-flow-danger focus-visible:
 const warningField = "border-flow-warning hover:border-flow-warning focus-visible:border-flow-warning focus-visible:ring-flow-warning/25"
 const fieldTone: Record<FieldSeverity, string> = { error: invalidField, warning: warningField }
 const messageTone: Record<FieldSeverity, string> = { error: ui.error, warning: ui.warning }
+const countTone: Record<FieldSeverity, string> = { error: "bg-flow-danger/15 text-flow-danger", warning: "bg-flow-warning/15 text-flow-warning" }
 const toggleRow = "flex items-center gap-2.5 rounded-lg border border-flow-border bg-flow-surface px-3 transition hover:border-flow-accent/50"
 const toggleLabel = "min-w-0 flex-1 cursor-pointer break-words py-2.5 text-sm text-flow-fg"
 const checkbox = "h-4 w-4 shrink-0 cursor-pointer accent-flow-accent"
@@ -101,6 +104,9 @@ const plural = (noun: string) => noun.endsWith("ão") ? `${noun.slice(0, -2)}õe
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 const describe = (...ids: Array<string | false | undefined>) => ids.filter(Boolean).join(" ") || undefined
 const hintOf = (id: string) => `${id}-hint`
+const idsOf = (problems: readonly FieldProblem[]) => problems.map((problem) => problem.id)
+const severityOf = (problems: readonly FieldProblem[]): FieldSeverity | undefined => problems.some((problem) => problem.severity === "error") ? "error" : problems.length ? "warning" : undefined
+const uncovered = (problems: readonly FieldProblem[], flagged: ReadonlySet<string>) => problems.filter((problem) => !problem.fields.every((path) => flagged.has(path)))
 const focusSoon = (id: string) => window.requestAnimationFrame(() => document.getElementById(id)?.focus())
 const focusEnd = (id: string) => window.requestAnimationFrame(() => {
   const element = document.getElementById(id)
@@ -182,17 +188,6 @@ function indexedKeys(data: JsonObject, prefix: string): number[] {
   }).sort((a, b) => a - b)
 }
 
-function pairPattern(spec: FieldSpec): RegExp | undefined {
-  const keys = (spec.itemFields ?? []).map((field) => escapeRegExp(field.key))
-  return keys.length ? new RegExp(`^(${keys.join("|")})-(\\d+)$`) : undefined
-}
-
-function indexedPattern(spec: FieldSpec): RegExp | undefined {
-  if (spec.kind === "menuOptions") return OPTION_KEY
-  if (spec.kind === "conditionPairs") return pairPattern(spec)
-  return undefined
-}
-
 function reindex(data: JsonObject, pattern: RegExp, indices: number[], removed: number): JsonObject {
   const positions = new Map(indices.filter((index) => index !== removed).map((index, position) => [index, position + 1]))
   const entries: Array<[string, JsonValue]> = []
@@ -266,6 +261,14 @@ function Field({ id, label, hint, meta, mono, children }: {
   )
 }
 
+function Problems({ items }: { items: readonly FieldProblem[] }) {
+  return (
+    <>
+      {items.map((item) => <p key={item.id} id={item.id} className={messageTone[item.severity]}>{item.message}</p>)}
+    </>
+  )
+}
+
 function CharacterCount({ length, limit }: { length: number; limit?: number }) {
   const over = limit !== undefined && length > limit
   return (
@@ -275,13 +278,14 @@ function CharacterCount({ length, limit }: { length: number; limit?: number }) {
   )
 }
 
-function JsonEditor({ label, value, hint, meta, mono, tall, onApply, onDraft }: {
+function JsonEditor({ label, value, hint, meta, mono, tall, problems = NO_PROBLEMS, onApply, onDraft }: {
   label: string
   value: JsonValue
   hint?: string
   meta?: ReactNode
   mono?: boolean
   tall?: boolean
+  problems?: ProblemSpot
   onApply: (value: JsonValue, base: JsonValue) => void
   onDraft: (dirty: boolean) => void
 }) {
@@ -322,6 +326,7 @@ function JsonEditor({ label, value, hint, meta, mono, tall, onApply, onDraft }: 
       {meta}
     </span>
   )
+  const tone = error ? "error" : severityOf(problems.marked)
   return (
     <div>
       <Field id={id} label={label} hint={hint} mono={mono} meta={status}>
@@ -329,9 +334,9 @@ function JsonEditor({ label, value, hint, meta, mono, tall, onApply, onDraft }: 
           id={id}
           value={text}
           spellCheck={false}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={describe(hint && hintOf(id), error && errorId)}
-          className={cn(ui.textarea, "resize-y font-mono text-xs leading-5", tall ? "min-h-48" : "min-h-28", error && invalidField)}
+          aria-invalid={tone === "error" || undefined}
+          aria-describedby={describe(hint && hintOf(id), error && errorId, ...idsOf(problems.marked))}
+          className={cn(ui.textarea, "resize-y font-mono text-xs leading-5", tall ? "min-h-48" : "min-h-28", tone && fieldTone[tone])}
           onChange={(event) => {
             if (base.current === null) base.current = serialized
             setEdited(event.target.value === serialized ? null : event.target.value)
@@ -339,6 +344,7 @@ function JsonEditor({ label, value, hint, meta, mono, tall, onApply, onDraft }: 
         />
       </Field>
       {error && <p id={errorId} role="alert" className={ui.error}>{error}</p>}
+      <Problems items={problems.shown} />
       {dirty && (
         <div className="mt-2 flex items-center gap-2">
           <button type="button" onClick={apply} className={ui.primaryButton}>Aplicar JSON</button>
@@ -349,35 +355,44 @@ function JsonEditor({ label, value, hint, meta, mono, tall, onApply, onDraft }: 
   )
 }
 
-function TechnicalText({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
+function TechnicalText({ id, value, problems, onChange }: { id: string; value: string; problems: ProblemSpot; onChange: (value: string) => void }) {
   const [wide] = useState(() => value.includes("\n") || value.length > 60)
-  if (wide || value.includes("\n")) {
-    return (
-      <textarea
-        id={id}
-        spellCheck={false}
-        className={cn(ui.textarea, "min-h-20 resize-y font-mono text-xs leading-5")}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    )
-  }
-  return <input id={id} className={ui.input} value={value} onChange={(event) => onChange(event.target.value)} />
+  const tone = severityOf(problems.marked)
+  const state = { "aria-invalid": tone === "error" || undefined, "aria-describedby": describe(...idsOf(problems.marked)) }
+  return (
+    <>
+      {wide || value.includes("\n") ? (
+        <textarea
+          id={id}
+          {...state}
+          spellCheck={false}
+          className={cn(ui.textarea, "min-h-20 resize-y font-mono text-xs leading-5", tone && fieldTone[tone])}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
+        <input id={id} {...state} className={cn(ui.input, tone && fieldTone[tone])} value={value} onChange={(event) => onChange(event.target.value)} />
+      )}
+      <Problems items={problems.shown} />
+    </>
+  )
 }
 
-function NumberInput({ id, value, rule, name, describedBy, onCommit }: {
+function NumberInput({ id, value, rule, name, describedBy, problems = NO_PROBLEMS, onCommit }: {
   id: string
   value: JsonValue | undefined
   rule: NumberRule
   name?: string
   describedBy?: string
+  problems?: ProblemSpot
   onCommit: (value: number) => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
   const stored = typeof value === "number" ? String(value) : typeof value === "string" && parseNumber(value, { integer: false }) !== undefined ? value.trim() : ""
   const text = draft ?? stored
-  const problem = text.trim() === "" ? draft === null ? "" : numberMessage(rule) : parseNumber(text, rule) === undefined ? numberMessage(rule) : ""
+  const typing = draft !== null && (draft.trim() === "" || parseNumber(draft, rule) === undefined) ? numberMessage(rule) : ""
   const errorId = `${id}-error`
+  const tone = typing ? "error" : severityOf(problems.marked)
   return (
     <>
       <input
@@ -388,9 +403,9 @@ function NumberInput({ id, value, rule, name, describedBy, onCommit }: {
         max={rule.max}
         step={rule.step ?? "any"}
         aria-label={name}
-        aria-invalid={problem ? true : undefined}
-        aria-describedby={describe(describedBy, problem && errorId)}
-        className={cn(ui.input, "tabular-nums", problem && invalidField)}
+        aria-invalid={tone === "error" || undefined}
+        aria-describedby={describe(describedBy, ...(typing ? [errorId] : idsOf(problems.marked)))}
+        className={cn(ui.input, "tabular-nums", tone && fieldTone[tone])}
         value={text}
         onChange={(event) => {
           const next = event.target.value
@@ -400,21 +415,22 @@ function NumberInput({ id, value, rule, name, describedBy, onCommit }: {
         }}
         onBlur={() => setDraft(null)}
       />
-      {problem && <p id={errorId} className={ui.error}>{problem}</p>}
+      {typing ? <p id={errorId} className={ui.error}>{typing}</p> : <Problems items={problems.shown} />}
     </>
   )
 }
 
-function Section({ title, hint, meta, edge = "none", children }: {
+function Section({ title, hint, meta, edge = "none", problems = [], children }: {
   title: string
   hint?: string
   meta?: ReactNode
   edge?: Edge
+  problems?: readonly FieldProblem[]
   children: ReactNode
 }) {
   const id = useId()
   return (
-    <section aria-labelledby={`${id}-title`} aria-describedby={hint ? `${id}-hint` : undefined} className={cn("space-y-3", edgeClass[edge])}>
+    <section aria-labelledby={`${id}-title`} aria-describedby={describe(hint && `${id}-hint`, ...idsOf(problems))} className={cn("space-y-3", edgeClass[edge])}>
       <div className="flex items-center justify-between gap-2">
         <h3 id={`${id}-title`} className="text-xs font-semibold text-flow-fg">{title}</h3>
         {meta}
@@ -523,13 +539,14 @@ function ItemInput({ id, spec, value, name, onChange }: {
   )
 }
 
-function ObjectListEditor({ spec, items, outputs, trailing, edge, footer, onChange }: {
+function ObjectListEditor({ spec, items, outputs, trailing, edge, footer, problems, onChange }: {
   spec: FieldSpec
   items: JsonValue[]
   outputs: boolean
   trailing: string[]
   edge: Edge
   footer?: ReactNode
+  problems: readonly FieldProblem[]
   onChange: (items: JsonValue[], change?: OutputChange) => void
 }) {
   const uid = useId()
@@ -542,6 +559,9 @@ function ObjectListEditor({ spec, items, outputs, trailing, edge, footer, onChan
   const fieldId = (index: number, position: number) => `${uid}-${index}-${position}`
   const compact = fields.length === 2 && fields.every((field) => field.kind === undefined || field.kind === "text" || field.kind === "number")
   const columns = fields.map((field) => field.kind === "number" ? "6rem" : "minmax(0, 1fr)").join(" ")
+  const editable = (entry: JsonValue): entry is JsonObject => isRecord(entry) && fields.every((field) => !structured(entry[field.key]))
+  const flagged = new Set(items.flatMap((entry, index) => editable(entry) ? fields.flatMap((field) => missingRequired(field, entry[field.key]) ? [`${spec.key}.${index}.${field.key}`] : []) : []))
+  const pending = uncovered(problems, flagged)
   const update = (index: number, key: string, value: JsonValue) => onChange(items.map((entry, position) => position === index && isRecord(entry) ? { ...entry, [key]: value } : entry))
   const add = () => {
     onChange([...items, newItemOf(spec)], outputs ? { kind: "insert", index: items.length } : undefined)
@@ -552,8 +572,8 @@ function ObjectListEditor({ spec, items, outputs, trailing, edge, footer, onChan
     focusSoon(addId)
   }
   return (
-    <Section title={spec.label} hint={spec.hint} edge={edge} meta={spec.max !== undefined && <Counter count={items.length} max={spec.max} noun={noun} />}>
-      {items.length === 0 && <p className={emptyNote}>{emptyList(noun)}</p>}
+    <Section title={spec.label} hint={spec.hint} edge={edge} problems={pending} meta={spec.max !== undefined && <Counter count={items.length} max={spec.max} noun={noun} />}>
+      {items.length === 0 && pending.length === 0 && <p className={emptyNote}>{emptyList(noun)}</p>}
       {items.map((entry, index) => {
         const number = index + 1
         return (
@@ -565,7 +585,7 @@ function ObjectListEditor({ spec, items, outputs, trailing, edge, footer, onChan
             removeDisabled={items.length <= min}
             onRemove={() => remove(index)}
           >
-            {isRecord(entry) && fields.every((field) => !structured(entry[field.key])) ? (
+            {editable(entry) ? (
               <div className={compact ? "grid gap-2" : "space-y-2.5"} style={compact ? { gridTemplateColumns: columns } : undefined}>
                 {fields.map((field, position) => (
                   <ItemInput
@@ -591,6 +611,7 @@ function ObjectListEditor({ spec, items, outputs, trailing, edge, footer, onChan
         </div>
       ))}
       {footer}
+      <Problems items={pending} />
       <AddButton id={addId} label={spec.addLabel || `Adicionar ${item}`} disabled={atLimit} onClick={add} />
       {atLimit && <p className={limitNote}>Limite de {spec.max} {plural(item)} atingido.</p>}
     </Section>
@@ -598,21 +619,18 @@ function ObjectListEditor({ spec, items, outputs, trailing, edge, footer, onChan
 }
 
 function WeightTotal({ paths }: { paths: JsonValue[] }) {
-  const weights = paths.map((path) => isRecord(path) && typeof path.weight === "number" && Number.isFinite(path.weight) ? path.weight : undefined)
+  const weights = paths.map((path) => isRecord(path) && typeof path.weight === "number" && Number.isFinite(path.weight) && path.weight >= 0 ? path.weight : undefined)
   if (paths.length === 0 || weights.some((weight) => weight === undefined)) return null
-  const total = Math.round(weights.reduce<number>((sum, weight) => sum + (weight ?? 0), 0) * 100) / 100
-  const expected = total === 100
-  return (
-    <p className={cn("text-[11px] font-medium tabular-nums", expected ? "text-flow-muted" : "text-flow-warning")}>
-      Soma dos pesos: {total.toLocaleString("pt-BR")}{expected ? "" : ". O total esperado é 100."}
-    </p>
-  )
+  const total = weights.reduce<number>((sum, weight) => sum + (weight ?? 0), 0)
+  if (Math.abs(total - 100) > 1e-9) return null
+  return <p className="text-[11px] font-medium tabular-nums text-flow-muted">Soma dos pesos: 100</p>
 }
 
-function PairsEditor({ spec, data, edge, onChange }: {
+function PairsEditor({ spec, data, edge, problems, onChange }: {
   spec: FieldSpec
   data: JsonObject
   edge: Edge
+  problems: readonly FieldProblem[]
   onChange: (data: JsonObject, change?: OutputChange) => void
 }) {
   const uid = useId()
@@ -625,6 +643,8 @@ function PairsEditor({ spec, data, edge, onChange }: {
   const atLimit = spec.max !== undefined && indices.length >= spec.max
   const addId = `${uid}-add`
   const fieldId = (index: number, position: number) => `${uid}-${index}-${position}`
+  const flagged = new Set(indices.flatMap((index) => fields.flatMap((field) => missingRequired(field, data[`${field.key}-${index}`]) ? [`${field.key}-${index}`] : [])))
+  const pending = uncovered(problems, flagged)
   const add = () => {
     const index = (indices.at(-1) ?? 0) + 1
     let next: JsonObject = { ...data }
@@ -641,13 +661,13 @@ function PairsEditor({ spec, data, edge, onChange }: {
     focusSoon(addId)
   }
   return (
-    <Section title={spec.label} hint={spec.hint} edge={edge} meta={spec.max !== undefined && <Counter count={indices.length} max={spec.max} noun={noun} />}>
-      {indices.length === 0 && <p className={emptyNote}>{emptyList(noun)}</p>}
+    <Section title={spec.label} hint={spec.hint} edge={edge} problems={pending} meta={spec.max !== undefined && <Counter count={indices.length} max={spec.max} noun={noun} />}>
+      {indices.length === 0 && pending.length === 0 && <p className={emptyNote}>{emptyList(noun)}</p>}
       {indices.map((index, position) => {
         const number = position + 1
-        const problems = fields.flatMap((field, column) => {
-          const missing = missingRequired(field, data[`${field.key}-${index}`])
-          return missing ? [{ column, missing, id: `${uid}-${index}-${column}-problem`, text: field.requiredMessage ?? "Preencha este campo." }] : []
+        const missing = fields.flatMap((field, column) => {
+          const severity = missingRequired(field, data[`${field.key}-${index}`])
+          return severity ? [{ column, severity, id: `${uid}-${index}-${column}-problem`, text: field.requiredMessage ?? "Preencha este campo." }] : []
         })
         return (
           <ItemCard
@@ -662,16 +682,16 @@ function PairsEditor({ spec, data, edge, onChange }: {
               {fields.map((field, column) => {
                 const key = `${field.key}-${index}`
                 const id = fieldId(index, column)
-                const problem = problems.find((entry) => entry.column === column)
+                const problem = missing.find((entry) => entry.column === column)
                 return (
                   <div key={field.key} className="min-w-0">
                     <label htmlFor={id} className={ui.label}>{field.label}</label>
                     <input
                       id={id}
                       aria-label={itemName(field.label, noun, number)}
-                      aria-invalid={problem?.missing === "error" || undefined}
+                      aria-invalid={problem?.severity === "error" || undefined}
                       aria-describedby={problem?.id}
-                      className={cn(ui.input, problem && fieldTone[problem.missing])}
+                      className={cn(ui.input, problem && fieldTone[problem.severity])}
                       placeholder={field.placeholder}
                       value={textOf(data[key])}
                       onChange={(event) => onChange({ ...data, [key]: event.target.value })}
@@ -680,17 +700,26 @@ function PairsEditor({ spec, data, edge, onChange }: {
                 )
               })}
             </div>
-            {problems.map((problem) => <p key={problem.id} id={problem.id} className={messageTone[problem.missing]}>{problem.text}</p>)}
+            {missing.map((problem) => <p key={problem.id} id={problem.id} className={messageTone[problem.severity]}>{problem.text}</p>)}
           </ItemCard>
         )
       })}
+      <Problems items={pending} />
       <AddButton id={addId} label={spec.addLabel || `Adicionar ${item}`} disabled={atLimit} onClick={add} />
       {atLimit && <p className={limitNote}>Limite de {spec.max} {plural(item)} atingido.</p>}
     </Section>
   )
 }
 
-function TextListEditor({ label, hint, noun, items, onChange }: { label: string; hint?: string; noun: string; items: string[]; onChange: (items: string[]) => void }) {
+function TextListEditor({ fieldKey, label, hint, noun, items, problems, onChange }: {
+  fieldKey: string
+  label: string
+  hint?: string
+  noun: string
+  items: string[]
+  problems: ProblemSpot
+  onChange: (items: string[]) => void
+}) {
   const uid = useId()
   const [pending, setPending] = useState(false)
   const labelId = `${uid}-label`
@@ -700,6 +729,7 @@ function TextListEditor({ label, hint, noun, items, onChange }: { label: string;
   const item = lowerFirst(noun)
   const female = feminine(item)
   const rows = pending ? [...items, ""] : items
+  const rowProblems = (index: number) => problems.marked.filter((problem) => problem.fields.includes(`${fieldKey}.${index}`))
   const change = (index: number, text: string) => {
     if (index < items.length) onChange(items.map((entry, position) => position === index ? text : entry))
     else if (text) {
@@ -721,7 +751,7 @@ function TextListEditor({ label, hint, noun, items, onChange }: { label: string;
     focusSoon(addId)
   }
   return (
-    <div role="group" aria-labelledby={labelId} aria-describedby={hint ? hintId : undefined}>
+    <div role="group" aria-labelledby={labelId} aria-describedby={describe(hint && hintId, ...idsOf(problems.marked))}>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <p id={labelId} className={cn(ui.label, "mb-0 min-w-0 break-words")}>{label}</p>
         {items.length > 0 && <span className="shrink-0 text-[11px] tabular-nums text-flow-muted">{items.length} {items.length === 1 ? item : plural(item)}</span>}
@@ -730,12 +760,16 @@ function TextListEditor({ label, hint, noun, items, onChange }: { label: string;
         {rows.length === 0 && <p className={emptyNote}>{emptyList(noun)}</p>}
         {rows.map((value, index) => {
           const number = index + 1
+          const flagged = index < items.length ? rowProblems(index) : []
+          const tone = severityOf(flagged)
           return (
             <div key={index} className="flex items-center gap-1.5">
               <input
                 id={`${uid}-${index}`}
                 aria-label={`${noun} ${number} de ${subject}`}
-                className={ui.input}
+                aria-invalid={tone === "error" || undefined}
+                aria-describedby={describe(...idsOf(flagged))}
+                className={cn(ui.input, tone && fieldTone[tone])}
                 value={value}
                 onChange={(event) => change(index, event.target.value)}
               />
@@ -751,6 +785,7 @@ function TextListEditor({ label, hint, noun, items, onChange }: { label: string;
             </div>
           )
         })}
+        <Problems items={problems.shown} />
         {pending && <p className={ui.hint}>{female ? "A" : "O"} {item} é {female ? "gravada quando preenchida" : "gravado quando preenchido"}.</p>}
         <AddButton id={addId} label={`Adicionar ${item}`} disabled={pending} onClick={add} />
       </div>
@@ -759,7 +794,7 @@ function TextListEditor({ label, hint, noun, items, onChange }: { label: string;
   )
 }
 
-function KeyValueEditor({ label, hint, value, onChange }: { label: string; hint?: string; value: Record<string, string>; onChange: (value: JsonObject) => void }) {
+function KeyValueEditor({ label, hint, value, problems, onChange }: { label: string; hint?: string; value: Record<string, string>; problems: ProblemSpot; onChange: (value: JsonObject) => void }) {
   const uid = useId()
   const [drafts, setDrafts] = useState<Record<number, string>>({})
   const [pending, setPending] = useState<{ key: string; value: string } | null>(null)
@@ -815,7 +850,7 @@ function KeyValueEditor({ label, hint, value, onChange }: { label: string; hint?
     focusSoon(`${uid}-${entries.length}-key`)
   }
   return (
-    <div role="group" aria-labelledby={labelId} aria-describedby={hint ? hintId : undefined}>
+    <div role="group" aria-labelledby={labelId} aria-describedby={describe(hint && hintId, ...idsOf(problems.marked))}>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <p id={labelId} className={cn(ui.label, "mb-0 min-w-0 break-words")}>{label}</p>
         {entries.length > 0 && <span className="shrink-0 text-[11px] tabular-nums text-flow-muted">{entries.length} {entries.length === 1 ? "par" : plural("par")}</span>}
@@ -866,6 +901,7 @@ function KeyValueEditor({ label, hint, value, onChange }: { label: string; hint?
             </div>
           )
         })}
+        <Problems items={problems.shown} />
         <AddButton id={addId} label="Adicionar par" disabled={pending !== null} onClick={add} />
       </div>
       {hint && <p id={hintId} className={ui.hint}>{hint}</p>}
@@ -873,11 +909,12 @@ function KeyValueEditor({ label, hint, value, onChange }: { label: string; hint?
   )
 }
 
-function JsonField({ fieldKey, label, hint, value, onApply, onDraft }: {
+function JsonField({ fieldKey, label, hint, value, problems, onApply, onDraft }: {
   fieldKey: string
   label: string
   hint?: string
   value: JsonValue
+  problems: ProblemSpot
   onApply: (value: JsonValue) => void
   onDraft: (dirty: boolean) => void
 }) {
@@ -886,16 +923,17 @@ function JsonField({ fieldKey, label, hint, value, onApply, onDraft }: {
   const [listed, setListed] = useState(noun !== undefined)
   if (strings && value.length > 0 && !listed) setListed(true)
   if (strings && (listed || value.length > 0)) {
-    return <TextListEditor label={label} hint={hint} noun={noun ?? "Item"} items={value as string[]} onChange={onApply} />
+    return <TextListEditor fieldKey={fieldKey} label={label} hint={hint} noun={noun ?? "Item"} items={value as string[]} problems={problems} onChange={onApply} />
   }
-  if (isStringRecord(value)) return <KeyValueEditor label={label} hint={hint} value={value} onChange={onApply} />
-  return <JsonEditor label={label} hint={hint} value={value} onApply={(next) => onApply(next)} onDraft={onDraft} />
+  if (isStringRecord(value)) return <KeyValueEditor label={label} hint={hint} value={value} problems={problems} onChange={onApply} />
+  return <JsonEditor label={label} hint={hint} value={value} problems={problems} onApply={(next) => onApply(next)} onDraft={onDraft} />
 }
 
-function MenuTargetField({ id, spec, value, onSelect }: {
+function MenuTargetField({ id, spec, value, problems, onSelect }: {
   id: string
   spec: FieldSpec
   value: JsonValue | undefined
+  problems: ProblemSpot
   onSelect: (target: string, menus: MenuEntry[]) => void
 }) {
   const signature = useStore(menuSignature)
@@ -903,11 +941,14 @@ function MenuTargetField({ id, spec, value, onSelect }: {
   const current = textOf(value)
   const known = menus.some((menu) => menu.id === current)
   const hint = menus.length ? spec.hint : "Adicione um Menu de Opções ao fluxo para escolher o destino."
+  const tone = severityOf(problems.marked)
   return (
     <Field id={id} label={spec.label} hint={hint}>
       <FlowSelect
         id={id}
-        aria-describedby={hint ? hintOf(id) : undefined}
+        aria-describedby={describe(hint && hintOf(id), ...idsOf(problems.marked))}
+        aria-invalid={tone === "error" || undefined}
+        className={tone && fieldTone[tone]}
         value={current}
         placeholder={menus.length ? "Selecione um menu" : "Nenhum menu no fluxo"}
         options={[
@@ -916,15 +957,41 @@ function MenuTargetField({ id, spec, value, onSelect }: {
         ]}
         onValueChange={(next) => { if (next) onSelect(next, menus) }}
       />
+      <Problems items={problems.shown} />
     </Field>
   )
 }
 
-function TimeRulesEditor({ label, value, onChange }: { label: string; value: JsonValue | undefined; onChange: (rules: JsonValue) => void }) {
+function TimeRulesEditor({ fieldKey, label, value, problems, onChange }: {
+  fieldKey: string
+  label: string
+  value: JsonValue | undefined
+  problems: readonly FieldProblem[]
+  onChange: (rules: JsonValue) => void
+}) {
   const uid = useId()
   const labelId = `${uid}-label`
   const rules = Array.isArray(value) ? value : []
   const ruleIds = rules.map((rule) => isObject(rule) && rule.id !== undefined ? String(rule.id) : "")
+  const checks = rules.map((rule) => {
+    if (!isObject(rule)) return undefined
+    const days = Array.isArray(rule.weekDays) ? rule.weekDays.map(String) : []
+    const start = String(rule.startTime ?? "")
+    const end = String(rule.endTime ?? "")
+    const hasDay = weekDayOptions.some((day) => days.includes(day.value))
+    const problem = !hasDay
+      ? "Selecione ao menos um dia."
+      : !TIME.test(start) || !TIME.test(end)
+        ? "Informe o início e o fim."
+        : start > end ? "O início deve ser anterior ao fim." : ""
+    return { days, start, end, hasDay, problem, timesInvalid: hasDay && problem !== "" }
+  })
+  const flagged = new Set(checks.flatMap((check, index) => {
+    if (!check) return []
+    if (!check.hasDay) return [`${fieldKey}.${index}.weekDays`]
+    return check.timesInvalid ? [`${fieldKey}.${index}.startTime`, `${fieldKey}.${index}.endTime`] : []
+  }))
+  const pending = uncovered(problems, flagged)
   const update = (index: number, patch: JsonObject) => onChange(rules.map((rule, position) => position === index && isObject(rule) ? { ...rule, ...patch } as JsonValue : rule))
   const addRule = () => {
     let stamp = Date.now()
@@ -932,22 +999,13 @@ function TimeRulesEditor({ label, value, onChange }: { label: string; value: Jso
     onChange([...rules, newTimeRule(`rule-${stamp}`)])
   }
   return (
-    <div role="group" aria-labelledby={labelId} className="space-y-3">
+    <div role="group" aria-labelledby={labelId} aria-describedby={describe(...idsOf(pending))} className="space-y-3">
       <p id={labelId} className={cn(ui.label, "mb-0")}>{label}</p>
-      {rules.map((rule, index) => {
-        if (!isObject(rule)) return null
+      {checks.map((check, index) => {
+        if (!check) return null
+        const { days, start, end, hasDay, problem, timesInvalid } = check
         const number = index + 1
         const ruleKey = ruleIds[index] && ruleIds.indexOf(ruleIds[index]) === index ? ruleIds[index] : `${ruleIds[index]}#${index}`
-        const days = Array.isArray(rule.weekDays) ? rule.weekDays.map(String) : []
-        const start = String(rule.startTime ?? "")
-        const end = String(rule.endTime ?? "")
-        const hasDay = weekDayOptions.some((day) => days.includes(day.value))
-        const problem = !hasDay
-          ? "Selecione ao menos um dia."
-          : !TIME.test(start) || !TIME.test(end)
-            ? "Informe o início e o fim."
-            : start > end ? "O início deve ser anterior ao fim." : ""
-        const timesInvalid = hasDay && problem !== ""
         const ruleId = `${uid}-rule-${index}`
         const problemId = `${ruleId}-problem`
         const times = [["startTime", "Início", start], ["endTime", "Fim", end]] as const
@@ -1009,6 +1067,7 @@ function TimeRulesEditor({ label, value, onChange }: { label: string; value: Jso
           </div>
         )
       })}
+      <Problems items={pending} />
       <button type="button" className={addButton} onClick={addRule}>
         <Plus className="h-3.5 w-3.5" aria-hidden />
         Adicionar horário
@@ -1018,8 +1077,9 @@ function TimeRulesEditor({ label, value, onChange }: { label: string; value: Jso
   )
 }
 
-export default function NodeConfigPanel({ node, updateData, removeOption, removeOutput, insertOutput, onClose, onRemove, onDuplicate, onDraft }: {
+export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, removeOption, removeOutput, insertOutput, onClose, onRemove, onDuplicate, onDraft }: {
   node: AtendimentoNode
+  issues?: FlowIssue[]
   updateData: (data: JsonObject) => void
   removeOption: (option: number) => void
   removeOutput?: (index: number, data: JsonObject) => void
@@ -1040,10 +1100,11 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
   const isStart = type === START_TYPE
   const isApi = API_TYPES.has(type)
   const labels: Record<string, string> = { ...technicalLabels, ...definition?.technicalLabels }
-  const indexed = fields.flatMap((field) => indexedPattern(field) ?? [])
-  const primaryKeys = new Set(fields.flatMap((field) => [field.key, ...mirrorKeys(field)]))
-  const technical = isStart ? [] : Object.entries(payload).filter(([key]) => !primaryKeys.has(key) && !indexed.some((pattern) => pattern.test(key)))
+  const technicalNames = isStart ? [] : technicalKeys(fields, payload)
+  const technical = technicalNames.map((key): [string, JsonValue] => [key, payload[key]])
   const technicalPending = technical.some(([key]) => pending[key])
+  const placement = placeIssues(fields, technicalNames, issues, uid)
+  const technicalTone = severityOf(technicalNames.flatMap((key) => placement.technical.get(key)?.marked ?? []))
   const outputRule = definition?.outputRule
 
   const track = (field: string, dirty: boolean) => {
@@ -1082,7 +1143,7 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
     return first && last ? "none" : first ? "bottom" : last ? "top" : "both"
   }
 
-  const renderMenu = (spec: FieldSpec, edge: Edge) => {
+  const renderMenu = (spec: FieldSpec, edge: Edge, problems: readonly FieldProblem[]) => {
     const indices = optionIndices(payload)
     const max = spec.max ?? MAX_OPTIONS
     const min = spec.min ?? 1
@@ -1094,20 +1155,24 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
       const digit = String(payload[`opt-${option}`] ?? "").trim()
       if (digit) digitCounts.set(digit, (digitCounts.get(digit) || 0) + 1)
     }
+    const options = indices.map((option) => {
+      const digit = String(payload[`opt-${option}`] ?? "").trim()
+      const repeated = (digitCounts.get(digit) || 0) > 1
+      const untitled = !String(payload[`text-${option}`] ?? "").trim()
+      const flagged = !digit || repeated ? "opt" : untitled ? "text" : ""
+      const problem = !digit ? "Informe o número da opção." : repeated ? "Número repetido em outra opção." : untitled ? "Informe o título da opção." : ""
+      return { option, flagged, problem }
+    })
+    const pending = uncovered(problems, new Set(options.flatMap(({ option, flagged }) => flagged ? [`${flagged}-${option}`] : [])))
     const addOption = () => {
       const option = (indices.at(-1) || 0) + 1
       write({ ...payload, [`opt-${option}`]: nextOptionDigit(payload), [`text-${option}`]: "", [`description-${option}`]: "" })
       focusSoon(`${uid}-option-${option}-text`)
     }
     return (
-      <Section key={spec.key} title={spec.label} hint={spec.hint} edge={edge} meta={<Counter count={indices.length} max={max} noun={noun} />}>
-        {indices.map((option, position) => {
+      <Section key={spec.key} title={spec.label} hint={spec.hint} edge={edge} problems={pending} meta={<Counter count={indices.length} max={max} noun={noun} />}>
+        {options.map(({ option, flagged, problem }, position) => {
           const number = position + 1
-          const digit = String(payload[`opt-${option}`] ?? "").trim()
-          const repeated = (digitCounts.get(digit) || 0) > 1
-          const untitled = !String(payload[`text-${option}`] ?? "").trim()
-          const flagged = !digit || repeated ? "opt" : untitled ? "text" : ""
-          const problem = !digit ? "Informe o número da opção." : repeated ? "Número repetido em outra opção." : untitled ? "Informe o título da opção." : ""
           const problemId = `${uid}-option-${option}-problem`
           return (
             <ItemCard
@@ -1147,19 +1212,21 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
             </ItemCard>
           )
         })}
+        <Problems items={pending} />
         <AddButton id={addId} label={spec.addLabel || "Adicionar opção"} disabled={atLimit} onClick={addOption} />
         {atLimit && <p className={limitNote}>Limite de {max} {plural(lowerFirst(noun))} atingido.</p>}
       </Section>
     )
   }
 
-  const renderStructured = (spec: FieldSpec, value: JsonValue) => (
+  const renderStructured = (spec: FieldSpec, value: JsonValue, problems: ProblemSpot) => (
     <JsonField
       key={spec.key}
       fieldKey={spec.key}
       label={spec.label}
       hint={spec.hint}
       value={value}
+      problems={problems}
       onApply={(next) => setField(spec, next)}
       onDraft={(dirty) => track(spec.key, dirty)}
     />
@@ -1170,15 +1237,19 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
     const id = `${uid}-field-${index}`
     const hintId = spec.hint ? hintOf(id) : undefined
     const edge = CARD_KINDS.has(spec.kind) ? edgeOf(index) : "none"
+    const spot = placement.fields.get(spec.key) ?? NO_PROBLEMS
+    const tone = severityOf(spot.marked)
+    const describedBy = describe(hintId, ...idsOf(spot.marked))
+    const problems = <Problems items={spot.shown} />
     if (spec.kind === "timeRules") {
-      return <TimeRulesEditor key={spec.key} label={spec.label} value={value} onChange={(rules) => setField(spec, rules)} />
+      return <TimeRulesEditor key={spec.key} fieldKey={spec.key} label={spec.label} value={value} problems={spot.shown} onChange={(rules) => setField(spec, rules)} />
     }
-    if (spec.kind === "menuOptions") return renderMenu(spec, edge)
+    if (spec.kind === "menuOptions") return renderMenu(spec, edge, spot.shown)
     if (spec.kind === "conditionPairs") {
-      return <PairsEditor key={spec.key} spec={spec} data={payload} edge={edge} onChange={(data, change) => write(data, { complete: true, change })} />
+      return <PairsEditor key={spec.key} spec={spec} data={payload} edge={edge} problems={spot.shown} onChange={(data, change) => write(data, { complete: true, change })} />
     }
     if (spec.kind === "weightedPaths" || spec.kind === "objectList") {
-      if (value !== undefined && !Array.isArray(value)) return renderStructured(spec, value)
+      if (value !== undefined && !Array.isArray(value)) return renderStructured(spec, value, spot)
       const items = value ?? []
       const trailing = outputRule?.kind === "list" && outputRule.key === spec.key ? outputRule.trailing ?? [] : []
       return (
@@ -1189,50 +1260,50 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
           outputs={spec.kind === "weightedPaths" || spec.drivesOutputs === true}
           trailing={trailing}
           edge={edge}
+          problems={spot.shown}
           footer={spec.kind === "weightedPaths" ? <WeightTotal paths={items} /> : undefined}
           onChange={(next, change) => setField(spec, next, change)}
         />
       )
     }
     if (spec.kind === "menuNode") {
-      return <MenuTargetField key={spec.key} id={id} spec={spec} value={value} onSelect={(target, menus) => chooseMenu(spec, target, menus)} />
+      return <MenuTargetField key={spec.key} id={id} spec={spec} value={value} problems={spot} onSelect={(target, menus) => chooseMenu(spec, target, menus)} />
     }
-    if (spec.kind === "json") return renderStructured(spec, value === undefined ? initialJson(type, spec.key) : value)
-    if (structured(value)) return renderStructured(spec, value)
+    if (spec.kind === "json") return renderStructured(spec, value === undefined ? initialJson(type, spec.key) : value, spot)
+    if (structured(value)) return renderStructured(spec, value, spot)
     if (spec.kind === "number") {
       return (
         <Field key={spec.key} id={id} label={spec.label} hint={spec.hint}>
-          <NumberInput id={id} value={value} rule={numberRule(spec)} describedBy={hintId} onCommit={(next) => setField(spec, next)} />
+          <NumberInput id={id} value={value} rule={numberRule(spec)} describedBy={hintId} problems={spot} onCommit={(next) => setField(spec, next)} />
         </Field>
       )
     }
     if (spec.kind === "numberText") {
       const rule = numberRule(spec)
-      const text = textOf(value)
-      const outOfFormat = text.trim() !== "" && !numericText(text.trim(), rule)
-      const warningId = `${id}-warning`
       return (
         <Field key={spec.key} id={id} label={spec.label} hint={spec.hint}>
           <input
             id={id}
             inputMode={rule.integer ? "numeric" : "decimal"}
-            aria-describedby={describe(hintId, outOfFormat && warningId)}
-            className={cn(ui.input, "tabular-nums", outOfFormat && warningField)}
+            aria-invalid={tone === "error" || undefined}
+            aria-describedby={describedBy}
+            className={cn(ui.input, "tabular-nums", tone && fieldTone[tone])}
             placeholder={spec.placeholder}
-            value={text}
+            value={textOf(value)}
             onChange={(event) => setField(spec, cleanNumberText(event.target.value, rule))}
           />
-          {outOfFormat && <p id={warningId} className={ui.warning}>{spec.formatWarning ?? numberMessage(rule)}</p>}
+          {problems}
         </Field>
       )
     }
     if (spec.kind === "checkbox") {
       return (
         <div key={spec.key}>
-          <div className={toggleRow}>
-            <input id={id} type="checkbox" aria-describedby={hintId} className={checkbox} checked={value === true} onChange={(event) => setField(spec, event.target.checked)} />
+          <div className={cn(toggleRow, tone && fieldTone[tone])}>
+            <input id={id} type="checkbox" aria-invalid={tone === "error" || undefined} aria-describedby={describedBy} className={checkbox} checked={value === true} onChange={(event) => setField(spec, event.target.checked)} />
             <label htmlFor={id} className={toggleLabel}>{spec.label}</label>
           </div>
+          {problems}
           {spec.hint && <p id={hintId} className={ui.hint}>{spec.hint}</p>}
         </div>
       )
@@ -1246,11 +1317,14 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
         <Field key={spec.key} id={id} label={spec.label} hint={spec.hint}>
           <FlowSelect
             id={id}
-            aria-describedby={hintId}
+            aria-describedby={describedBy}
+            aria-invalid={tone === "error" || undefined}
+            className={tone && fieldTone[tone]}
             value={current}
             options={[...blank, ...options, ...extra]}
             onValueChange={(next) => setField(spec, next === "" && value === undefined ? undefined : next)}
           />
+          {problems}
         </Field>
       )
     }
@@ -1259,7 +1333,7 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
     const text = fallback ?? stored
     const limit = TEXT_LIMITS[`${type}.${spec.key}`]
     const mono = MONOSPACE_KEYS.has(spec.key)
-    const overLimit = limit !== undefined && text.length > limit
+    const textTone = limit !== undefined && text.length > limit ? "error" : tone
     const derived = spec.key === "filename" ? fileNameFrom((FILE_NAME_SOURCES[type] ?? []).map((key) => textOf(payload[key])).find(Boolean)) : ""
     const suggestions = [...(spec.suggestions ?? []), ...(derived && derived !== text && !spec.suggestions?.includes(derived) ? [derived] : [])]
     return (
@@ -1267,10 +1341,10 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
         {spec.kind === "textarea" ? (
           <textarea
             id={id}
-            aria-describedby={hintId}
-            aria-invalid={overLimit || undefined}
+            aria-describedby={describedBy}
+            aria-invalid={textTone === "error" || undefined}
             spellCheck={mono ? false : undefined}
-            className={cn(ui.textarea, "resize-y", mono && "font-mono text-xs leading-5", overLimit && invalidField)}
+            className={cn(ui.textarea, "resize-y", mono && "font-mono text-xs leading-5", textTone && fieldTone[textTone])}
             placeholder={spec.placeholder}
             value={text}
             onChange={(event) => setField(spec, event.target.value)}
@@ -1278,8 +1352,9 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
         ) : (
           <input
             id={id}
-            aria-describedby={hintId}
-            className={ui.input}
+            aria-describedby={describedBy}
+            aria-invalid={textTone === "error" || undefined}
+            className={cn(ui.input, textTone && fieldTone[textTone])}
             inputMode={spec.kind === "url" ? "url" : undefined}
             spellCheck={spec.kind === "url" ? false : undefined}
             placeholder={spec.placeholder}
@@ -1288,6 +1363,7 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
             onChange={(event) => setField(spec, event.target.value)}
           />
         )}
+        {problems}
         {suggestions.length > 0 && <datalist id={`${id}-suggestions`}>{suggestions.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist>}
       </Field>
     )
@@ -1298,28 +1374,33 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
     const label = friendly || key
     const id = `${uid}-technical-${index}`
     const tag = friendly ? <code className={keyTag} title={key}>{key}</code> : undefined
+    const spot = placement.technical.get(key) ?? NO_PROBLEMS
     if (value === null || typeof value === "object") {
-      return <JsonEditor key={key} label={label} mono={!friendly} meta={tag} value={value} onApply={(next) => setKey(key, next)} onDraft={(dirty) => track(key, dirty)} />
+      return <JsonEditor key={key} label={label} mono={!friendly} meta={tag} value={value} problems={spot} onApply={(next) => setKey(key, next)} onDraft={(dirty) => track(key, dirty)} />
     }
     if (typeof value === "boolean") {
+      const tone = severityOf(spot.marked)
       return (
-        <div key={key} className={toggleRow}>
-          <input id={id} type="checkbox" className={checkbox} checked={value} onChange={(event) => setKey(key, event.target.checked)} />
-          <label htmlFor={id} className={cn(toggleLabel, !friendly && "font-mono text-xs")}>{label}</label>
-          {tag}
+        <div key={key}>
+          <div className={cn(toggleRow, tone && fieldTone[tone])}>
+            <input id={id} type="checkbox" aria-invalid={tone === "error" || undefined} aria-describedby={describe(...idsOf(spot.marked))} className={checkbox} checked={value} onChange={(event) => setKey(key, event.target.checked)} />
+            <label htmlFor={id} className={cn(toggleLabel, !friendly && "font-mono text-xs")}>{label}</label>
+            {tag}
+          </div>
+          <Problems items={spot.shown} />
         </div>
       )
     }
     if (typeof value === "number") {
       return (
         <Field key={key} id={id} label={label} mono={!friendly} meta={tag}>
-          <NumberInput id={id} value={value} rule={{ integer: false }} onCommit={(next) => setKey(key, next)} />
+          <NumberInput id={id} value={value} rule={{ integer: false }} problems={spot} onCommit={(next) => setKey(key, next)} />
         </Field>
       )
     }
     return (
       <Field key={key} id={id} label={label} mono={!friendly} meta={tag}>
-        <TechnicalText id={id} value={value} onChange={(next) => setKey(key, next)} />
+        <TechnicalText id={id} value={value} problems={spot} onChange={(next) => setKey(key, next)} />
       </Field>
     )
   }
@@ -1354,6 +1435,7 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
         {isStart && <p className={note}>O início do fluxo não tem configurações. Conecte a saída dele ao primeiro componente do atendimento.</p>}
         {definition && !isStart && fields.length === 0 && <p className={note}>Nenhuma configuração necessária.</p>}
         {fields.length > 0 && <div className="space-y-4">{fields.map(renderField)}</div>}
+        {placement.loose.length > 0 && <div><Problems items={placement.loose} /></div>}
 
         {isApi && (
           <div className="flex gap-2.5 rounded-lg border border-flow-border bg-flow-soft px-3 py-2.5">
@@ -1370,7 +1452,8 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
             <summary className={summary} onClick={holdOpen(technicalPending)}>
               <ChevronRight className={chevron} aria-hidden />
               <span>Campos técnicos</span>
-              <span className="rounded-md bg-flow-strong px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-flow-muted-strong">{technical.length}</span>
+              <span className={cn("rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums", technicalTone ? countTone[technicalTone] : "bg-flow-strong text-flow-muted-strong")}>{technical.length}</span>
+              {technicalTone && <span className="sr-only">{technicalTone === "error" ? "Com pendência que impede a exportação" : "Com aviso"}</span>}
             </summary>
             <div className="mt-3 space-y-3">
               <p className={cn(ui.hint, "mt-0")}>Fazem parte do formato de Atendimento e são exportados exatamente como estão.</p>

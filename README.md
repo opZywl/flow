@@ -56,7 +56,7 @@ The interface is in Brazilian Portuguese, like the platform it targets.
 | canvas | rule-checked connections (one input per component, one target per output), multi-select, undo and redo, minimap |
 | components | a summary of each step, labeled outputs and a remove button on hover |
 | panel | the fields of each component in the platform's order, with editors for menu options, business hours, weighted paths, conditions and lists, plus technical fields and the full JSON |
-| validation | live issues, each one jumps to the component that needs attention |
+| validation | live issues, also shown under the field they refer to; each one jumps to the component that needs attention |
 | preview | a simulated conversation covering all 62 components, where you pick the result of each integration, without calling the platform |
 | import | Atendimento JSON, older flows from this editor and AI generation |
 | theme | light or dark, with the accent color you pick in Cores |

@@ -54,7 +54,7 @@ IDs e o mesmo padrão de conexões.
 | canvas | conexões com regras (uma entrada por componente, um destino por saída), seleção múltipla, desfazer e refazer, minimapa |
 | componentes | resumo de cada etapa, saídas com nome e botão de remover ao passar o mouse |
 | painel | campos de cada componente na ordem da plataforma, com editores para opções do menu, horários, caminhos com peso, condições e listas, além dos campos técnicos e do JSON completo |
-| validação | pendências ao vivo; cada uma leva ao componente que precisa de atenção |
+| validação | pendências ao vivo, mostradas também abaixo do campo a que se referem; cada uma leva ao componente que precisa de atenção |
 | prévia | conversa simulada com os 62 componentes, em que você escolhe o resultado de cada integração, sem chamar a plataforma |
 | importação | JSON de Atendimento, fluxos antigos deste editor e geração por IA |
 | tema | claro ou escuro, com a cor de destaque escolhida em Cores |

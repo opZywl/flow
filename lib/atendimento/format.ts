@@ -6,7 +6,7 @@ import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode, FlowIssue, Json
 type OutputNode = Pick<AtendimentoNode, "id" | "data">
 type SourceEdge = { source: string; sourceHandle?: string | null }
 type Severity = FlowIssue["severity"]
-type Report = (message: string, severity?: Severity) => void
+type Report = (message: string, severity?: Severity, ...fields: string[]) => void
 type Check = (rules: Rules) => void
 
 interface NodeOutputs {
@@ -28,6 +28,8 @@ interface Rules {
 }
 
 const CONDITIONS_TYPE = "multiple_condicional_api"
+const MENU_OPTIONS_FIELD = "options"
+const CONDITIONS_FIELD = "conditions"
 const MENU_OPTION_LIMIT = 10
 const MENU_TITLE_LIMIT = 1024
 const CONDITION_LIMIT = 20
@@ -83,39 +85,39 @@ const filled = (value: unknown) => typeof value === "number" || nonempty(value)
 const positiveInteger = (value: unknown) => typeof value === "number" ? Number.isInteger(value) && value > 0 : typeof value === "string" && NUMERIC_ID.test(value.trim()) && Number(value) > 0
 const optionalType = (value: Record<string, unknown>, key: string, type: string) => !has(value, key) || valueType(value[key]) === type
 
-function requireText(data: JsonObject, key: string, message: string, report: Report, severity: Severity = "warning") {
-  if (!nonempty(data[key])) report(message, severity)
+function requireText(data: JsonObject, key: string, message: string, report: Report, severity: Severity = "warning", ...related: string[]) {
+  if (!nonempty(data[key])) report(message, severity, ...related, key)
 }
 
 function checkUrl(data: JsonObject, key: string, report: Report, missing?: string, invalid: Severity = "error", absent: Severity = "warning") {
   const value = data[key]
   if (!nonempty(value)) {
-    if (missing) report(missing, absent)
-  } else if (!isHttpUrl(value)) report(INVALID_URL, invalid)
+    if (missing) report(missing, absent, key)
+  } else if (!isHttpUrl(value)) report(INVALID_URL, invalid, key)
 }
 
 function checkFlag(data: JsonObject, key: string, report: Report) {
-  if (has(data, key) && data[key] !== "true" && data[key] !== "false") report(`O campo ${key} deve ser o texto "true" ou "false".`)
+  if (has(data, key) && data[key] !== "true" && data[key] !== "false") report(`O campo ${key} deve ser o texto "true" ou "false".`, "error", key)
 }
 
 function checkSpaces(data: JsonObject, key: string, report: Report) {
   const value = data[key]
-  if (typeof value === "string" && /\s/.test(value)) report("O nome da variável não pode ter espaços.", "warning")
+  if (typeof value === "string" && /\s/.test(value)) report("O nome da variável não pode ter espaços.", "warning", key)
 }
 
 function checkVariable(data: JsonObject, key: string, report: Report, missing?: string) {
   const value = data[key]
   if (!nonempty(value)) {
-    if (missing) report(missing, "warning")
+    if (missing) report(missing, "warning", key)
     return
   }
   checkSpaces(data, key, report)
-  if (/[{}]/.test(value)) report("Informe só o nome da variável, sem {{ }}.", "warning")
+  if (/[{}]/.test(value)) report("Informe só o nome da variável, sem {{ }}.", "warning", key)
 }
 
 function checkWhole(data: JsonObject, key: string, message: string, report: Report) {
   const value = data[key]
-  if (typeof value === "number" && !(Number.isInteger(value) && value >= 0)) report(message, "warning")
+  if (typeof value === "number" && !(Number.isInteger(value) && value >= 0)) report(message, "warning", key)
 }
 
 function uniqueId(base: string, taken: Set<string>): string {
@@ -447,68 +449,72 @@ function checkFieldTypes(type: string, data: JsonObject, report: Report) {
   for (const [key, value] of Object.entries(data)) {
     const expected = schema?.get(key) ?? patterns.find(([pattern]) => pattern.test(key))?.[1]
     const actual = valueType(value)
-    if (expected && !expected.includes(actual)) report(`Campo ${key}: esperado ${expected.map(typeName).join(" ou ")}, recebido ${typeName(actual)}.`)
+    if (expected && !expected.includes(actual)) report(`Campo ${key}: esperado ${expected.map(typeName).join(" ou ")}, recebido ${typeName(actual)}.`, "error", key)
   }
 }
 
 function checkMenu({ data, keys, report }: Rules) {
   const options = keys ?? optionIndices(data)
-  if (!nonempty(data.title)) report("Preencha a mensagem do menu.")
-  else if (data.title.length > MENU_TITLE_LIMIT) report(`A mensagem do menu tem ${data.title.length} caracteres; o limite é ${MENU_TITLE_LIMIT}.`)
-  if (options.length < 1 || options.length > MENU_OPTION_LIMIT) report(`O menu deve ter de 1 a ${MENU_OPTION_LIMIT} opções.`)
-  if (options.some((option, position) => option !== position + 1)) report("As opções devem usar chaves consecutivas (text-1, text-2…).")
-  const digits = new Set<string>()
+  if (!nonempty(data.title)) report("Preencha a mensagem do menu.", "error", "title")
+  else if (data.title.length > MENU_TITLE_LIMIT) report(`A mensagem do menu tem ${data.title.length} caracteres; o limite é ${MENU_TITLE_LIMIT}.`, "error", "title")
+  if (options.length < 1 || options.length > MENU_OPTION_LIMIT) report(`O menu deve ter de 1 a ${MENU_OPTION_LIMIT} opções.`, "error", MENU_OPTIONS_FIELD)
+  if (options.some((option, position) => option !== position + 1)) report("As opções devem usar chaves consecutivas (text-1, text-2…).", "error", MENU_OPTIONS_FIELD)
+  const digits = new Map<string, string>()
   options.forEach((option, position) => {
-    if (!nonempty(data[`text-${option}`])) report(`Opção ${position + 1}: informe o título.`)
-    if (!nonempty(data[`opt-${option}`])) report(`Opção ${position + 1}: informe o número.`)
-    const digit = String(data[`opt-${option}`] ?? "").trim()
-    if (digit && digits.has(digit)) report(`O número de opção ${digit} está repetido.`)
-    digits.add(digit)
+    const key = `opt-${option}`
+    if (!nonempty(data[`text-${option}`])) report(`Opção ${position + 1}: informe o título.`, "error", `text-${option}`)
+    if (!nonempty(data[key])) report(`Opção ${position + 1}: informe o número.`, "error", key)
+    const digit = String(data[key] ?? "").trim()
+    const first = digits.get(digit)
+    if (digit && first) report(`O número de opção ${digit} está repetido.`, "error", first, key)
+    if (first === undefined) digits.set(digit, key)
   })
   const present = new Set(options)
   for (const key of Object.keys(data)) {
     const match = OPTION_KEY.exec(key)
-    if (match && !present.has(Number(match[2]))) report(`Campo ${key} sem a opção correspondente text-${match[2]}.`)
+    if (match && !present.has(Number(match[2]))) report(`Campo ${key} sem a opção correspondente text-${match[2]}.`, "error", key)
   }
   checkFlag(data, "buttons", report)
 }
 
 function checkConditions({ data, keys, report }: Rules) {
   const conditions = keys ?? conditionIndices(data)
-  if (conditions.length === 0) report("Cadastre ao menos uma condição.", "warning")
-  if (conditions.length > CONDITION_LIMIT) report(`O limite é de ${CONDITION_LIMIT} condições.`, "warning")
-  if (conditions.some((condition, position) => condition !== position + 1)) report("As condições devem usar chaves consecutivas (var-1, var-2…).", "warning")
+  if (conditions.length === 0) report("Cadastre ao menos uma condição.", "warning", CONDITIONS_FIELD)
+  if (conditions.length > CONDITION_LIMIT) report(`O limite é de ${CONDITION_LIMIT} condições.`, "warning", CONDITIONS_FIELD)
+  if (conditions.some((condition, position) => condition !== position + 1)) report("As condições devem usar chaves consecutivas (var-1, var-2…).", "warning", CONDITIONS_FIELD)
   conditions.forEach((condition, position) => {
-    if (!nonempty(data[`var-${condition}`])) report(`Condição ${position + 1}: informe a variável.`, "warning")
-    if (!has(data, `value-${condition}`)) report(`Campo var-${condition} sem o valor value-${condition}.`, "warning")
+    if (!nonempty(data[`var-${condition}`])) report(`Condição ${position + 1}: informe a variável.`, "warning", `var-${condition}`)
+    if (!has(data, `value-${condition}`)) report(`Campo var-${condition} sem o valor value-${condition}.`, "warning", `value-${condition}`)
   })
   const present = new Set(conditions)
   for (const key of Object.keys(data)) {
     const match = CONDITION_KEY.exec(key)
-    if (match && match[1] === "value" && !present.has(Number(match[2]))) report(`Campo ${key} sem a variável var-${match[2]}.`, "warning")
+    if (match && match[1] === "value" && !present.has(Number(match[2]))) report(`Campo ${key} sem a variável var-${match[2]}.`, "warning", key)
   }
 }
 
 function checkTimeRules({ data, report }: Rules) {
   const rules = data.timeRules
   if (!Array.isArray(rules) || rules.length === 0) {
-    report("Cadastre ao menos uma regra de horário.")
+    report("Cadastre ao menos uma regra de horário.", "error", "timeRules")
     return
   }
   rules.forEach((rule, index) => {
     const label = `Regra de horário ${index + 1}`
-    if (!isObject(rule)) report(`${label} inválida.`)
-    else if (!nonempty(rule.id)) report(`${label}: ID ausente.`)
-    else if (!Array.isArray(rule.weekDays) || rule.weekDays.length === 0) report(`${label}: selecione ao menos um dia.`)
-    else if (!rule.weekDays.every((day) => WEEK_DAYS.has(String(day)))) report(`${label}: dia da semana inválido.`)
-    else if (!TIME.test(String(rule.startTime)) || !TIME.test(String(rule.endTime))) report(`${label}: informe início e fim no formato HH:MM.`)
-    else if (String(rule.startTime) > String(rule.endTime)) report(`${label}: o início não pode ser posterior ao fim.`)
+    const path = `timeRules.${index}`
+    const times = [`${path}.startTime`, `${path}.endTime`]
+    if (!isObject(rule)) report(`${label} inválida.`, "error", path)
+    else if (!nonempty(rule.id)) report(`${label}: ID ausente.`, "error", `${path}.id`)
+    else if (!Array.isArray(rule.weekDays) || rule.weekDays.length === 0) report(`${label}: selecione ao menos um dia.`, "error", `${path}.weekDays`)
+    else if (!rule.weekDays.every((day) => WEEK_DAYS.has(String(day)))) report(`${label}: dia da semana inválido.`, "error", `${path}.weekDays`)
+    else if (!TIME.test(String(rule.startTime)) || !TIME.test(String(rule.endTime))) report(`${label}: informe início e fim no formato HH:MM.`, "error", ...times)
+    else if (String(rule.startTime) > String(rule.endTime)) report(`${label}: o início não pode ser posterior ao fim.`, "error", ...times)
   })
 }
 
 function checkPaths({ data, report }: Rules) {
   const paths = data.paths
-  if (!Array.isArray(paths) || paths.length < 2) report("Cadastre ao menos dois caminhos.")
+  if (!Array.isArray(paths) || paths.length < 2) report("Cadastre ao menos dois caminhos.", "error", "paths")
   if (Array.isArray(paths) && paths.length) {
     let total = 0
     let weighted = true
@@ -516,12 +522,12 @@ function checkPaths({ data, report }: Rules) {
       const weight = isObject(path) ? path.weight : undefined
       if (!finite(weight) || weight < 0) {
         weighted = false
-        report(`Caminho ${index + 1}: informe um peso numérico.`)
+        report(`Caminho ${index + 1}: informe um peso numérico.`, "error", isObject(path) ? `paths.${index}.weight` : `paths.${index}`)
       } else total += weight
-      if (isObject(path) && !nonempty(path.label)) report(`Caminho ${index + 1}: informe o nome.`, "warning")
+      if (isObject(path) && !nonempty(path.label)) report(`Caminho ${index + 1}: informe o nome.`, "warning", `paths.${index}.label`)
     })
-    if (weighted && total === 0) report("A soma dos pesos deve ser maior que zero.")
-    else if (weighted && Math.abs(total - 100) > 1e-9) report(`Os pesos somam ${Math.round(total * 100) / 100}; o total esperado é 100.`, "warning")
+    if (weighted && total === 0) report("A soma dos pesos deve ser maior que zero.", "error", "paths")
+    else if (weighted && Math.abs(total - 100) > 1e-9) report(`Os pesos somam ${(Math.round(total * 100) / 100).toLocaleString("pt-BR")}; o total esperado é 100.`, "warning", "paths")
   }
   checkSpaces(data, "variable", report)
 }
@@ -531,21 +537,23 @@ function checkAgent({ data, report }: Rules) {
   if (nonempty(data.generative_ai)) requireText(data, "generativeAiName", "Informe o nome do agente de IA.", report)
   const exits = data.exits
   if (Array.isArray(exits)) {
-    if (exits.length === 0) report("Cadastre ao menos uma saída para o agente.", "warning")
-    const names = new Set<string>()
+    if (exits.length === 0) report("Cadastre ao menos uma saída para o agente.", "warning", "exits")
+    const names = new Map<string, string>()
     exits.forEach((exit, index) => {
       const label = `Saída ${index + 1} do agente`
+      const path = `exits.${index}`
       if (!isObject(exit) || !optionalType(exit, "name", "string") || !optionalType(exit, "when", "string") || !optionalType(exit, "requireFields", "boolean")) {
-        report(`${label} inválida: nome e condição devem ser texto e a exigência de campos, verdadeiro ou falso.`)
+        report(`${label} inválida: nome e condição devem ser texto e a exigência de campos, verdadeiro ou falso.`, "error", path)
         return
       }
-      if (!nonempty(exit.name)) report(`${label}: informe o nome.`)
+      if (!nonempty(exit.name)) report(`${label}: informe o nome.`, "error", `${path}.name`)
       else {
         const name = exit.name.trim().toLocaleLowerCase("pt-BR")
-        if (names.has(name)) report(`O nome de saída ${exit.name.trim()} está repetido.`, "warning")
-        names.add(name)
+        const first = names.get(name)
+        if (first) report(`O nome de saída ${exit.name.trim()} está repetido.`, "warning", first, `${path}.name`)
+        else names.set(name, `${path}.name`)
       }
-      if (!nonempty(exit.when)) report(`${label}: descreva quando usar.`, "warning")
+      if (!nonempty(exit.when)) report(`${label}: descreva quando usar.`, "warning", `${path}.when`)
     })
   }
   checkWhole(data, "maxTurns", "O máximo de turnos deve ser um número inteiro, a partir de 0.", report)
@@ -555,21 +563,21 @@ function checkAgent({ data, report }: Rules) {
 function checkReturn({ data, report, nodes }: Rules) {
   const target = data.targetNodeId
   if (!nonempty(target)) {
-    report("Selecione o menu de destino.", "warning")
+    report("Selecione o menu de destino.", "warning", "targetNodeId")
     return
   }
   const node = nodes.get(target)
-  if (!node) report("O menu de destino não existe mais no fluxo.", "warning")
-  else if (node.data.type !== MENU_TYPE) report("O destino deve ser um Menu de Opções.", "warning")
-  if (data.id !== target) report("O campo id deve ser igual ao menu de destino.", "warning")
+  if (!node) report("O menu de destino não existe mais no fluxo.", "warning", "targetNodeId")
+  else if (node.data.type !== MENU_TYPE) report("O destino deve ser um Menu de Opções.", "warning", "targetNodeId")
+  if (data.id !== target) report("O campo id deve ser igual ao menu de destino.", "warning", "id")
 }
 
 function checkReference(type: string, { data, report }: Rules) {
   const reference = REFERENCES.get(type)
   if (!reference) return
-  if (!nonempty(data[reference.id])) report(`Informe o ID ${reference.noun}.`, "warning")
-  else if (data.id !== data[reference.id]) report(`O campo id deve ser igual ao ID ${reference.noun}.`, "warning")
-  if (!nonempty(data[reference.name])) report(`Informe o nome ${reference.noun}.`, "warning")
+  if (!nonempty(data[reference.id])) report(`Informe o ID ${reference.noun}.`, "warning", reference.id)
+  else if (data.id !== data[reference.id]) report(`O campo id deve ser igual ao ID ${reference.noun}.`, "warning", "id")
+  if (!nonempty(data[reference.name])) report(`Informe o nome ${reference.noun}.`, "warning", reference.name)
 }
 
 function checkChoiceList(noun: string, list: string) {
@@ -577,13 +585,14 @@ function checkChoiceList(noun: string, list: string) {
     checkVariable(data, "outputVar", report, "Informe a variável de saída.")
     requireText(data, "headerMessage", "Preencha a mensagem da lista.", report)
     requireText(data, "emptyMessage", `Preencha a mensagem sem ${noun}.`, report)
-    if (list && Array.isArray(data.selectedIds) && !data.selectedIds.every(nonempty)) report(`Cada item de ${list} oferecidos deve ser um ID em texto.`, "warning")
+    const ids = data.selectedIds
+    if (list && Array.isArray(ids) && !ids.every(nonempty)) report(`Cada item de ${list} oferecidos deve ser um ID em texto.`, "warning", ...ids.flatMap((id, index) => nonempty(id) ? [] : [`selectedIds.${index}`]))
   }
 }
 
 function checkApi({ data, report }: Rules) {
   checkUrl(data, "url_api", report, "Informe a URL da API.")
-  if (has(data, "method") && !HTTP_METHODS.includes(String(data.method))) report("Método HTTP inválido: use GET, POST, PUT, PATCH ou DELETE.")
+  if (has(data, "method") && !HTTP_METHODS.includes(String(data.method))) report("Método HTTP inválido: use GET, POST, PUT, PATCH ou DELETE.", "error", "method")
 }
 
 function checkValidatedApi(rules: Rules) {
@@ -596,44 +605,44 @@ const CHECKS = new Map<string, Check>([
   [MENU_TYPE, checkMenu],
   ["envio_arquivo", ({ data, report }) => {
     checkUrl(data, "url", report, "Informe a URL do arquivo.", "warning")
-    if (nonempty(data.url) && !nonempty(data.mime_type)) report("Informe o tipo do arquivo (MIME).", "warning")
-    if (data.voice_note === true && nonempty(data.mime_type) && !data.mime_type.trim().toLowerCase().startsWith("audio/")) report("Mensagem de voz exige um arquivo de áudio.", "warning")
+    if (nonempty(data.url) && !nonempty(data.mime_type)) report("Informe o tipo do arquivo (MIME).", "warning", "mime_type")
+    if (data.voice_note === true && nonempty(data.mime_type) && !data.mime_type.trim().toLowerCase().startsWith("audio/")) report("Mensagem de voz exige um arquivo de áudio.", "warning", "mime_type", "voice_note")
   }],
   ["envio_imagem", ({ data, report }) => {
-    if (!nonempty(data.imagem) && !nonempty(data.url)) report("Informe a URL da imagem.", "warning")
+    if (!nonempty(data.imagem) && !nonempty(data.url)) report("Informe a URL da imagem.", "warning", "imagem", "url")
     for (const key of ["imagem", "url"]) checkUrl(data, key, report, undefined, "warning")
   }],
   ["whatsappFlow", ({ data, report }) => {
     const form = nonempty(data.formId) || nonempty(data.metaFlowId)
     const interactive = (has(data, "sendMode") ? data.sendMode : "interactive") === "interactive"
-    if (!form) report("Informe o ID do formulário ou o ID do Flow na Meta.", "warning")
+    if (!form) report("Informe o ID do formulário ou o ID do Flow na Meta.", "warning", "formId", "metaFlowId")
     else if (interactive) {
       requireText(data, "body", "Preencha o corpo da mensagem.", report)
       requireText(data, "cta", "Informe o texto do botão.", report)
     }
     if (!interactive) requireText(data, "templateName", "Informe o nome do template.", report)
     requireText(data, "outputVar", "Informe a variável da resposta.", report)
-    if (typeof data.maxReminders === "number" && !(Number.isInteger(data.maxReminders) && data.maxReminders >= 0)) report("O máximo de lembretes deve ser um número inteiro a partir de 0.")
+    if (typeof data.maxReminders === "number" && !(Number.isInteger(data.maxReminders) && data.maxReminders >= 0)) report("O máximo de lembretes deve ser um número inteiro a partir de 0.", "error", "maxReminders")
   }],
   ["whatsappCall", ({ data, report }) => {
     if (data.mode === "button") requireText(data, "displayText", "Informe o texto do botão de ligação.", report)
-    if (filled(data.ttlMinutes) && !positiveInteger(data.ttlMinutes)) report("A validade do botão deve ser um número inteiro de minutos.", "warning")
+    if (filled(data.ttlMinutes) && !positiveInteger(data.ttlMinutes)) report("A validade do botão deve ser um número inteiro de minutos.", "warning", "ttlMinutes")
   }],
   ["voltar", checkReturn],
   ["webchatHandoff", ({ data, report }) => {
     requireText(data, "widgetId", "Informe o ID do widget do chat.", report)
-    if (!nonempty(data.message)) report("Preencha a mensagem com o link do chat.", "warning")
-    else if (!data.message.includes("{{link}}")) report("Inclua {{link}} na mensagem para enviar o link do chat.", "warning")
-    if (has(data, "ttlHours") && !positiveInteger(data.ttlHours)) report("A validade do link deve ser um número inteiro de horas.", "warning")
-    if (nonempty(data.outputVar) && !VARIABLE_NAME.test(data.outputVar)) report("Use apenas letras, números e _ no nome da variável.", "warning")
+    if (!nonempty(data.message)) report("Preencha a mensagem com o link do chat.", "warning", "message")
+    else if (!data.message.includes("{{link}}")) report("Inclua {{link}} na mensagem para enviar o link do chat.", "warning", "message")
+    if (has(data, "ttlHours") && !positiveInteger(data.ttlHours)) report("A validade do link deve ser um número inteiro de horas.", "warning", "ttlHours")
+    if (nonempty(data.outputVar) && !VARIABLE_NAME.test(data.outputVar)) report("Use apenas letras, números e _ no nome da variável.", "warning", "outputVar")
   }],
   ["timeConditions", checkTimeRules],
   ["waiting_time", ({ data, report }) => {
     const delay = data.waiting_time
-    if (!nonempty(delay)) report("Selecione o tempo de espera.", "warning")
+    if (!nonempty(delay)) report("Selecione o tempo de espera.", "warning", "waiting_time")
     else {
-      if (!DELAY.test(delay)) report("Tempo de espera inválido.")
-      if (data.id !== delay) report("O campo id deve ser igual ao tempo de espera.", "warning")
+      if (!DELAY.test(delay)) report("Tempo de espera inválido.", "error", "waiting_time")
+      if (data.id !== delay) report("O campo id deve ser igual ao tempo de espera.", "warning", "id")
     }
   }],
   ["randomizer", checkPaths],
@@ -644,16 +653,16 @@ const CHECKS = new Map<string, Check>([
   ["adCondition", ({ data, report }) => requireText(data, "adMatch", "Selecione como identificar o anúncio.", report)],
   ["sendConversion", ({ data, report }) => {
     requireText(data, "eventName", "Informe o evento de conversão.", report)
-    if (nonempty(data.value) && !DECIMAL.test(data.value.trim())) report("Informe o valor da conversão como número, por exemplo 99.90.", "warning")
-    if (has(data, "currency") && !CURRENCY.test(String(data.currency))) report("Informe a moeda com 3 letras, por exemplo BRL.", "warning")
+    if (nonempty(data.value) && !DECIMAL.test(data.value.trim())) report("Informe o valor da conversão como número, por exemplo 99.90.", "warning", "value")
+    if (has(data, "currency") && !CURRENCY.test(String(data.currency))) report("Informe a moeda com 3 letras, por exemplo BRL.", "warning", "currency")
   }],
   ["trackEvent", ({ data, report }) => {
     requireText(data, "eventName", "Informe o nome do evento.", report)
-    if (nonempty(data.numericValue) && !SIGNED_DECIMAL.test(data.numericValue.trim())) report("Informe o valor numérico como número.", "warning")
+    if (nonempty(data.numericValue) && !SIGNED_DECIMAL.test(data.numericValue.trim())) report("Informe o valor numérico como número.", "warning", "numericValue")
   }],
   ["tabulation", ({ data, report }) => {
-    if (!nonempty(data.tabulacao)) report("Informe o ID da tabulação.", "warning")
-    else if (data.id !== data.tabulacao || data.tabulation !== data.tabulacao) report("Os campos id e tabulation devem ser iguais ao ID da tabulação.", "warning")
+    if (!nonempty(data.tabulacao)) report("Informe o ID da tabulação.", "warning", "tabulacao")
+    else if (data.id !== data.tabulacao || data.tabulation !== data.tabulacao) report("Os campos id e tabulation devem ser iguais ao ID da tabulação.", "warning", ...["id", "tabulation"].filter((key) => data[key] !== data.tabulacao))
     requireText(data, "tabulacaoName", "Informe o nome da tabulação.", report)
   }],
   ["protocolo", ({ data, report }) => {
@@ -663,13 +672,13 @@ const CHECKS = new Map<string, Check>([
     const { data, report } = rules
     checkValidatedApi(rules)
     requireText(data, "text", "Preencha a mensagem de solicitação.", report)
-    if (has(data, "channel") && !DATA_KINDS.includes(String(data.channel))) report("Tipo de dado desconhecido: use CPF/CNPJ, CPF, CNPJ ou Outro.", "warning")
-    if (has(data, "tentativas") && !ATTEMPTS.test(String(data.tentativas).trim())) report("A quantidade de tentativas deve ser de 1 a 5.", "warning")
+    if (has(data, "channel") && !DATA_KINDS.includes(String(data.channel))) report("Tipo de dado desconhecido: use CPF/CNPJ, CPF, CNPJ ou Outro.", "warning", "channel")
+    if (has(data, "tentativas") && !ATTEMPTS.test(String(data.tentativas).trim())) report("A quantidade de tentativas deve ser de 1 a 5.", "warning", "tentativas")
   }],
   ["consulta_api", checkValidatedApi],
   ["condicional_api", ({ data, report }) => {
-    if (!nonempty(data.condition)) report("Escolha a comparação.", "warning")
-    else if (!COMPARISONS.includes(data.condition)) report("Comparação desconhecida: use Igual a ou Diferente de.", "warning")
+    if (!nonempty(data.condition)) report("Escolha a comparação.", "warning", "condition")
+    else if (!COMPARISONS.includes(data.condition)) report("Comparação desconhecida: use Igual a ou Diferente de.", "warning", "condition")
     requireText(data, "key", "Informe a chave a comparar.", report)
   }],
   [CONDITIONS_TYPE, checkConditions],
@@ -677,11 +686,11 @@ const CHECKS = new Map<string, Check>([
   ["External_Message_Http", checkApi],
   ["Send_DataStore", checkApi],
   ["Local_DataStore", ({ data, report }) => {
-    if (!nonempty(data.local_datastore)) report("Escolha a base de dados.", "warning")
-    else if (!DATASTORES.includes(data.local_datastore)) report("Base de dados desconhecida: use Contato ou Datastore.", "warning")
+    if (!nonempty(data.local_datastore)) report("Escolha a base de dados.", "warning", "local_datastore")
+    else if (!DATASTORES.includes(data.local_datastore)) report("Base de dados desconhecida: use Contato ou Datastore.", "warning", "local_datastore")
   }],
   ["envio_boletos", ({ data, report }) => {
-    if (has(data, "channel") && !INVOICE_MODES.includes(String(data.channel))) report("Modo de envio desconhecido: use Enviar todos, Enviar menu ou Catálogo.", "warning")
+    if (has(data, "channel") && !INVOICE_MODES.includes(String(data.channel))) report("Modo de envio desconhecido: use Enviar todos, Enviar menu ou Catálogo.", "warning", "channel")
     checkUrl(data, "url_list", report, "Informe a URL da API que lista os boletos.")
     checkUrl(data, "url_send", report, "Informe a URL da API que envia os boletos.")
   }],
@@ -696,10 +705,10 @@ const CHECKS = new Map<string, Check>([
   ["googleSheetsAppend", ({ data, report }) => {
     requireText(data, "spreadsheet", "Informe a planilha.", report)
     if (!Array.isArray(data.columns)) return
-    if (data.columns.length === 0) report("Cadastre ao menos uma coluna.", "warning")
+    if (data.columns.length === 0) report("Cadastre ao menos uma coluna.", "warning", "columns")
     data.columns.forEach((column, index) => {
-      if (!isObject(column) || typeof column.header !== "string" || typeof column.value !== "string") report(`Coluna ${index + 1} inválida: informe nome e valor.`)
-      else if (!nonempty(column.header)) report(`Coluna ${index + 1}: informe o nome.`, "warning")
+      if (!isObject(column) || typeof column.header !== "string" || typeof column.value !== "string") report(`Coluna ${index + 1} inválida: informe nome e valor.`, "error", `columns.${index}`)
+      else if (!nonempty(column.header)) report(`Coluna ${index + 1}: informe o nome.`, "warning", `columns.${index}.header`)
     })
   }],
   ["rdStationConversion", ({ data, report }) => {
@@ -713,7 +722,7 @@ const CHECKS = new Map<string, Check>([
   ["apptSlot", checkChoiceList("horários", "")],
   ["apptIdentify", ({ data, report }) => checkVariable(data, "contactVar", report, "Informe a variável do cliente.")],
   ["apptCustomerIntake", ({ data, report }) => {
-    if (data.askName !== true && data.askEmail !== true && data.askNotes !== true) report("Selecione ao menos um dado para pedir ao cliente.", "warning")
+    if (data.askName !== true && data.askEmail !== true && data.askNotes !== true) report("Selecione ao menos um dado para pedir ao cliente.", "warning", "askName", "askEmail", "askNotes")
   }],
   ["apptBook", ({ data, report }) => {
     checkVariable(data, "outputVar", report, "Informe a variável de saída.")
@@ -726,7 +735,7 @@ const CHECKS = new Map<string, Check>([
     checkChoiceList("chamados", "")(rules)
   }],
   ["ticketCreate", ({ data, report }) => {
-    if (!nonempty(data.formId)) requireText(data, "fallbackQuestion", "Informe o formulário ou a pergunta alternativa.", report)
+    if (!nonempty(data.formId)) requireText(data, "fallbackQuestion", "Informe o formulário ou a pergunta alternativa.", report, "warning", "formId")
     else requireText(data, "subjectFieldKey", "Informe o campo de assunto do formulário.", report)
     requireText(data, "defaultPriority", "Selecione a prioridade padrão.", report)
     requireText(data, "defaultType", "Selecione o tipo padrão.", report)
@@ -748,13 +757,13 @@ const CHECKS = new Map<string, Check>([
   ["crmLead", ({ data, report }) => checkVariable(data, "outputVar", report, "Informe a variável que recebe o ID do lead.")],
   ["crmLeadUpdate", ({ data, report }) => {
     checkVariable(data, "inputVar", report, "Informe a variável com o ID do lead.")
-    if (!nonempty(data.setStatus) && !nonempty(data.addTags) && !nonempty(data.setValue)) report("Defina ao menos uma alteração: status, tags ou valor.", "warning")
+    if (!nonempty(data.setStatus) && !nonempty(data.addTags) && !nonempty(data.setValue)) report("Defina ao menos uma alteração: status, tags ou valor.", "warning", "setStatus", "addTags", "setValue")
   }],
   ["crmActivity", ({ data, report }) => {
     requireText(data, "title", "Informe o título da atividade.", report)
     requireText(data, "activityType", "Selecione o tipo de atividade.", report)
     checkWhole(data, "dueInDays", "O prazo deve ser um número inteiro de dias, a partir de 0.", report)
-    if (!nonempty(data.leadVar) && !nonempty(data.contactVar)) report("Informe a variável do lead ou do contato.", "warning")
+    if (!nonempty(data.leadVar) && !nonempty(data.contactVar)) report("Informe a variável do lead ou do contato.", "warning", "leadVar", "contactVar")
     checkVariable(data, "leadVar", report)
     checkVariable(data, "contactVar", report)
   }],
@@ -763,7 +772,7 @@ const CHECKS = new Map<string, Check>([
     if (nonempty(data.sequenceId)) requireText(data, "sequenceName", "Informe o nome da lista.", report)
   }],
   ["sequenceUnenroll", ({ data, report }) => {
-    if (!nonempty(data.sequenceId) && data.allSequences !== true) report("Informe o ID da lista ou marque Remover de todas as listas.", "warning")
+    if (!nonempty(data.sequenceId) && data.allSequences !== true) report("Informe o ID da lista ou marque Remover de todas as listas.", "warning", "sequenceId", "allSequences")
   }],
   ["aiAgentBlock", checkAgent],
 ])
@@ -775,12 +784,19 @@ export function validateFlow(flow: AtendimentoFlow): FlowIssue[] {
     return [{ severity: "error", message: (error as Error).message }]
   }
   const issues: FlowIssue[] = []
-  const reported = new Set<string>()
-  const add = (message: string, nodeId?: string, severity: Severity = "error") => {
+  const reported = new Map<string, FlowIssue>()
+  const add = (message: string, nodeId?: string, severity: Severity = "error", fields: readonly string[] = []) => {
     const key = JSON.stringify([severity, nodeId ?? null, message])
-    if (reported.has(key)) return
-    reported.add(key)
-    issues.push({ severity, message, nodeId })
+    const known = reported.get(key)
+    if (known) {
+      const merged = [...new Set([...(known.fields ?? []), ...fields])]
+      if (merged.length) known.fields = merged
+      return
+    }
+    const issue: FlowIssue = { severity, message, nodeId }
+    if (fields.length) issue.fields = [...new Set(fields)]
+    reported.set(key, issue)
+    issues.push(issue)
   }
   if (!nonempty(flow.name)) add("Informe o nome do fluxo.")
   if (!nonempty(flow.service_type)) add("Informe o tipo de serviço do fluxo (padrão: chat).")
@@ -821,7 +837,7 @@ export function validateFlow(flow: AtendimentoFlow): FlowIssue[] {
 
   for (const { node, keys, handles } of outputs.values()) {
     const { type, data } = node.data
-    const report: Report = (message, severity) => add(message, node.id, severity)
+    const report: Report = (message, severity, ...fields) => add(message, node.id, severity, fields)
     checkFieldTypes(type, data, report)
     const nodeType = getNodeType(type)
     if (!getDefinition(type) && type !== NOTE_TYPE) report("Tipo preservado do arquivo, sem exemplo no formato de Atendimento.", "warning")

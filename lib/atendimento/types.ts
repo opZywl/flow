@@ -145,4 +145,5 @@ export interface FlowIssue {
   severity: "error" | "warning"
   message: string
   nodeId?: string
+  fields?: string[]
 }

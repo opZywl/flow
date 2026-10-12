@@ -96,7 +96,7 @@ A saída única dos componentes com 1 saída se chama Próximo e usa `output-0`.
 
 ## Componentes com mais de uma saída
 
-O sentido de cada saída vem das conexões dos exports da plataforma. Nos componentes mais antigos (Condições de Tempo, Solicitar Dados, Consulta API, API de Mensagem, Condicional, DataStore Local e Enviar Boletos), `output-0` é o caminho negativo. Nos demais, `output-0` é o positivo. No canvas, a saída positiva fica verde, a negativa vermelha e as saídas sem lado positivo usam a cor de destaque.
+O sentido de cada saída vem das conexões dos exports da plataforma. Nos componentes mais antigos (Condições de Tempo, Solicitar Dados, Consulta API, API de Mensagem, Condicional, DataStore Local e Enviar Boletos), `output-0` é o caminho negativo. Nos demais, `output-0` é o positivo. No canvas, a saída positiva fica verde e a negativa vermelha. Veio do anúncio? e Consentimento, cuja ordem de saídas ainda não foi confirmada num export da plataforma, usam a cor de destaque nas duas saídas, como as saídas sem lado positivo.
 
 ### Saídas que dependem da configuração
 
@@ -170,7 +170,7 @@ O sentido de cada saída vem das conexões dos exports da plataforma. Nos compon
 
 O painel mostra os campos de cada componente na ordem da plataforma, com editores próprios para opções do menu, regras de horário, caminhos com peso, pares de condição, listas de itens, listas de IDs e pares chave e valor. Os demais campos estruturados ficam num editor JSON com Aplicar e Descartar. Campos que a plataforma grava mas não precisam de edição aparecem em "Campos técnicos", e o JSON completo do componente fica sempre disponível.
 
-Cada campo indica o problema com a mesma gravidade da validação: em vermelho o que impede a exportação e em amarelo os avisos. Um componente adicionado por clique entra num espaço livre da área visível do canvas.
+Cada campo mostra logo abaixo dele as pendências que a validação aponta nele, com o mesmo texto e a mesma gravidade: em vermelho o que impede a exportação e em amarelo os avisos. Isso vale para textos, URLs, seleções, caixas de marcação, números, listas de IDs e campos JSON. Uma pendência que envolve mais de um campo, como "Selecione ao menos um dado para pedir ao cliente.", marca todos eles e aparece abaixo do último. Nas opções do menu, nos pares de condição, nas regras de horário e nas listas, o item com problema fica marcado, e as demais pendências da lista aparecem abaixo dela. Os campos técnicos seguem a mesma regra, e o contador da seção muda de cor quando algum deles tem pendência. As pendências que não pertencem a um campo, como as de conexão, as do tipo do componente e o aviso de API não validada na plataforma, ficam no painel "Validação do fluxo", com atalho para o componente. Um componente adicionado por clique entra num espaço livre da área visível do canvas.
 
 ## Outras entradas
 
@@ -213,11 +213,11 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-- `npm test` executa os testes do formato e da prévia, com os 62 componentes: forma de um componente novo, forma configurada, tipos de valor, saídas, regras de validação, ida e volta de um fluxo com todos os componentes e a simulação de cada tipo.
+- `npm test` executa os testes do formato e da prévia, com os 62 componentes: forma de um componente novo, forma configurada, tipos de valor, saídas, regras de validação, o campo de cada pendência, ida e volta de um fluxo com todos os componentes e a simulação de cada tipo.
 - `FLOW_REFERENCE` aceita um ou mais exports da plataforma, separados pelo delimitador de caminhos do sistema: `;` no Windows e `:` no Linux e no macOS. Cada arquivo vira um teste próprio:
   - nos testes unitários, ida e volta byte a byte, nenhum erro de validação, todo tipo conhecido e a prévia respondendo a todas as escolhas alcançáveis;
   - nos testes de navegador, importação e exportação pela interface com o mesmo conteúdo, byte a byte, exceto `created_at`.
 - Sem a variável, esses testes são ignorados com aviso. Um arquivo que não existe também é ignorado, com a posição dele na lista.
 - `check:reference` importa e exporta um arquivo, compara o resultado e lista erros e avisos. Termina com código 1 se houver diferença ou erro; avisos só são listados.
-- `test:e2e` faz o build de produção e sobe o servidor na porta 3100 (ou em `E2E_PORT`), sem reaproveitar um servidor em execução. Entre outros cenários, cria pela biblioteca cada um dos 61 componentes da paleta e confere a forma exata do JSON exportado, as saídas no canvas, a Nota sem conexões e a renumeração das conexões quando caminhos ou saídas do agente mudam.
+- `test:e2e` faz o build de produção e sobe o servidor na porta 3100 (ou em `E2E_PORT`), sem reaproveitar um servidor em execução. Entre outros cenários, cria pela biblioteca cada um dos 61 componentes da paleta e confere a forma exata do JSON exportado, as saídas no canvas, a Nota sem conexões, a renumeração das conexões quando caminhos ou saídas do agente mudam e as pendências mostradas no próprio campo do painel.
 - Nenhum teste chama as URLs contidas nos exports.

@@ -1,7 +1,7 @@
 "use client"
 
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
-import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, useReactFlow, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type XYPosition } from "reactflow"
+import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, useReactFlow, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type Viewport, type XYPosition } from "reactflow"
 import "reactflow/dist/style.css"
 import { Check, Download, FilePlus2, Info, MapIcon, Maximize, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
@@ -57,6 +57,8 @@ const CANVAS_CLASS = String.raw`[&_.react-flow\_\_nodesselection-rect]:border-fl
 const MINIMAP_CLASS = "!m-3 overflow-hidden rounded-xl border border-flow-border !bg-flow-surface shadow-sm [&_path]:fill-flow-bg/70"
 const DEFAULT_NODE_SIZE: Size = { width: 280, height: 160 }
 const REVEAL_WINDOW = 2000
+const PAN_DURATION = 300
+const ZOOM_DURATION = 200
 const COLUMN_STEP = 360
 const ROW_STEP = 180
 const NODE_GAP = 40
@@ -281,19 +283,24 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const dragOrigin = useRef<AtendimentoFlow | null>(null)
   const removalBatch = useRef(false)
   const pendingReveal = useRef<{ id: string; until: number } | null>(null)
+  const viewTarget = useRef<{ viewport: Viewport | null; until: number }>({ viewport: null, until: 0 })
+  const revealTimer = useRef<number | undefined>(undefined)
   const lookup = useRef<{ nodes: AtendimentoNode[]; byId: Map<string, AtendimentoNode> } | null>(null)
   const handlers = useRef<Handlers | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const canvas = useRef<HTMLDivElement>(null)
   const settingsTrigger = useRef<HTMLButtonElement>(null)
   const issuesId = useId()
-  const { setViewport, getViewport, screenToFlowPosition, fitView, zoomIn, zoomOut, setCenter } = useReactFlow()
+  const { setViewport, getViewport, screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
+  const store = useStoreApi()
   const dirty = Object.values(drafts).some(Boolean)
   const issues = useMemo(() => validateFlow(flow), [flow])
   const errorCount = useMemo(() => issues.filter((issue) => issue.severity === "error").length, [issues])
   const nodesById = useMemo(() => new Map(flow.nodes.map((node) => [node.id, node])), [flow.nodes])
   const startNode = useMemo(() => flow.nodes.find((node) => node.data.type === START_TYPE), [flow.nodes])
   const panelNode = panelId ? nodesById.get(panelId) : undefined
+  const panelIssuesKey = useMemo(() => (panelId ? JSON.stringify(issues.filter((issue) => issue.nodeId === panelId)) : "[]"), [issues, panelId])
+  const panelIssues = useMemo<FlowIssue[]>(() => JSON.parse(panelIssuesKey), [panelIssuesKey])
   const invalidKey = useMemo(() => {
     if (!showIssues) return ""
     const ids = new Set<string>()
@@ -350,6 +357,35 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       if (current.viewport.x !== viewport.x || current.viewport.y !== viewport.y || current.viewport.zoom !== viewport.zoom) setDocument({ ...current, viewport }, "silent")
     }, delay)
   }, [getViewport, setDocument])
+
+  const holdView = useCallback((duration: number, viewport: Viewport | null = null) => {
+    viewTarget.current = { viewport, until: performance.now() + duration }
+  }, [])
+
+  const releaseView = useCallback(() => {
+    viewTarget.current = { viewport: null, until: 0 }
+  }, [])
+
+  const settledView = useCallback((): Viewport => {
+    const { viewport, until } = viewTarget.current
+    return viewport && performance.now() < until ? viewport : getViewport()
+  }, [getViewport])
+
+  const toFlow = useCallback((point: XYPosition): XYPosition => {
+    const origin = store.getState().domNode?.getBoundingClientRect()
+    const { x, y, zoom } = settledView()
+    return { x: (point.x - (origin?.left ?? 0) - x) / zoom, y: (point.y - (origin?.top ?? 0) - y) / zoom }
+  }, [settledView, store])
+
+  const centerOn = useCallback((x: number, y: number, zoom: number) => {
+    const { width, height } = store.getState()
+    const viewport = { x: width / 2 - x * zoom, y: height / 2 - y * zoom, zoom }
+    holdView(PAN_DURATION, viewport)
+    void setViewport(viewport, { duration: PAN_DURATION })
+    syncViewport(PAN_DURATION + 50)
+  }, [holdView, setViewport, store, syncViewport])
+
+  useEffect(() => () => window.clearTimeout(revealTimer.current), [])
 
   const allocateId = useCallback(() => {
     idFloor.current = Math.max(idFloor.current, maxNumericId(flowRef.current.nodes.map((node) => node.id))) + 1
@@ -536,12 +572,9 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setSelectedNodes([node.id])
     setSelectedEdges([])
     const size = sizes[node.id] || DEFAULT_NODE_SIZE
-    const zoom = Math.max(getViewport().zoom, 0.9)
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      void setCenter(node.position.x + size.width / 2, node.position.y + size.height / 2, { zoom, duration: 300 })
-      syncViewport(350)
-    }))
-  }, [getViewport, setCenter, sizes, syncViewport])
+    const zoom = Math.max(settledView().zoom, 0.9)
+    requestAnimationFrame(() => requestAnimationFrame(() => centerOn(node.position.x + size.width / 2, node.position.y + size.height / 2, zoom)))
+  }, [centerOn, settledView, sizes])
 
   const selectIssue = useCallback((node: AtendimentoNode) => {
     if (ensureApplied()) focusNode(node)
@@ -587,19 +620,22 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [clearSelection, ensureApplied, setDocument])
 
   const zoomInView = useCallback(() => {
-    void zoomIn({ duration: 200 })
-    syncViewport(250)
-  }, [syncViewport, zoomIn])
+    holdView(ZOOM_DURATION)
+    void zoomIn({ duration: ZOOM_DURATION })
+    syncViewport(ZOOM_DURATION + 50)
+  }, [holdView, syncViewport, zoomIn])
 
   const zoomOutView = useCallback(() => {
-    void zoomOut({ duration: 200 })
-    syncViewport(250)
-  }, [syncViewport, zoomOut])
+    holdView(ZOOM_DURATION)
+    void zoomOut({ duration: ZOOM_DURATION })
+    syncViewport(ZOOM_DURATION + 50)
+  }, [holdView, syncViewport, zoomOut])
 
   const fitCanvas = useCallback(() => {
-    void fitView({ padding: 0.2, duration: 300 })
-    syncViewport(350)
-  }, [fitView, syncViewport])
+    holdView(PAN_DURATION)
+    void fitView({ padding: 0.2, duration: PAN_DURATION })
+    syncViewport(PAN_DURATION + 50)
+  }, [fitView, holdView, syncViewport])
 
   const openFile = useCallback(() => fileInput.current?.click(), [])
 
@@ -682,21 +718,21 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const bounds = element?.getBoundingClientRect()
     const reserved = panelId ? 0 : Math.min(PANEL_WIDTH, window.innerWidth * 0.9)
     const right = (bounds ? bounds.right : 600) - reserved
-    const center = screenToFlowPosition({ x: ((bounds?.left ?? 0) + right) / 2, y: ((bounds?.top ?? 0) + (bounds?.bottom ?? 500)) / 2 })
+    const center = toFlow({ x: ((bounds?.left ?? 0) + right) / 2, y: ((bounds?.top ?? 0) + (bounds?.bottom ?? 500)) / 2 })
     const preferred = anchor
       ? { x: anchor.position.x + COLUMN_STEP, y: anchor.position.y }
       : { x: center.x - DEFAULT_NODE_SIZE.width / 2, y: center.y - DEFAULT_NODE_SIZE.height / 2 }
     const overlays = Array.from(element?.querySelectorAll(OVERLAY_SELECTOR) ?? [], (overlay) => {
       const rect = overlay.getBoundingClientRect()
-      const start = screenToFlowPosition({ x: rect.left, y: rect.top })
-      const end = screenToFlowPosition({ x: rect.right, y: rect.bottom })
+      const start = toFlow({ x: rect.left, y: rect.top })
+      const end = toFlow({ x: rect.right, y: rect.bottom })
       return { x: start.x, y: start.y, width: end.x - start.x, height: end.y - start.y }
     })
     const obstacles = [...flowRef.current.nodes.map((node) => ({ ...node.position, ...(sizes[node.id] ?? DEFAULT_NODE_SIZE) })), ...overlays]
     const free = (point: XYPosition) => !obstacles.some((box) => overlaps({ ...point, ...DEFAULT_NODE_SIZE }, box, NODE_GAP))
     if (bounds) {
-      const start = screenToFlowPosition({ x: bounds.left + VIEW_MARGIN, y: bounds.top + VIEW_MARGIN })
-      const end = screenToFlowPosition({ x: right - VIEW_MARGIN, y: bounds.bottom - VIEW_MARGIN })
+      const start = toFlow({ x: bounds.left + VIEW_MARGIN, y: bounds.top + VIEW_MARGIN })
+      const end = toFlow({ x: right - VIEW_MARGIN, y: bounds.bottom - VIEW_MARGIN })
       const inside = (point: XYPosition) => point.x >= start.x && point.y >= start.y && point.x + DEFAULT_NODE_SIZE.width <= end.x && point.y + DEFAULT_NODE_SIZE.height <= end.y
       let best: { point: XYPosition; cost: number } | undefined
       for (let column = -SEARCH_COLUMNS; column <= SEARCH_COLUMNS; column++) {
@@ -712,19 +748,29 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     let point = preferred
     for (let attempt = 0; attempt < 20 && !free(point); attempt++) point = { x: point.x, y: point.y + ROW_STEP }
     return point
-  }, [findNode, panelId, screenToFlowPosition, sizes])
+  }, [findNode, panelId, sizes, toFlow])
 
-  const revealNode = useCallback((id: string) => {
-    const area = canvas.current?.getBoundingClientRect()
-    const element = canvas.current?.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`)
+  const revealNode = useCallback(function reveal(id: string) {
+    const pending = pendingReveal.current
+    if (!pending || pending.id !== id || Date.now() > pending.until) return
+    const moving = viewTarget.current.until - performance.now()
+    if (moving > 0 && !viewTarget.current.viewport) {
+      window.clearTimeout(revealTimer.current)
+      revealTimer.current = window.setTimeout(() => reveal(id), moving + 20)
+      return
+    }
+    const element = canvas.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`)
+    const area = store.getState().domNode?.getBoundingClientRect() ?? canvas.current?.getBoundingClientRect()
     const node = findNode(id)
     if (!area || !element || !node) return
-    const box = element.getBoundingClientRect()
-    if (box.left >= area.left && box.top >= area.top && box.right <= area.right && box.bottom <= area.bottom) return
-    const { zoom } = getViewport()
-    void setCenter(node.position.x + box.width / zoom / 2, node.position.y + box.height / zoom / 2, { zoom, duration: 300 })
-    syncViewport(350)
-  }, [findNode, getViewport, setCenter, syncViewport])
+    const { x, y, zoom } = settledView()
+    const left = area.left + x + node.position.x * zoom
+    const top = area.top + y + node.position.y * zoom
+    const width = element.offsetWidth
+    const height = element.offsetHeight
+    if (left >= area.left && top >= area.top && left + width * zoom <= area.right && top + height * zoom <= area.bottom) return
+    centerOn(node.position.x + width / 2, node.position.y + height / 2, zoom)
+  }, [centerOn, findNode, settledView, store])
 
   const addComponent = useCallback((type: string, position?: XYPosition) => {
     if (recovery) {
@@ -1111,6 +1157,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
                     onConnect={connect}
                     onDragOver={dragOver}
                     onDrop={drop}
+                    onMoveStart={releaseView}
                     onMoveEnd={moveEnd}
                     defaultViewport={flow.viewport}
                     minZoom={0.05}
@@ -1158,6 +1205,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
           <ConfigPanel
             key={panelNode.id}
             node={panelNode}
+            issues={panelIssues}
             updateData={updateData}
             onDraft={trackDraft}
             removeOption={removeOption}
