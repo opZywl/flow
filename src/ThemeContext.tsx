@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
+import { readableChannels } from "./flow/contrast"
 
 type HomeTheme = "dark" | "light"
 
@@ -181,7 +182,10 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
 
         const colors = extractColorsFromGradient(gradient)
         const accent = colors.color1.slice(1).match(/../g)?.map((pair) => Number.parseInt(pair, 16)).join(" ")
-        if (accent) root.style.setProperty("--flow-accent", accent)
+        if (accent) {
+            root.style.setProperty("--flow-accent", accent)
+            root.style.setProperty("--flow-accent-strong", readableChannels(colors.color1).join(" "))
+        }
         setFadeColor1(colors.color1)
         setFadeColor2(colors.color2)
     }, [extractColorsFromGradient])

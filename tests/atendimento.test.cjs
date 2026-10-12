@@ -10,13 +10,14 @@ const {
   supportedComponents, pendingComponents, componentCatalog, categories, getTemplate, getDefinition, getComponentLabel, getComponentColor, getCategory, getNodeType,
   expectedFieldTypes, outputTone, START_ID, START_TYPE,
 } = require('../lib/atendimento/catalog.ts')
+const { cleanNumberText, numberMessage, numberRule, numericText } = require('../lib/atendimento/numbers.ts')
 const fieldTypes = require('../lib/atendimento/field-types.json')
 const templates = require('../lib/atendimento/templates.json')
 
 const DATE = new Date('2026-01-15T12:00:00.000Z')
 const API_URL = 'https://example.com/api'
 const INVALID_URL = 'Informe uma URL válida, iniciada por http:// ou https://.'
-const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging', 'deletable']
+const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging']
 const START_KEYS = ['id', 'type', 'position', 'data', 'deletable', 'measured', 'selected', 'dragging']
 const EDGE_KEYS = ['type', 'source', 'sourceHandle', 'target', 'id']
 const TYPE_NAMES = { string: 'texto', number: 'número', boolean: 'verdadeiro ou falso', object: 'objeto', array: 'lista', null: 'nulo' }
@@ -931,7 +932,7 @@ test('newNode creates each of the 62 components with the spec keys, order, defau
     assert.deepEqual(node.position, { x: 10, y: 20 })
     assert.deepEqual(Object.keys(node.data), ['type', 'data', 'html'], type)
     assert.equal(node.data.type, type)
-    assert.deepEqual([node.selected, node.dragging, node.deletable], [false, false, type !== START_TYPE], type)
+    assert.deepEqual([node.selected, node.dragging, node.deletable], [false, false, type === START_TYPE ? false : undefined], type)
     assert.deepEqual(node.measured, { width: spec.measured[0], height: spec.measured[1] }, type)
     assert.equal(node.data.html, getTemplate(type), type)
     assert.equal(getTemplate(type) !== '', spec.html, type)
@@ -1578,16 +1579,82 @@ test('issue messages are short PT-BR sentences that never cite the reference fil
   assert.ok(messages.includes('Componente desconectado do início.'))
 })
 
-test('duplicate creates a deletable copy with a new id and new rule ids', () => {
+test('duplicate creates a removable copy with a new id, new rule ids and the original node keys', () => {
   const node = newNode('timeConditions', { x: 10, y: 10 }, '2')
   node.selected = true
   const copy = duplicateNode(node, '9')
   assert.equal(copy.id, '9')
   assert.equal(copy.selected, false)
-  assert.equal(copy.deletable, true)
+  assert.equal(Object.hasOwn(copy, 'deletable'), false)
   assert.deepEqual(copy.position, { x: 50, y: 50 })
   assert.deepEqual(Object.keys(copy), NODE_KEYS)
   assert.notEqual(copy.data.data.timeRules[0], node.data.data.timeRules[0])
+  const imported = { id: '3', type: 'custom', position: { x: 0, y: 0 }, data: newNode('finalizar', { x: 0, y: 0 }, '3').data, measured: { width: 260, height: 86 }, deletable: false, selected: true }
+  const importedCopy = duplicateNode(imported, '10')
+  assert.deepEqual(Object.keys(importedCopy), ['id', 'type', 'position', 'data', 'measured', 'deletable', 'selected'])
+  assert.deepEqual([importedCopy.deletable, importedCopy.selected], [true, false])
+  const bare = duplicateNode({ id: '4', type: 'custom', position: { x: 0, y: 0 }, data: imported.data }, '11')
+  assert.deepEqual(Object.keys(bare), ['id', 'type', 'position', 'data'])
+})
+
+test('number text input keeps separators on integer fields and drops the sign only where negatives are not allowed', () => {
+  const minutes = numberRule({ min: 1, step: 1 })
+  assert.deepEqual(['1,5', '2.5', '3 min', '-4', '1a2'].map(value => cleanNumberText(value, minutes)), ['1,5', '2.5', '3', '4', '12'])
+  assert.deepEqual(['15', '1,5', '2.5', '0', '-1'].map(value => numericText(value, minutes)), [true, false, false, false, false])
+  assert.equal(numberMessage(minutes), 'Informe um número inteiro a partir de 1.')
+  const amount = numberRule({ min: 0 })
+  assert.equal(cleanNumberText('-10', amount), '10')
+  assert.deepEqual(['99,90', '99.90', '0', '-10', '-0', '1.'].map(value => numericText(value, amount)), [true, true, true, false, false, false])
+  const free = numberRule({})
+  assert.equal(cleanNumberText('--1-2', free), '-12')
+  assert.deepEqual(['-1.5', '-1,5', '+1', '.5'].map(value => numericText(value, free)), [true, true, false, false])
+})
+
+test('number text fields warn in the panel exactly when the validator warns, with the same message', () => {
+  const samples = ['', '1', '01', '0', '30', '1,5', '2.5', '99,90', '-10', '-0', '-1.5', '1.', '.5', 'abc', ' 7 ', '1.299,90', '1e3']
+  const fields = componentCatalog.flatMap(definition => (definition.fields ?? []).filter(field => field.kind === 'numberText').map(field => [definition.nativeType, field]))
+  assert.deepEqual(fields.map(([type, field]) => `${type}.${field.key}`), ['whatsappCall.ttlMinutes', 'sendConversion.value', 'trackEvent.numericValue'])
+  for (const [type, field] of fields) {
+    assert.ok(field.formatWarning, `${type}.${field.key}`)
+    const rule = numberRule(field)
+    for (const sample of samples) {
+      const panel = sample.trim() !== '' && !numericText(sample.trim(), rule)
+      const reported = pairsOf(single(type, patched(type, { [field.key]: sample })), '2').filter(([, message]) => message === field.formatWarning)
+      assert.deepEqual(reported, panel ? [['warning', field.formatWarning]] : [], `${type}.${field.key} = ${JSON.stringify(sample)}`)
+    }
+  }
+})
+
+test('required list item fields use the validator severity when left empty', () => {
+  const fill = item => Object.fromEntries(Object.entries(item).map(([key, value]) => [key, typeof value === 'string' ? `valor ${key}` : value]))
+  const blankItem = field => field.newItem ? clone(field.newItem) : Object.fromEntries(field.itemFields.map(entry => [entry.key, entry.kind === 'checkbox' ? false : entry.kind === 'number' ? 0 : '']))
+  const checked = []
+  for (const definition of componentCatalog) {
+    const type = definition.nativeType
+    for (const field of definition.fields ?? []) {
+      for (const item of (field.itemFields ?? []).filter(entry => entry.required)) {
+        const [complete, empty] = ['valor', ''].map(value => {
+          const data = configuredData(type)
+          if (field.kind === 'conditionPairs') {
+            for (const entry of field.itemFields) data[`${entry.key}-1`] = `valor ${entry.key}`
+            data[`${item.key}-1`] = value
+          } else {
+            const items = Array.isArray(data[field.key]) && data[field.key].length ? data[field.key] : [blankItem(field)]
+            data[field.key] = items.map(fill)
+            data[field.key][0][item.key] = value
+          }
+          return pairsOf(single(type, data), '2').map(pair => JSON.stringify(pair))
+        })
+        const added = empty.filter(pair => !complete.includes(pair)).map(pair => JSON.parse(pair))
+        assert.equal(added.length, 1, `${type}.${field.key}.${item.key}`)
+        assert.equal(added[0][0], item.required, `${type}.${field.key}.${item.key}`)
+        assert.deepEqual(complete.filter(pair => !empty.includes(pair)), [], `${type}.${field.key}.${item.key}`)
+        assert.ok(item.requiredMessage && /^[A-ZÁÉÍÓÚ].*.$/.test(item.requiredMessage), item.requiredMessage)
+        checked.push(`${type}.${field.key}.${item.key}:${item.required}`)
+      }
+    }
+  }
+  assert.deepEqual(checked, ['randomizer.paths.label:warning', 'aiAgentBlock.exits.name:error', 'aiAgentBlock.exits.when:warning', 'googleSheetsAppend.columns.header:warning', 'multiple_condicional_api.conditions.var:warning'])
 })
 
 test('behavior signature ignores layout, viewport and metadata', () => {

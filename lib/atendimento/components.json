@@ -1233,7 +1233,8 @@
         "kind": "numberText",
         "hint": "Opcional. Somente números.",
         "min": 1,
-        "step": 1
+        "step": 1,
+        "formatWarning": "A validade do botão deve ser um número inteiro de minutos."
       },
       {
         "key": "respectHours",
@@ -2693,7 +2694,9 @@
           {
             "key": "label",
             "label": "Nome do caminho",
-            "kind": "text"
+            "kind": "text",
+            "required": "warning",
+            "requiredMessage": "Informe o nome do caminho."
           },
           {
             "key": "weight",
@@ -3046,13 +3049,17 @@
             "key": "name",
             "label": "Nome da saída",
             "kind": "text",
-            "placeholder": "Nome exibido na conexão"
+            "placeholder": "Nome exibido na conexão",
+            "required": "error",
+            "requiredMessage": "Informe o nome da saída."
           },
           {
             "key": "when",
             "label": "Quando usar",
             "kind": "textarea",
-            "placeholder": "Situação em que o agente deve seguir por esta saída"
+            "placeholder": "Situação em que o agente deve seguir por esta saída",
+            "required": "warning",
+            "requiredMessage": "Descreva quando usar."
           },
           {
             "key": "requireFields",
@@ -3223,7 +3230,9 @@
         "itemFields": [
           {
             "key": "header",
-            "label": "Nome da coluna"
+            "label": "Nome da coluna",
+            "required": "warning",
+            "requiredMessage": "Informe o nome da coluna."
           },
           {
             "key": "value",
@@ -3484,7 +3493,9 @@
         "itemFields": [
           {
             "key": "var",
-            "label": "Variável"
+            "label": "Variável",
+            "required": "warning",
+            "requiredMessage": "Informe a variável."
           },
           {
             "key": "value",
@@ -4028,7 +4039,9 @@
         "label": "Valor da conversão",
         "kind": "numberText",
         "placeholder": "Ex.: 99.90",
-        "hint": "Opcional."
+        "hint": "Opcional.",
+        "min": 0,
+        "formatWarning": "Informe o valor da conversão como número, por exemplo 99.90."
       },
       {
         "key": "currency",
@@ -4102,7 +4115,8 @@
         "label": "Valor numérico",
         "kind": "numberText",
         "placeholder": "Opcional",
-        "hint": "Número associado ao evento, como valor ou quantidade."
+        "hint": "Número associado ao evento, como valor ou quantidade.",
+        "formatWarning": "Informe o valor numérico como número."
       },
       {
         "key": "oncePerConversation",

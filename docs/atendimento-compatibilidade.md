@@ -14,7 +14,7 @@ Os exports reais não fazem parte do repositório. Eles têm dados internos e se
 | Serialização | `JSON.stringify(fluxo, null, 2)`, UTF-8 sem BOM e sem quebra de linha final. |
 | Componente | `id`, `type`, `position`, `data { type, data, html }`, `measured { width, height }`, `selected`, `dragging` e `deletable`. |
 | `node.type` | `"custom"` em quase todos os componentes. A Nota usa `"note"` e o Menu de Opções API usa `"apiOptionsMenu"`, como a plataforma grava. |
-| Componente criado no editor | Chaves na ordem `id, type, position, data, measured, selected, dragging, deletable`. O início segue a ordem da plataforma: `id, type, position, data, deletable, measured, selected, dragging`. |
+| Componente criado no editor | Chaves na ordem `id, type, position, data, measured, selected, dragging`, sem `deletable`, como a plataforma grava um componente recém-criado. O início segue a ordem da plataforma: `id, type, position, data, deletable, measured, selected, dragging`. Duplicar mantém as chaves do componente original. |
 | `data.data` | Campos, valores padrão e ordem das chaves iguais aos do componente recém-criado na plataforma. Os campos que a plataforma acrescenta durante a configuração entram no fim, na ordem em que ela grava. |
 | ID de componente | O início é sempre `"inicio"`. Os demais recebem números sequenciais em texto (`"2"`, `"3"`…), a partir do maior ID existente, sem reaproveitar IDs. |
 | Conexão | `type: "deletable"`, `source`, `sourceHandle: "output-N"`, `target` e `id: "xy-edge__<source><sourceHandle>-<target>"`, sem `targetHandle`. Um ID já usado recebe o sufixo `-1`, `-2`… |
@@ -169,6 +169,8 @@ O sentido de cada saída vem das conexões dos exports da plataforma. Nos compon
 ## Painel de configuração
 
 O painel mostra os campos de cada componente na ordem da plataforma, com editores próprios para opções do menu, regras de horário, caminhos com peso, pares de condição, listas de itens, listas de IDs e pares chave e valor. Os demais campos estruturados ficam num editor JSON com Aplicar e Descartar. Campos que a plataforma grava mas não precisam de edição aparecem em "Campos técnicos", e o JSON completo do componente fica sempre disponível.
+
+Cada campo indica o problema com a mesma gravidade da validação: em vermelho o que impede a exportação e em amarelo os avisos. Um componente adicionado por clique entra num espaço livre da área visível do canvas.
 
 ## Outras entradas
 

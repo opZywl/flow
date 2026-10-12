@@ -5,7 +5,7 @@ export const ui = {
   button:
     "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-flow-border bg-flow-surface px-2.5 text-xs font-semibold text-flow-muted-strong transition hover:border-flow-accent/60 hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 disabled:pointer-events-none disabled:opacity-40",
   primaryButton:
-    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-flow-accent px-3 text-xs font-semibold text-white shadow-sm transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/40 disabled:pointer-events-none disabled:opacity-40",
+    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-flow-accent-strong px-3 text-xs font-semibold text-white shadow-sm transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/40 disabled:pointer-events-none disabled:opacity-40",
   accentButton:
     "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-flow-accent/40 bg-flow-accent/15 px-3 text-xs font-semibold text-flow-accent transition hover:bg-flow-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 disabled:pointer-events-none disabled:opacity-40",
   dangerButton:
@@ -22,6 +22,7 @@ export const ui = {
   label: "mb-1 block text-xs font-semibold text-flow-muted-strong",
   hint: "mt-1 text-[11px] leading-4 text-flow-muted",
   error: "mt-1 text-[11px] font-medium leading-4 text-flow-danger",
+  warning: "mt-1 text-[11px] font-medium leading-4 text-flow-warning",
   sectionTitle: "text-[10px] font-bold uppercase tracking-wider text-flow-muted",
   card: "rounded-xl border border-flow-border bg-flow-surface",
   chip: "rounded-md bg-flow-soft px-2 py-1 text-[11px] text-flow-muted-strong",

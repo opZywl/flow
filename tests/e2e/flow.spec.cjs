@@ -5,7 +5,8 @@ const path = require('node:path')
 const { createEdge, newFlow, newNode, outputHandles, outputLabel } = require('../../lib/atendimento/format.ts')
 const { START_TYPE, categories, componentCatalog } = require('../../lib/atendimento/catalog.ts')
 
-const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging', 'deletable']
+const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging']
+const START_KEYS = ['id', 'type', 'position', 'data', 'deletable', 'measured', 'selected', 'dragging']
 const EDGE_KEYS = ['type', 'source', 'sourceHandle', 'target', 'id']
 const DATA_KEYS = ['type', 'data', 'html']
 const CREATED_AT = /"created_at": "[^"]*"/
@@ -72,6 +73,21 @@ async function edgesFrom(page, source) {
 }
 
 const withoutStamp = flow => ({ ...flow, created_at: 'ignorado' })
+const describedBy = async (page, field, message) => {
+  const note = page.getByText(message, { exact: true })
+  await expect(note).toBeVisible()
+  const id = (await note.getAttribute('id')).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  await expect(field).toHaveAttribute('aria-describedby', new RegExp(`(^| )${id}$`))
+  return note
+}
+const contrastWithWhite = locator => locator.evaluate(element => {
+  const [red, green, blue] = getComputedStyle(element).backgroundColor.match(/[\d.]+/g).slice(0, 3).map(Number)
+  const linear = [red, green, blue].map(value => {
+    const channel = value / 255
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+  return 1.05 / (0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2] + 0.05)
+})
 const withoutRuleIds = node => {
   const rules = node.data.data.timeRules
   if (!Array.isArray(rules)) return node
@@ -107,11 +123,11 @@ test('components created in the editor are exported exactly in the reference for
   expect(json.service_type).toBe('chat')
   expect(json.nodes.map(node => node.id)).toEqual(['inicio', '2', '3'])
   for (const node of json.nodes) {
-    expect(Object.keys(node).sort()).toEqual([...NODE_KEYS].sort())
+    expect(Object.keys(node)).toEqual(node.id === 'inicio' ? START_KEYS : NODE_KEYS)
     expect(node.type).toBe('custom')
     expect(node.selected).toBe(false)
     expect(node.dragging).toBe(false)
-    expect(node.deletable).toBe(node.id !== 'inicio')
+    expect(node.deletable).toBe(node.id === 'inicio' ? false : undefined)
   }
   expect(json.nodes[1].data).toMatchObject({ type: 'envio_pergunta', data: { envio_pergunta: '', template: 'Olá, #NAME!' } })
   expect(json.nodes[2].data.type).toBe('finalizar')
@@ -272,6 +288,13 @@ test('removing a weighted path or adding an agent exit moves the connections wit
   await page.getByRole('button', { name: 'Adicionar saída', exact: true }).click()
   await expect(page.locator('.react-flow__node[data-id="5"] .react-flow__handle.source')).toHaveCount(3)
   await expect.poll(() => edgesFrom(page, '5')).toEqual([['output-0', '6', 'xy-edge__5output-0-6'], ['output-2', '7', 'xy-edge__5output-2-7']])
+  const exitName = page.getByLabel('Nome da saída 2', { exact: true })
+  await expect(exitName).toHaveAttribute('aria-invalid', 'true')
+  await expect(await describedBy(page, exitName, 'Informe o nome da saída.')).toHaveClass(/text-flow-danger/)
+  const exitWhen = page.getByLabel('Quando usar, saída 2', { exact: true })
+  await expect(exitWhen).not.toHaveAttribute('aria-invalid')
+  await expect(await describedBy(page, exitWhen, 'Descreva quando usar.')).toHaveClass(/text-flow-warning/)
+  await expect(page.getByLabel('Nome da saída 1', { exact: true })).not.toHaveAttribute('aria-invalid')
   await page.getByRole('button', { name: '2 pendências', exact: true }).click()
   const issues = page.getByLabel('Validação do fluxo')
   await expect(issues).toContainText('Conecte a saída “Saída 2”.')
@@ -393,15 +416,22 @@ test('the remove button on a component deletes it with its connections, respects
   await open(page)
   await upload(page, sample())
   const nodes = page.locator('.react-flow__node')
-  await expect(page.locator('.react-flow__node[data-id="inicio"]').getByRole('button', { name: 'Remover componente', exact: true })).toHaveCount(0)
   const menu = page.locator('.react-flow__node[data-id="2"]')
-  const remove = menu.getByRole('button', { name: 'Remover componente', exact: true })
+  await expect(page.getByRole('button', { name: 'Menu de Opções, ID 2', exact: true })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Iniciar Fluxo, ID inicio', exact: true })).toHaveCount(1)
+  await expect(nodes.locator('button, a, input, select, textarea, [tabindex]')).toHaveCount(0)
+  const remove = page.getByRole('button', { name: 'Remover Menu de Opções, ID 2', exact: true })
   const id = menu.getByText('ID 2', { exact: true })
-  await expect(remove).toHaveCSS('opacity', '0')
+  await expect(remove).toHaveCount(0)
   await expect(id).toHaveCSS('opacity', '0')
   await menu.hover()
-  await expect(remove).toHaveCSS('opacity', '1')
+  await expect(remove).toBeVisible()
+  await expect(remove).toHaveAttribute('title', 'Remover componente')
   await expect(id).toHaveCSS('opacity', '1')
+  await expect(page.getByRole('button', { name: /^Remover Iniciar Fluxo/ })).toHaveCount(0)
+  await page.locator('.react-flow__node[data-id="inicio"]').hover()
+  await expect(remove).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Remover Iniciar Fluxo/ })).toHaveCount(0)
 
   await page.locator('.react-flow__node[data-id="3"]').click()
   await page.getByText('Todos os dados do componente (JSON)', { exact: true }).click()
@@ -463,14 +493,77 @@ test('keyboard shortcuts keep working and Delete still removes components after 
 
 test('a custom accent color is applied to the editor and survives a reload', async ({ page }) => {
   await open(page)
-  const accent = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--flow-accent').trim())
+  const variable = name => () => page.evaluate(key => getComputedStyle(document.documentElement).getPropertyValue(key).trim(), name)
+  const accent = variable('--flow-accent')
+  const strong = variable('--flow-accent-strong')
+  await expect.poll(strong).toBe('51 114 216')
   await page.getByRole('button', { name: 'Cores', exact: true }).click()
   await page.getByLabel('Código hexadecimal da cor').fill('#0f766e')
   await page.getByRole('button', { name: 'Aplicar', exact: true }).click()
   await expect.poll(accent).toBe('15 118 110')
+  await expect.poll(strong).toBe('15 118 110')
   await page.reload()
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
   await expect.poll(accent).toBe('15 118 110')
+  await page.getByRole('button', { name: 'Cores', exact: true }).click()
+  await page.getByLabel('Código hexadecimal da cor').fill('#facc15')
+  await page.getByRole('button', { name: 'Aplicar', exact: true }).click()
+  await expect.poll(accent).toBe('250 204 21')
+  await expect.poll(() => contrastWithWhite(page.getByRole('button', { name: 'Prévia', exact: true }))).toBeGreaterThanOrEqual(4.5)
+})
+
+test('components added by click always land inside the visible canvas', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Todas', exact: true }).click()
+  const buttons = page.getByLabel('Biblioteca de componentes').locator('section button')
+  const panel = page.getByLabel('Configuração do componente')
+  const area = page.locator('.react-flow')
+  for (let index = 0; index < 12; index++) {
+    await buttons.nth(index).click()
+    const id = String(index + 2)
+    await expect(panel).toContainText(`ID ${id} ·`)
+    await expect.poll(async () => {
+      const canvas = await area.boundingBox()
+      const node = await page.locator(`.react-flow__node[data-id="${id}"]`).boundingBox()
+      return node.x >= canvas.x && node.y >= canvas.y && node.x + node.width <= canvas.x + canvas.width && node.y + node.height <= canvas.y + canvas.height
+    }, { message: `componente ${id}` }).toBe(true)
+  }
+})
+
+test('the panel shows blocking problems in red and warnings in yellow with the validator wording', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Todas', exact: true }).click()
+  const library = page.getByLabel('Biblioteca de componentes')
+
+  await library.getByRole('button', { name: 'Transferir para Ligação', exact: true }).click()
+  const minutes = page.getByLabel('Validade do botão (minutos)', { exact: true })
+  await minutes.fill('1,5')
+  await expect(minutes).toHaveValue('1,5')
+  await expect(minutes).not.toHaveAttribute('aria-invalid')
+  await expect(await describedBy(page, minutes, 'A validade do botão deve ser um número inteiro de minutos.')).toHaveClass(/text-flow-warning/)
+  await minutes.fill('15')
+  await expect(minutes).toHaveValue('15')
+  await expect(page.getByText('A validade do botão deve ser um número inteiro de minutos.', { exact: true })).toHaveCount(0)
+
+  await library.getByRole('button', { name: 'Enviar Conversão', exact: true }).click()
+  const amount = page.getByLabel('Valor da conversão', { exact: true })
+  await amount.fill('-10')
+  await expect(amount).toHaveValue('10')
+  await expect(page.getByText('Informe o valor da conversão como número, por exemplo 99.90.', { exact: true })).toHaveCount(0)
+
+  await library.getByRole('button', { name: 'Múltipla Condição', exact: true }).click()
+  const variable = page.getByLabel('Variável da condição 1', { exact: true })
+  await expect(variable).not.toHaveAttribute('aria-invalid')
+  await expect(await describedBy(page, variable, 'Informe a variável.')).toHaveClass(/text-flow-warning/)
+
+  await library.getByRole('button', { name: 'Condições de Tempo', exact: true }).click()
+  const monday = page.getByRole('button', { name: 'Segunda-feira', exact: true })
+  await expect(monday).toHaveAttribute('aria-pressed', 'true')
+  expect(await contrastWithWhite(monday)).toBeGreaterThanOrEqual(4.5)
+  await page.getByText('Todos os dados do componente (JSON)', { exact: true }).click()
+  await page.getByLabel('Dados do componente', { exact: true }).fill('{}')
+  expect(await contrastWithWhite(page.getByRole('button', { name: 'Aplicar JSON', exact: true }))).toBeGreaterThanOrEqual(4.5)
+  await page.getByRole('button', { name: 'Descartar edição', exact: true }).click()
 })
 
 test('local preview follows the chosen branch even after panning triggers an autosave', async ({ page }) => {

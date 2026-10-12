@@ -5,14 +5,13 @@ import { Info, Search, SearchX, X } from "lucide-react"
 import { START_TYPE, categories, componentCatalog } from "@/lib/atendimento/catalog"
 import type { ComponentDefinition } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
+import { readableChannels } from "./contrast"
 import { componentIcon } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
 const DRAG_TYPE = "application/reactflow"
 const MAIN_CATEGORIES: readonly string[] = ["messages", "routing", "conditions", "control"]
 const UNAVAILABLE = "Requer um JSON exportado da plataforma"
-const LUMINANCE_WEIGHTS = [0.2126, 0.7152, 0.0722]
-const MIN_CONTRAST = 4.5
 
 const tabs = [
   { id: "main", label: "Principais" },
@@ -33,18 +32,7 @@ const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u0
 
 const keepCompoundWords = (label: string) => label.replace(/([-/])(?=\S)/g, "$1\u2060")
 
-const luminance = (rgb: number[]) =>
-  rgb.reduce((sum, channel, index) => {
-    const value = channel / 255
-    const linear = value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
-    return sum + LUMINANCE_WEIGHTS[index] * linear
-  }, 0)
-
-const readableTone = (hex: string) => {
-  let rgb = [1, 3, 5].map((start) => Number.parseInt(hex.slice(start, start + 2), 16))
-  while (1.05 / (luminance(rgb) + 0.05) < MIN_CONTRAST) rgb = rgb.map((channel) => Math.floor(channel * 0.97))
-  return `rgb(${rgb.join(" ")})`
-}
+const readableTone = (hex: string) => `rgb(${readableChannels(hex).join(" ")})`
 
 const library = categories
   .map((category) => ({

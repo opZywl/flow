@@ -162,7 +162,7 @@ export function newNode(type: string, position: XYPosition, id: string): Atendim
   if (!definition?.defaults) throw new Error(`O componente “${type}” ainda não tem exemplo no formato de Atendimento.`)
   const node = { id, type: getNodeType(type), position: { x: position.x, y: position.y }, data: { type, data: definition.defaults(), html: getTemplate(type) } }
   if (type === START_TYPE) return { ...node, deletable: false, measured: defaultMeasured(type), selected: false, dragging: false }
-  return { ...node, measured: defaultMeasured(type), selected: false, dragging: false, deletable: true }
+  return { ...node, measured: defaultMeasured(type), selected: false, dragging: false }
 }
 
 export function newFlow(now = new Date()): AtendimentoFlow {
@@ -189,7 +189,7 @@ export function duplicateNode(node: AtendimentoNode, id: string): AtendimentoNod
     position: { x: node.position.x + 40, y: node.position.y + 40 },
     ...("selected" in clone ? { selected: false } : {}),
     ...("dragging" in clone ? { dragging: false } : {}),
-    deletable: true,
+    ...("deletable" in clone ? { deletable: true } : {}),
   }
 }
 

@@ -1,7 +1,7 @@
 "use client"
 
-import { createContext, memo, useContext, useEffect, useMemo, type CSSProperties } from "react"
-import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "reactflow"
+import { createContext, memo, useContext, useEffect, useMemo, useState, type CSSProperties } from "react"
+import { Handle, NodeToolbar, Position, useUpdateNodeInternals, type NodeProps } from "reactflow"
 import {
   Activity,
   AlertTriangle,
@@ -186,8 +186,8 @@ const SOURCE_HANDLE = `${HANDLE} !-right-1.5`
 const NOTE_TARGET_HANDLE = `${HANDLE} !-left-2 !bg-flow-danger`
 const NOTE_SOURCE_HANDLE = `${HANDLE} !-right-1.5 !bg-flow-danger`
 const REVEAL = "group-hover:opacity-100 group-focus-within:opacity-100 [.react-flow__node:focus-visible_&]:opacity-100"
-const REMOVE_BUTTON = "nodrag nopan absolute -right-2.5 -top-2.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,rgb(var(--flow-danger))_85%,black)] text-white shadow-md ring-2 ring-flow-bg transition duration-150 ease-out hover:brightness-110 focus-visible:outline-none focus-visible:ring-flow-accent motion-reduce:transition-none"
-const REMOVE_HIDDEN = `pointer-events-none scale-90 opacity-0 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:pointer-events-auto group-focus-within:scale-100 [.react-flow__node:focus-visible_&]:scale-100 ${REVEAL}`
+const REMOVE_BUTTON = "nodrag nopan relative left-2.5 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,rgb(var(--flow-danger))_85%,black)] text-white shadow-md ring-2 ring-flow-bg transition duration-150 ease-out animate-in fade-in-0 zoom-in-90 hover:brightness-110 focus-visible:outline-none focus-visible:ring-flow-accent motion-reduce:animate-none motion-reduce:transition-none"
+const REMOVE_OFFSET = -14
 const ID_CHIP = `mr-1 mt-0.5 max-w-[6rem] shrink-0 translate-y-0.5 truncate rounded-md bg-flow-soft px-1.5 py-0.5 font-mono text-[10px] leading-none text-flow-muted opacity-0 transition duration-200 ease-out group-hover:translate-y-0 group-focus-within:translate-y-0 [.react-flow__node:focus-visible_&]:translate-y-0 motion-reduce:transition-none ${REVEAL}`
 const numberFormat = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 })
 
@@ -320,23 +320,29 @@ export function noteColor(value: unknown): string {
   return color && typeof CSS !== "undefined" && CSS.supports("color", color) ? color : DEFAULT_NOTE_COLOR
 }
 
-function RemoveButton({ id, selected }: { id: string; selected: boolean }) {
+function RemoveButton({ id, label, visible }: { id: string; label: string; visible: boolean }) {
   const actions = useContext(NodeActionsContext)
-  if (!actions) return null
+  const [focused, setFocused] = useState(false)
+  if (!actions || !(visible || focused)) return null
   return (
-    <button
-      type="button"
-      aria-label="Remover componente"
-      title="Remover componente"
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.stopPropagation()
-        actions.remove(id)
-      }}
-      className={cn(REMOVE_BUTTON, selected ? "scale-100 opacity-100" : REMOVE_HIDDEN)}
-    >
-      <X className="h-3.5 w-3.5" strokeWidth={2.75} aria-hidden />
-    </button>
+    <NodeToolbar nodeId={id} isVisible position={Position.Top} align="end" offset={REMOVE_OFFSET} className="nodrag nopan" data-node-toolbar={id}>
+      <button
+        type="button"
+        aria-label={`Remover ${label}, ID ${id}`}
+        title="Remover componente"
+        onPointerDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onClick={(event) => {
+          event.stopPropagation()
+          actions.remove(id)
+        }}
+        className={REMOVE_BUTTON}
+      >
+        <X className="h-3.5 w-3.5" strokeWidth={2.75} aria-hidden />
+      </button>
+    </NodeToolbar>
   )
 }
 
@@ -372,6 +378,7 @@ function NoteCard({ id, data, selected }: NodeProps<AtendimentoData>) {
   )
   const signature = useMemo(() => JSON.stringify([links.targets, links.sources]), [links])
   const invalid = invalidNodes.has(id)
+  const [hovered, setHovered] = useState(false)
   const Icon = componentIcon(NOTE_TYPE)
   const style = useMemo(
     () => ({ backgroundColor: `color-mix(in srgb, ${color} 16%, rgb(var(--flow-surface)))`, "--note-border": `color-mix(in srgb, ${color} 50%, rgb(var(--flow-border)))` }) as CSSProperties,
@@ -393,8 +400,10 @@ function NoteCard({ id, data, selected }: NodeProps<AtendimentoData>) {
             : "border-[color:var(--note-border)] hover:border-flow-accent/50",
       )}
       style={style}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      <RemoveButton id={id} selected={selected} />
+      <RemoveButton id={id} label={getComponentLabel(NOTE_TYPE)} visible={selected || hovered} />
       {links.targets.map((target) => (
         <Handle key={`in-${target}`} id={target || undefined} type="target" position={Position.Left} isConnectable={false} className={NOTE_TARGET_HANDLE} />
       ))}
@@ -453,6 +462,7 @@ function ComponentCard({ id, data, selected, isConnectable }: NodeProps<Atendime
     return needsSetup(data) ? "Clique para configurar" : ""
   }, [data, start, summary.chips.length, type])
   const invalid = invalidNodes.has(id)
+  const [hovered, setHovered] = useState(false)
 
   useEffect(() => {
     updateInternals(id)
@@ -473,8 +483,10 @@ function ComponentCard({ id, data, selected, isConnectable }: NodeProps<Atendime
               : "border-flow-border hover:border-flow-accent/50",
       )}
       style={cardStyle}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      {!start && <RemoveButton id={id} selected={selected} />}
+      {!start && <RemoveButton id={id} label={title} visible={selected || hovered} />}
       {!start && (
         <>
           <Handle type="target" position={Position.Left} isConnectable={isConnectable} className={TARGET_HANDLE} />

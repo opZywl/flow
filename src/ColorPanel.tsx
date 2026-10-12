@@ -122,7 +122,7 @@ function ColorPanelBody() {
                 }}
                 className={cn(
                   "inline-flex h-8 items-center justify-center gap-1.5 rounded-md text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30",
-                  active ? "bg-flow-accent text-white shadow-sm" : "text-flow-muted-strong hover:bg-flow-surface hover:text-flow-fg",
+                  active ? "bg-flow-accent-strong text-white shadow-sm" : "text-flow-muted-strong hover:bg-flow-surface hover:text-flow-fg",
                 )}
               >
                 <Icon className="h-3.5 w-3.5" aria-hidden="true" />

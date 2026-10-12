@@ -57,6 +57,7 @@ const RETURN_TYPE = "voltar"
 const PROTOCOL_SAMPLE = "[protocolo gerado na plataforma]"
 const LINK_SAMPLE = "[link do chat gerado na plataforma]"
 const INTEGRATION_SAMPLE = "[retorno da integração]"
+const FORM_SAMPLE = "[resposta do formulário]"
 const DELAY = /^[1-9]\d*$/
 const OUTPUT = /^output-(\d+)$/
 const TOKEN = /@@@([\w-]+(?::[\w-]+)*)|\{\{\s*([^{}\s]+)\s*\}\}|#NAME\b|\{protocol\}/g
@@ -273,7 +274,11 @@ const CHOICES = new Map<string, Choice>([
   ["whatsappFlow", {
     intro: "Enviar Formulário: o formulário não abre na prévia. Escolha o resultado a testar.",
     before: (data, variables) => nonempty(data.body) ? [renderText(data.body, variables)] : [`Formulário${quoted(first(data, "formName", "formId"))} enviado.`],
-    outcome: ({ data, variables, index }) => index === 0 ? optional(data.successMessage, variables) : [],
+    outcome: ({ data, variables, index }) => {
+      if (index !== 0) return []
+      remember(variables, data.outputVar, FORM_SAMPLE)
+      return optional(data.successMessage, variables)
+    },
   }],
   ["whatsappCall", {
     intro: "Transferir para Ligação: a ligação não acontece na prévia. Escolha o resultado a testar.",
@@ -450,7 +455,8 @@ function returnToMenu(graph: Graph, node: AtendimentoNode, state: PreviewState):
   if (target === undefined) return finish(state, interrupted(node, "não tem menu de destino"))
   const destination = graph.nodes.get(target)
   if (!destination) return finish(state, `Componente de destino não encontrado (ID ${target}).`)
-  state.messages.push(`Retorno ao menu${quoted(textOf(destination.data.data.title) ?? target)}.`)
+  const title = renderText(destination.data.data.title, state.variables).trim()
+  state.messages.push(`Retorno ao menu${quoted(title || target)}.`)
   return target
 }
 

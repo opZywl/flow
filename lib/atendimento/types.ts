@@ -71,6 +71,8 @@ export type FieldKind =
 
 export type ItemFieldKind = "text" | "textarea" | "checkbox" | "number"
 
+export type FieldSeverity = "error" | "warning"
+
 export interface ItemFieldSpec {
   key: string
   label: string
@@ -79,6 +81,8 @@ export interface ItemFieldSpec {
   min?: number
   max?: number
   step?: number
+  required?: FieldSeverity
+  requiredMessage?: string
 }
 
 export interface FieldSpec {
@@ -94,6 +98,7 @@ export interface FieldSpec {
   max?: number
   step?: number
   pattern?: string
+  formatWarning?: string
   itemFields?: ItemFieldSpec[]
   itemLabel?: string
   addLabel?: string

@@ -5,7 +5,8 @@ import { useStore, type ReactFlowState } from "reactflow"
 import { AlertTriangle, ChevronRight, Copy, Plus, Trash2, X } from "lucide-react"
 import { API_TYPES, MENU_TYPE, NOTE_TYPE, START_TYPE, expectedFieldTypes, getComponentColor, getComponentLabel, getDefinition, mirrorKeys, newTimeRule, weekDayOptions } from "@/lib/atendimento/catalog"
 import { isObject, nextOptionDigit, optionIndices } from "@/lib/atendimento/format"
-import type { AtendimentoNode, ComponentDefinition, FieldSpec, ItemFieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
+import { cleanNumberText, numberMessage, numberRule, numericText, parseNumber, type NumberRule } from "@/lib/atendimento/numbers"
+import type { AtendimentoNode, ComponentDefinition, FieldSeverity, FieldSpec, ItemFieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
 import { categoryTint, componentIcon, noteColor } from "./nodes/atendimento-node"
 import { ui } from "./ui"
@@ -13,13 +14,6 @@ import { ui } from "./ui"
 type Edge = "none" | "top" | "bottom" | "both"
 type OutputChange = { kind: "insert" | "remove"; index: number }
 type MenuEntry = { id: string; title: string }
-
-interface NumberRule {
-  integer: boolean
-  min?: number
-  max?: number
-  step?: number
-}
 
 interface WriteOptions {
   complete?: boolean
@@ -73,6 +67,9 @@ const iconDangerButton =
 const addButton =
   "inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-flow-border bg-flow-surface text-xs font-semibold text-flow-muted-strong transition hover:border-flow-accent/60 hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 disabled:pointer-events-none disabled:opacity-40"
 const invalidField = "border-flow-danger hover:border-flow-danger focus-visible:border-flow-danger focus-visible:ring-flow-danger/25"
+const warningField = "border-flow-warning hover:border-flow-warning focus-visible:border-flow-warning focus-visible:ring-flow-warning/25"
+const fieldTone: Record<FieldSeverity, string> = { error: invalidField, warning: warningField }
+const messageTone: Record<FieldSeverity, string> = { error: ui.error, warning: ui.warning }
 const toggleRow = "flex items-center gap-2.5 rounded-lg border border-flow-border bg-flow-surface px-3 transition hover:border-flow-accent/50"
 const toggleLabel = "min-w-0 flex-1 cursor-pointer break-words py-2.5 text-sm text-flow-fg"
 const checkbox = "h-4 w-4 shrink-0 cursor-pointer accent-flow-accent"
@@ -126,34 +123,8 @@ function itemName(label: string, noun: string, position: number): string {
   return `${label}, ${item} ${position}`
 }
 
-function numberRule({ min, max, step }: { min?: number; max?: number; step?: number }): NumberRule {
-  return { integer: step !== undefined && Number.isInteger(step), min, max, step }
-}
-
-function numberMessage({ integer, min, max }: NumberRule): string {
-  const kind = integer ? "um número inteiro" : "um número"
-  if (min !== undefined && max !== undefined) return `Informe ${kind} de ${min} a ${max}.`
-  if (min !== undefined) return `Informe ${kind} a partir de ${min}.`
-  if (max !== undefined) return `Informe ${kind} até ${max}.`
-  return `Informe ${kind}.`
-}
-
-function parseNumber(text: string, { integer, min, max }: NumberRule): number | undefined {
-  const trimmed = text.trim().replace(",", ".")
-  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(trimmed)) return undefined
-  const value = Number(trimmed)
-  if (!Number.isFinite(value) || (integer && !Number.isInteger(value))) return undefined
-  if ((min !== undefined && value < min) || (max !== undefined && value > max)) return undefined
-  return value
-}
-
-function numericText(text: string, rule: NumberRule): boolean {
-  return (rule.integer ? /^-?\d+$/ : /^-?\d+([.,]\d+)?$/).test(text) && parseNumber(text, rule) !== undefined
-}
-
-function cleanNumberText(text: string, rule: NumberRule): string {
-  const kept = text.replace(rule.integer ? /[^\d-]/g : /[^\d.,-]/g, "")
-  return rule.min === undefined || rule.min < 0 ? kept.replace(/(?!^)-/g, "") : kept.replace(/-/g, "")
+function missingRequired(spec: ItemFieldSpec, value: JsonValue | undefined): FieldSeverity | undefined {
+  return spec.required && spec.kind !== "checkbox" && spec.kind !== "number" && !textOf(value).trim() ? spec.required : undefined
 }
 
 function buildCurl(data: JsonObject): string {
@@ -516,6 +487,8 @@ function ItemInput({ id, spec, value, name, onChange }: {
       </div>
     )
   }
+  const missing = missingRequired(spec, value)
+  const problemId = `${id}-problem`
   return (
     <div className="min-w-0">
       <label htmlFor={id} className={cn(ui.label, "break-words")}>{spec.label}</label>
@@ -525,14 +498,26 @@ function ItemInput({ id, spec, value, name, onChange }: {
         <textarea
           id={id}
           aria-label={name}
-          className={cn(ui.textarea, "min-h-20 resize-y")}
+          aria-invalid={missing === "error" || undefined}
+          aria-describedby={missing ? problemId : undefined}
+          className={cn(ui.textarea, "min-h-20 resize-y", missing && fieldTone[missing])}
           placeholder={spec.placeholder}
           value={textOf(value)}
           onChange={(event) => onChange(event.target.value)}
         />
       ) : (
-        <input id={id} aria-label={name} className={ui.input} placeholder={spec.placeholder} value={textOf(value)} onChange={(event) => onChange(event.target.value)} />
+        <input
+          id={id}
+          aria-label={name}
+          aria-invalid={missing === "error" || undefined}
+          aria-describedby={missing ? problemId : undefined}
+          className={cn(ui.input, missing && fieldTone[missing])}
+          placeholder={spec.placeholder}
+          value={textOf(value)}
+          onChange={(event) => onChange(event.target.value)}
+        />
       )}
+      {missing && <p id={problemId} className={messageTone[missing]}>{spec.requiredMessage ?? "Preencha este campo."}</p>}
     </div>
   )
 }
@@ -659,8 +644,10 @@ function PairsEditor({ spec, data, edge, onChange }: {
       {indices.length === 0 && <p className={emptyNote}>{emptyList(noun)}</p>}
       {indices.map((index, position) => {
         const number = position + 1
-        const missing = fields.length > 0 && !textOf(data[`${fields[0].key}-${index}`]).trim()
-        const problemId = `${uid}-${index}-problem`
+        const problems = fields.flatMap((field, column) => {
+          const missing = missingRequired(field, data[`${field.key}-${index}`])
+          return missing ? [{ column, missing, id: `${uid}-${index}-${column}-problem`, text: field.requiredMessage ?? "Preencha este campo." }] : []
+        })
         return (
           <ItemCard
             key={index}
@@ -674,16 +661,16 @@ function PairsEditor({ spec, data, edge, onChange }: {
               {fields.map((field, column) => {
                 const key = `${field.key}-${index}`
                 const id = fieldId(index, column)
-                const invalid = column === 0 && missing
+                const problem = problems.find((entry) => entry.column === column)
                 return (
                   <div key={field.key} className="min-w-0">
                     <label htmlFor={id} className={ui.label}>{field.label}</label>
                     <input
                       id={id}
                       aria-label={itemName(field.label, noun, number)}
-                      aria-invalid={invalid || undefined}
-                      aria-describedby={invalid ? problemId : undefined}
-                      className={cn(ui.input, invalid && invalidField)}
+                      aria-invalid={problem?.missing === "error" || undefined}
+                      aria-describedby={problem?.id}
+                      className={cn(ui.input, problem && fieldTone[problem.missing])}
                       placeholder={field.placeholder}
                       value={textOf(data[key])}
                       onChange={(event) => onChange({ ...data, [key]: event.target.value })}
@@ -692,7 +679,7 @@ function PairsEditor({ spec, data, edge, onChange }: {
                 )
               })}
             </div>
-            {missing && <p id={problemId} className={ui.error}>Preencha este campo.</p>}
+            {problems.map((problem) => <p key={problem.id} id={problem.id} className={messageTone[problem.missing]}>{problem.text}</p>)}
           </ItemCard>
         )
       })}
@@ -992,7 +979,7 @@ function TimeRulesEditor({ label, value, onChange }: { label: string; value: Jso
                     onClick={() => update(index, { weekDays: weekDayOptions.map((entry) => entry.value).filter((entry) => entry === day.value ? !active : days.includes(entry)) })}
                     className={cn(
                       "h-8 rounded-md border text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30",
-                      active ? "border-flow-accent bg-flow-accent text-white" : "border-flow-border bg-flow-surface text-flow-muted-strong hover:border-flow-accent/50 hover:text-flow-fg",
+                      active ? "border-flow-accent-strong bg-flow-accent-strong text-white" : "border-flow-border bg-flow-surface text-flow-muted-strong hover:border-flow-accent/50 hover:text-flow-fg",
                     )}
                   >
                     {day.label}
@@ -1221,21 +1208,20 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
     if (spec.kind === "numberText") {
       const rule = numberRule(spec)
       const text = textOf(value)
-      const invalid = text !== "" && !numericText(text, rule)
-      const errorId = `${id}-error`
+      const outOfFormat = text.trim() !== "" && !numericText(text.trim(), rule)
+      const warningId = `${id}-warning`
       return (
         <Field key={spec.key} id={id} label={spec.label} hint={spec.hint}>
           <input
             id={id}
             inputMode={rule.integer ? "numeric" : "decimal"}
-            aria-invalid={invalid || undefined}
-            aria-describedby={describe(hintId, invalid && errorId)}
-            className={cn(ui.input, "tabular-nums", invalid && invalidField)}
+            aria-describedby={describe(hintId, outOfFormat && warningId)}
+            className={cn(ui.input, "tabular-nums", outOfFormat && warningField)}
             placeholder={spec.placeholder}
             value={text}
             onChange={(event) => setField(spec, cleanNumberText(event.target.value, rule))}
           />
-          {invalid && <p id={errorId} className={ui.error}>{numberMessage(rule)}</p>}
+          {outOfFormat && <p id={warningId} className={ui.warning}>{spec.formatWarning ?? numberMessage(rule)}</p>}
         </Field>
       )
     }

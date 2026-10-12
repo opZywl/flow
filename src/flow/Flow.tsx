@@ -827,7 +827,7 @@ function YenFlowBot({ isOpen, openRequest, onClose, onStart }: { isOpen: boolean
                 <p
                   className={cn(
                     "max-w-[85%] whitespace-pre-line break-words rounded-2xl px-3 py-2 text-sm leading-relaxed",
-                    message.role === "user" ? "rounded-br-md bg-flow-accent text-white" : "rounded-bl-md border border-flow-border bg-flow-soft text-flow-fg",
+                    message.role === "user" ? "rounded-br-md bg-flow-accent-strong text-white" : "rounded-bl-md border border-flow-border bg-flow-soft text-flow-fg",
                   )}
                 >
                   {message.content}

@@ -39,6 +39,7 @@ interface WorkflowBuilderProps {
 
 type Handlers = WorkflowActions & { undo: () => void; redo: () => void }
 type Size = { width: number; height: number }
+type Box = XYPosition & Size
 type ToolButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "type"> & { label: string; icon: LucideIcon; pressed?: boolean }
 
 const ConfigPanel = memo(NodeConfigPanel)
@@ -55,6 +56,14 @@ const CONNECTION_LINE_STYLE = { stroke: "rgb(var(--flow-accent))", strokeWidth: 
 const CANVAS_CLASS = String.raw`[&_.react-flow\_\_nodesselection-rect]:border-flow-accent/70 [&_.react-flow\_\_nodesselection-rect]:bg-flow-accent/10 [&_.react-flow\_\_selection]:border-flow-accent/70 [&_.react-flow\_\_selection]:bg-flow-accent/10`
 const MINIMAP_CLASS = "!m-3 overflow-hidden rounded-xl border border-flow-border !bg-flow-surface shadow-sm [&_path]:fill-flow-bg/70"
 const DEFAULT_NODE_SIZE: Size = { width: 280, height: 160 }
+const COLUMN_STEP = 360
+const ROW_STEP = 180
+const NODE_GAP = 40
+const VIEW_MARGIN = 24
+const PANEL_WIDTH = 320
+const SEARCH_COLUMNS = 12
+const SEARCH_ROWS = 24
+const OVERLAY_SELECTOR = ".react-flow__minimap, [data-canvas-overlay]"
 const NO_INVALID_NODES: ReadonlySet<string> = new Set()
 const ID_SEPARATOR = "\u0000"
 const CANVAS_HINTS: ReadonlyArray<readonly [string, string]> = [
@@ -70,6 +79,8 @@ const formatPoint = (point?: XYPosition | null) => (point ? `(${Math.round(point
 const isTypingTarget = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
 const minimapColor = (node: Node<AtendimentoData>) => (node.data.type === NOTE_TYPE ? noteColor(node.data.data.color) : getComponentColor(node.data.type))
 const minimapClass = (node: Node<AtendimentoData>) => (node.data.type === START_TYPE ? "fill-flow-success" : "")
+const overlaps = (first: Box, second: Box, gap: number) =>
+  first.x < second.x + second.width + gap && second.x < first.x + first.width + gap && first.y < second.y + second.height + gap && second.y < first.y + first.height + gap
 
 function translateCanvasAnnouncements(root: HTMLElement) {
   for (const [selector, text] of CANVAS_HINTS) {
@@ -123,7 +134,7 @@ const CanvasStatus = memo(function CanvasStatus({ container, count, start }: { c
   }, [container, screenToFlowPosition])
 
   return (
-    <div className={cn(ui.overlay, "pointer-events-none absolute bottom-3 left-3 z-10 flex max-w-[calc(100%_-_1.5rem)] items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-lg px-3 py-1.5 text-[11px] font-medium text-flow-muted shadow-sm")}>
+    <div data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute bottom-3 left-3 z-10 flex max-w-[calc(100%_-_1.5rem)] items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-lg px-3 py-1.5 text-[11px] font-medium text-flow-muted shadow-sm")}>
       <span>Componentes: <span className="text-flow-muted-strong">{count}</span></span>
       <span className="h-3 w-px shrink-0 bg-flow-border" aria-hidden />
       <span>Início <span className="text-flow-muted-strong">{formatPoint(start)}</span></span>
@@ -151,7 +162,7 @@ function IssuesPanel({ id, issues, nodes, onClose, onSelect }: {
   const Icon = tone.icon
 
   return (
-    <section id={id} aria-label="Validação do fluxo" className={cn(ui.overlay, "absolute left-1/2 top-3 z-20 flex max-h-[min(24rem,calc(100%_-_1.5rem))] w-[min(92%,30rem)] -translate-x-1/2 flex-col overflow-hidden", tone.frame)}>
+    <section id={id} aria-label="Validação do fluxo" data-canvas-overlay="" className={cn(ui.overlay, "absolute left-1/2 top-3 z-20 flex max-h-[min(24rem,calc(100%_-_1.5rem))] w-[min(92%,30rem)] -translate-x-1/2 flex-col overflow-hidden", tone.frame)}>
       <div className={cn("flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2", tone.header)}>
         <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold">
           <Icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -662,6 +673,56 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     return root ? translateCanvasAnnouncements(root) : undefined
   }, [])
 
+  const placeComponent = useCallback((): XYPosition => {
+    const anchor = findNode(panelId)
+    const element = canvas.current
+    const bounds = element?.getBoundingClientRect()
+    const reserved = panelId ? 0 : Math.min(PANEL_WIDTH, window.innerWidth * 0.9)
+    const right = (bounds ? bounds.right : 600) - reserved
+    const center = screenToFlowPosition({ x: ((bounds?.left ?? 0) + right) / 2, y: ((bounds?.top ?? 0) + (bounds?.bottom ?? 500)) / 2 })
+    const preferred = anchor
+      ? { x: anchor.position.x + COLUMN_STEP, y: anchor.position.y }
+      : { x: center.x - DEFAULT_NODE_SIZE.width / 2, y: center.y - DEFAULT_NODE_SIZE.height / 2 }
+    const overlays = Array.from(element?.querySelectorAll(OVERLAY_SELECTOR) ?? [], (overlay) => {
+      const rect = overlay.getBoundingClientRect()
+      const start = screenToFlowPosition({ x: rect.left, y: rect.top })
+      const end = screenToFlowPosition({ x: rect.right, y: rect.bottom })
+      return { x: start.x, y: start.y, width: end.x - start.x, height: end.y - start.y }
+    })
+    const obstacles = [...flowRef.current.nodes.map((node) => ({ ...node.position, ...(sizes[node.id] ?? DEFAULT_NODE_SIZE) })), ...overlays]
+    const free = (point: XYPosition) => !obstacles.some((box) => overlaps({ ...point, ...DEFAULT_NODE_SIZE }, box, NODE_GAP))
+    if (bounds) {
+      const start = screenToFlowPosition({ x: bounds.left + VIEW_MARGIN, y: bounds.top + VIEW_MARGIN })
+      const end = screenToFlowPosition({ x: right - VIEW_MARGIN, y: bounds.bottom - VIEW_MARGIN })
+      const inside = (point: XYPosition) => point.x >= start.x && point.y >= start.y && point.x + DEFAULT_NODE_SIZE.width <= end.x && point.y + DEFAULT_NODE_SIZE.height <= end.y
+      let best: { point: XYPosition; cost: number } | undefined
+      for (let column = -SEARCH_COLUMNS; column <= SEARCH_COLUMNS; column++) {
+        for (let row = -SEARCH_ROWS; row <= SEARCH_ROWS; row++) {
+          const point = { x: preferred.x + column * COLUMN_STEP, y: preferred.y + row * ROW_STEP }
+          if (!inside(point) || !free(point)) continue
+          const cost = Math.abs(column) * COLUMN_STEP * (column < 0 ? 1.5 : 1) + Math.abs(row) * ROW_STEP * (row < 0 ? 1.5 : 1)
+          if (!best || cost < best.cost) best = { point, cost }
+        }
+      }
+      if (best) return best.point
+    }
+    let point = preferred
+    for (let attempt = 0; attempt < 20 && !free(point); attempt++) point = { x: point.x, y: point.y + ROW_STEP }
+    return point
+  }, [findNode, panelId, screenToFlowPosition, sizes])
+
+  const revealNode = useCallback((id: string) => {
+    const area = canvas.current?.getBoundingClientRect()
+    const element = canvas.current?.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`)
+    const node = findNode(id)
+    if (!area || !element || !node) return
+    const box = element.getBoundingClientRect()
+    if (box.left >= area.left && box.top >= area.top && box.right <= area.right && box.bottom <= area.bottom) return
+    const { zoom } = getViewport()
+    void setCenter(node.position.x + box.width / zoom / 2, node.position.y + box.height / zoom / 2, { zoom, duration: 300 })
+    syncViewport(350)
+  }, [findNode, getViewport, setCenter, syncViewport])
+
   const addComponent = useCallback((type: string, position?: XYPosition) => {
     if (recovery) {
       toast({ title: "Edição pausada", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
@@ -669,27 +730,17 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     }
     if (!ensureApplied()) return
     try {
-      let point = position
-      if (!point) {
-        const anchor = findNode(panelId)
-        const bounds = canvas.current?.getBoundingClientRect()
-        point = anchor
-          ? { x: anchor.position.x + 360, y: anchor.position.y }
-          : screenToFlowPosition({ x: (bounds?.left || 0) + (bounds?.width || 600) / 2 - 140, y: (bounds?.top || 0) + (bounds?.height || 500) / 2 - 60 })
-        const nodes = flowRef.current.nodes
-        const occupied = (candidate: XYPosition) => nodes.some((node) => Math.abs(node.position.x - candidate.x) < 280 && Math.abs(node.position.y - candidate.y) < 140)
-        for (let attempt = 0; attempt < 20 && occupied(point); attempt++) point = { x: point.x, y: point.y + 180 }
-      }
-      const node = newNode(type, point, allocateId())
+      const node = newNode(type, position ?? placeComponent(), allocateId())
       commit((current) => ({ ...current, nodes: [...current.nodes, node] }))
       setPanelId(node.id)
       setSelectedNodes([node.id])
       setSelectedEdges([])
       setDrafts({})
+      if (!position) requestAnimationFrame(() => requestAnimationFrame(() => revealNode(node.id)))
     } catch (cause) {
       toast({ title: "Componente indisponível", description: (cause as Error).message, variant: "destructive" })
     }
-  }, [allocateId, commit, ensureApplied, findNode, panelId, recovery, screenToFlowPosition])
+  }, [allocateId, commit, ensureApplied, placeComponent, recovery, revealNode])
 
   const isValidConnection = useCallback((connection: Connection) => {
     const source = findNode(connection.source)
@@ -915,6 +966,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       ...sizes[node.id],
       selected: selected.has(node.id),
       deletable: node.data.type !== START_TYPE && node.deletable !== false,
+      ariaLabel: `${getComponentLabel(node.data.type)}, ID ${node.id}`,
     }))
   }, [flow.nodes, selectedNodes, sizes])
 
@@ -939,7 +991,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const nodeActions = useMemo(() => ({
     remove: (id: string) => {
       const active = document.activeElement
-      const fromNode = active instanceof HTMLElement && active.closest(".react-flow__node")?.getAttribute("data-id") === id
+      const owner = active instanceof HTMLElement ? active.closest(".react-flow__node")?.getAttribute("data-id") ?? active.closest("[data-node-toolbar]")?.getAttribute("data-node-toolbar") : undefined
+      const fromNode = owner === id
       removeNode(id)
       if (fromNode) requestAnimationFrame(() => canvas.current?.focus({ preventScroll: true }))
     },
@@ -1079,6 +1132,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             <button
               type="button"
               aria-label="Mostrar componentes"
+              data-canvas-overlay=""
               onClick={() => setShowLibrary(true)}
               className="absolute left-3 top-3 z-10 inline-flex h-9 items-center gap-1.5 rounded-xl border border-flow-border bg-flow-surface px-3 text-xs font-semibold text-flow-muted-strong shadow-sm transition hover:border-flow-accent/60 hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
             >

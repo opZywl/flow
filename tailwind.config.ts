@@ -71,6 +71,7 @@ const config: Config = {
           muted: "rgb(var(--flow-muted) / <alpha-value>)",
           "muted-strong": "rgb(var(--flow-muted-strong) / <alpha-value>)",
           accent: "rgb(var(--flow-accent) / <alpha-value>)",
+          "accent-strong": "rgb(var(--flow-accent-strong) / <alpha-value>)",
           success: "rgb(var(--flow-success) / <alpha-value>)",
           warning: "rgb(var(--flow-warning) / <alpha-value>)",
           danger: "rgb(var(--flow-danger) / <alpha-value>)",
