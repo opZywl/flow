@@ -90,6 +90,7 @@ const TEXT_ONLY: Partial<Record<ProviderId, RegExp>> = { openai: /^(o1-mini|o1-p
 const REFUSAL_EVENT = /"type"\s*:\s*"(?:response\.refusal\.|refusal")/
 const FAILED_EVENT = /"type"\s*:\s*"response\.failed"/
 const WATCH_TAIL = 48
+const NO_CREDITS = /insufficient_quota/i
 const EMPTY_FLOW = "O modelo não gerou nenhum componente para esta descrição."
 const PERMISSION_MESSAGE = /permission_error|does not have permission/i
 const KEY_MESSAGE = /api[ _-]?key|x-api-key|unauthori[sz]ed|authenticat|API_KEY_INVALID|invalid[ _-]?key|incorrect[ _-]?key/i
@@ -140,9 +141,16 @@ function newWatch(): StreamWatch {
   return { refusal: false, failed: false }
 }
 
+async function withoutQuotaRetry(response: Response): Promise<Response> {
+  const text = await response.text()
+  const status = NO_CREDITS.test(text) ? 402 : response.status
+  return new Response(text, { status, statusText: response.statusText, headers: response.headers })
+}
+
 function observe(watch: StreamWatch): typeof fetch {
   return async (input, init) => {
     const response = await fetch(input, init)
+    if (response.status === 429) return withoutQuotaRetry(response)
     if (!response.ok || !response.body) return response
     const decoder = new TextDecoder()
     let tail = ""

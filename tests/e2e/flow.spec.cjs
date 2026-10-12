@@ -650,6 +650,34 @@ test('local preview follows the chosen branch even after panning triggers an aut
   await expect(chat.getByText('Conversa finalizada.', { exact: true })).toBeVisible()
 })
 
+test('switching the AI provider keeps the recommended model and never breaks the page', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await open(page)
+  await page.getByRole('button', { name: 'Gerar com IA' }).first().click()
+  const dialog = page.getByRole('dialog')
+  const model = dialog.getByRole('combobox', { name: 'Modelo' })
+  const choose = async (name) => {
+    const radio = dialog.getByRole('radio', { name, exact: true })
+    await dialog.locator('label', { has: page.getByRole('radio', { name, exact: true }) }).click()
+    await expect(radio).toBeChecked()
+  }
+  await expect(model).toHaveText(/^GPT-6\.1 Sol/)
+  for (const [name, expected] of [['Claude', /^Claude Opus 5\.5/], ['Gemini', /^Gemini 3\.8 Flash/], ['Grok', /^Grok 4\.7/], ['ChatGPT', /^GPT-6\.1 Sol/], ['Claude', /^Claude Opus 5\.5/]]) {
+    await choose(name)
+    await expect(model).toHaveText(expected)
+  }
+  await model.click()
+  await page.getByRole('option', { name: /^Claude Sonnet 5\.5/ }).click()
+  await expect(model).toHaveText(/^Claude Sonnet 5\.5/)
+  await choose('Gemini')
+  await expect(model).toHaveText(/^Gemini 3\.8 Flash/)
+  await choose('Claude')
+  await expect(model).toHaveText(/^Claude Sonnet 5\.5/)
+  await expect(dialog).toBeVisible()
+  expect(errors).toEqual([])
+})
+
 test('design system selects open, list the options and keep the choice in the panel and in the AI dialog', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Todas', exact: true }).click()

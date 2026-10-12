@@ -177,6 +177,32 @@ test('NDJSON sem result, com linhas inválidas ou progresso fora do contrato vir
   assert.deepEqual(progress, [])
 })
 
+test('queda da conexão depois do progresso vira conexão interrompida, e o cancelamento continua rejeitando', async () => {
+  const progress = []
+  let step = 0
+  const broken = new ReadableStream({
+    pull(controller) {
+      if (step++ === 0) controller.enqueue(new TextEncoder().encode(ndjson([{ type: 'progress', progress: { stage: 'gerando', round: 1, maxRounds: 3, nodes: 2, edges: 1 } }])))
+      else controller.error(new TypeError('network error'))
+    },
+  })
+  serve(broken, { status: 200, headers: { 'content-type': 'application/x-ndjson' } })
+  const out = await client.requestGeneration(BASE, signal(), (value) => progress.push(value))
+  assert.equal(out.ok, false)
+  assert.equal(out.rejection.failure.title, 'A conexão foi interrompida antes do fim da geração.')
+  assert.equal(progress.length, 1)
+
+  const controller = new AbortController()
+  const cancelled = new ReadableStream({
+    pull(stream) {
+      controller.abort()
+      stream.error(new DOMException('Aborted', 'AbortError'))
+    },
+  })
+  serve(cancelled, { status: 200, headers: { 'content-type': 'application/x-ndjson' } })
+  await assert.rejects(client.requestGeneration(BASE, controller.signal, () => {}))
+})
+
 test('falhas da rota chegam com código e campo do diálogo, em NDJSON e em JSON', async () => {
   serve(ndjson([{ type: 'result', result: { success: false, code: 'invalid_key', error: 'A chave da API foi recusada.', details: 'Confira a chave.' } }]), { status: 200, headers: { 'content-type': 'application/x-ndjson' } })
   let out = await client.requestGeneration(BASE, signal(), () => {})

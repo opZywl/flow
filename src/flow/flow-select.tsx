@@ -71,6 +71,7 @@ export function FlowSelect({
     <SelectPrimitive.Root
       value={inner}
       onValueChange={(next) => {
+        if (next === "") return
         const outer = toOuter(next)
         if (outer !== value) onValueChange(outer)
       }}
@@ -80,9 +81,9 @@ export function FlowSelect({
         id={id}
         aria-describedby={describedBy}
         aria-invalid={isInvalid || undefined}
-        className={cn(ui.select, trigger, !isInvalid && openTrigger, className)}
+        className={cn(ui.select, trigger, !isInvalid && openTrigger, !selected && "text-flow-muted", className)}
       >
-        <SelectPrimitive.Value placeholder={placeholder}>{selected?.label}</SelectPrimitive.Value>
+        <SelectPrimitive.Value placeholder={placeholder}>{selected ? selected.label : (placeholder ?? "")}</SelectPrimitive.Value>
         <SelectPrimitive.Icon asChild>
           <ChevronDown
             className="h-4 w-4 shrink-0 text-flow-muted transition-transform duration-150 group-data-[state=open]:rotate-180 motion-reduce:transition-none"

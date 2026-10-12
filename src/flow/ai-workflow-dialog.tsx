@@ -404,6 +404,7 @@ function readEvent(line: string, onProgress: (progress: GenerationProgress) => v
 
 async function readEvents(
   body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
   onProgress: (progress: GenerationProgress) => void,
 ): Promise<Outcome> {
   const reader = body.getReader()
@@ -420,6 +421,8 @@ async function readEvents(
       for (const line of lines) outcome = readEvent(line, onProgress) ?? outcome
     }
     outcome = readEvent(buffer + decoder.decode(), onProgress) ?? outcome
+  } catch (error) {
+    if (signal.aborted) throw error
   } finally {
     reader.releaseLock()
   }
@@ -439,7 +442,7 @@ async function requestGeneration(
     signal,
   })
   const type = response.headers.get("content-type") ?? ""
-  if (response.ok && response.body && type.includes("ndjson")) return readEvents(response.body, onProgress)
+  if (response.ok && response.body && type.includes("ndjson")) return readEvents(response.body, signal, onProgress)
   return readOutcome(await response.json().catch(() => null), response.status)
 }
 
@@ -671,7 +674,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
   const info = PROVIDERS.find((entry) => entry.id === provider) ?? PROVIDERS[0]
   const apiKey = keys[provider] ?? ""
   const listed = fetched[provider]?.models
-  const model = models[provider] ?? info.presets[0].id
+  const model = models[provider] || info.presets[0].id
   const currentModelName = modelName(info, model, listed)
   const vision = modelVision(info, model, listed)
   const imageBlocked = vision === false
@@ -1488,6 +1491,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                   </label>
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <FlowSelect
+                      key={provider}
                       id={idFor("model")}
                       value={model}
                       onValueChange={changeModel}

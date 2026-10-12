@@ -625,6 +625,14 @@ for (const [provider, status, body, code, error, details] of PROVIDER_ERRORS) {
   })
 }
 
+test('sem créditos na OpenAI responde na hora, sem repetir a chamada', async () => {
+  responder = () => errorResponse(429, { error: { message: 'You exceeded your current quota, please check your plan and billing details.', type: 'insufficient_quota', code: 'insufficient_quota' } }, { 'retry-after-ms': '0' })
+  const { data } = await run(payload('openai'))
+  assert.equal(data.code, 'billing')
+  assert.equal(data.error, 'Saldo insuficiente na conta do provedor.')
+  assert.equal(calls.length, 1)
+})
+
 test('repete chamadas com limite temporário e segue quando o provedor volta', async () => {
   responder = (call, index) => index === 0 ? errorResponse(429, { error: { message: 'Rate limit reached', type: 'requests', code: 'rate_limit_exceeded' } }, { 'retry-after-ms': '0' }) : reply.openai(JSON.stringify(RI))
   const { data } = await run(payload('openai'))

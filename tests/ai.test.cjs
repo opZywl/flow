@@ -372,14 +372,14 @@ test('values become the platform type of each field kind', () => {
 
 test('invalid values keep the default and explain the accepted format', () => {
   const cases = [
-    ['apptCustomerIntake', { askName: 'talvez' }, 'askName', true, 'O valor “talvez” não vale para askName e o padrão foi mantido. Use “true” ou “false”.'],
-    ['languageRouter', { fallback: 'francês' }, 'fallback', 'pt', 'O valor “francês” não vale para fallback e o padrão foi mantido. Use “pt” (Português), “en” (Inglês), “es” (Espanhol).'],
-    ['crmActivity', { dueInDays: '-1' }, 'dueInDays', 1, 'O valor “-1” não vale para dueInDays e o padrão foi mantido. Use um número inteiro a partir de 0.'],
-    ['aiAgentBlock', { maxTurns: '2,5' }, 'maxTurns', 15, 'O valor “2,5” não vale para maxTurns e o padrão foi mantido. Use um número inteiro a partir de 0.'],
-    ['whatsappCall', { ttlMinutes: 'meia hora' }, 'ttlMinutes', '', 'O valor “meia hora” não vale para ttlMinutes e o padrão foi mantido. Use um número inteiro a partir de 1.'],
-    ['consulta_api', { api_test_values: '[1,2]' }, 'api_test_values', {}, 'O valor “[1,2]” não vale para api_test_values e o padrão foi mantido. Use um objeto JSON.'],
-    ['solicitar_dados', { headers: 'Authorization: x' }, 'headers', [], 'O valor “Authorization: x” não vale para headers e o padrão foi mantido. Use uma lista JSON.'],
-    ['envio_arquivo', { url: 'ftp://arquivos/x.pdf' }, 'url', '', 'O valor “ftp://arquivos/x.pdf” de url não é uma URL http(s) e foi descartado.'],
+    ['apptCustomerIntake', { askName: 'talvez' }, 'askName', true, 'O valor “talvez” não vale para “Pedir nome” (askName) e o padrão foi mantido. Use “true” ou “false”.'],
+    ['languageRouter', { fallback: 'francês' }, 'fallback', 'pt', 'O valor “francês” não vale para “Idioma padrão” (fallback) e o padrão foi mantido. Use “pt” (Português), “en” (Inglês), “es” (Espanhol).'],
+    ['crmActivity', { dueInDays: '-1' }, 'dueInDays', 1, 'O valor “-1” não vale para “Prazo em dias” (dueInDays) e o padrão foi mantido. Use um número inteiro a partir de 0.'],
+    ['aiAgentBlock', { maxTurns: '2,5' }, 'maxTurns', 15, 'O valor “2,5” não vale para “Máximo de turnos” (maxTurns) e o padrão foi mantido. Use um número inteiro a partir de 0.'],
+    ['whatsappCall', { ttlMinutes: 'meia hora' }, 'ttlMinutes', '', 'O valor “meia hora” não vale para “Validade do botão (minutos)” (ttlMinutes) e o padrão foi mantido. Use um número inteiro a partir de 1.'],
+    ['consulta_api', { api_test_values: '[1,2]' }, 'api_test_values', {}, 'O valor “[1,2]” não vale para “Valores de teste” (api_test_values) e o padrão foi mantido. Use um objeto JSON.'],
+    ['solicitar_dados', { headers: 'Authorization: x' }, 'headers', [], 'O valor “Authorization: x” não vale para “Cabeçalhos” (headers) e o padrão foi mantido. Use uma lista JSON.'],
+    ['envio_arquivo', { url: 'ftp://arquivos/x.pdf' }, 'url', '', 'O valor “ftp://arquivos/x.pdf” de “URL do arquivo” (url) não é uma URL http(s) e foi descartado.'],
     ['waiting_time', { waiting_time: '90 segundos' }, 'waiting_time', '', null],
   ]
   for (const [type, config, key, value, message] of cases) {
@@ -392,7 +392,7 @@ test('invalid values keep the default and explain the accepted format', () => {
   const rules = configure('timeConditions', { timeRules: '[{"weekDays":["funday"],"startTime":"08:00","endTime":"18:00"}]' })
   assert.equal(rules.data.timeRules.length, 1)
   assert.deepEqual(rules.data.timeRules[0].weekDays, ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
-  assert.match(rules.notes[0].message, /^O valor “.+” não vale para timeRules e o padrão foi mantido\. Use uma lista JSON de regras/)
+  assert.match(rules.notes[0].message, /^O valor “.+” não vale para “Horários de atendimento” \(timeRules\) e o padrão foi mantido\. Use uma lista JSON de regras/)
 })
 
 test('unknown keys are discarded with a warning that lists the accepted keys', () => {
@@ -1050,13 +1050,13 @@ test('required keys left empty are sent back to the model once, without repeatin
     node('fim', 'finalizar'),
   ], [edge('inicio', '', 'espera'), edge('espera', '', 'crm'), edge('crm', 'Sucesso', 'msg'), edge('msg', '', 'fim')]))
   assert.deepEqual(assembled.notes.map(note => [note.scope, note.riId, note.message]), [
-    ['ia', 'espera', 'Preencha customFields (Salvar resposta no campo), que é obrigatório.'],
-    ['ia', 'crm', 'Preencha successMessage (Mensagem de sucesso), que é obrigatório.'],
-    ['ia', 'crm', 'Preencha errorMessage (Mensagem de erro), que é obrigatório.'],
+    ['ia', 'espera', 'Preencha “Salvar resposta no campo” (customFields), que é obrigatório.'],
+    ['ia', 'crm', 'Preencha “Mensagem de sucesso” (successMessage), que é obrigatório.'],
+    ['ia', 'crm', 'Preencha “Mensagem de erro” (errorMessage), que é obrigatório.'],
   ])
   const evaluation = evaluateRi(flowOf([node('espera', 'waitForAnswer', { logToActivity: 'sim' }), node('fim', 'finalizar')], [edge('inicio', '', 'espera'), edge('espera', '', 'fim')]), { now: NOW })
   assert.equal(needsCorrection(evaluation), true)
-  assert.ok(evaluation.pending.includes('[espera] Aguardando Mensagem: Preencha customFields (Salvar resposta no campo), que é obrigatório.'))
+  assert.ok(evaluation.pending.includes('[espera] Aguardando Mensagem: Preencha “Salvar resposta no campo” (customFields), que é obrigatório.'))
   assert.equal(reviewFlow(assembled).filter(issue => issue.riId === 'msg' && issue.message.startsWith('Preencha')).length, 1)
 })
 

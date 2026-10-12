@@ -203,7 +203,7 @@ function requireKeys(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, 
       if (!field || UNCHECKED_KINDS.has(field.kind) || !accepted.includes(key)) continue
       if (flagged.has(JSON.stringify([node.id, key])) || !isEmptyValue(node.data.data[key])) continue
       const origin = riIds.get(node.id)
-      notes.push({ level: "warning", scope: "ia", message: `Preencha ${key} (${field.label}), que é obrigatório.`, nodeId: node.id, ...(origin ? { riId: origin } : {}), type })
+      notes.push({ level: "warning", scope: "ia", message: `Preencha ${quote(field.label)} (${key}), que é obrigatório.`, nodeId: node.id, ...(origin ? { riId: origin } : {}), type })
     }
   }
 }

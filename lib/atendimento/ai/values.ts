@@ -574,8 +574,8 @@ export function matchOption(field: FieldSpec, raw: string, type: string): string
   return undefined
 }
 
-function invalidValue(raw: string, key: string, accepted: string): string {
-  return `O valor ${quote(clip(toText(raw), 80))} não vale para ${key} e o padrão foi mantido. Use ${accepted}.`
+function invalidValue(raw: string, field: FieldSpec, accepted: string): string {
+  return `O valor ${quote(clip(toText(raw), 80))} não vale para ${quote(field.label)} (${field.key}) e o padrão foi mantido. Use ${accepted}.`
 }
 
 function writeIndexed(data: JsonObject, rows: ReadonlyArray<Record<string, string>>): void {
@@ -644,7 +644,7 @@ export function configureNode(type: string, config: readonly RiConfigEntry[], co
       data[field.key] = value
       for (const mirror of mirrorKeys(field)) data[mirror] = value
     }
-    const reject = (accepted: string) => notes.push({ level: "warning", message: invalidValue(source, field.key, accepted) })
+    const reject = (accepted: string) => notes.push({ level: "warning", message: invalidValue(source, field, accepted) })
     switch (field.kind) {
       case "text":
       case "textarea": {
@@ -665,7 +665,7 @@ export function configureNode(type: string, config: readonly RiConfigEntry[], co
       }
       case "url": {
         const url = toUrl(source)
-        if (url === undefined) notes.push({ level: "warning", message: `O valor ${quote(clip(toText(source), 80))} de ${field.key} não é uma URL http(s) e foi descartado.` })
+        if (url === undefined) notes.push({ level: "warning", message: `O valor ${quote(clip(toText(source), 80))} de ${quote(field.label)} (${field.key}) não é uma URL http(s) e foi descartado.` })
         else set(url)
         break
       }
