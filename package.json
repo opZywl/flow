@@ -72,7 +72,7 @@
     "html2canvas": "^1.4.1",
     "input-otp": "latest",
     "lucide-react": "^0.454.0",
-    "next": "15.2.9",
+    "next": "16.4.0",
     "next-themes": "latest",
     "react": "latest",
     "react-day-picker": "latest",
