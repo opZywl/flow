@@ -2,10 +2,18 @@ require('../../scripts/register-typescript.cjs')
 const { test, expect } = require('@playwright/test')
 const fs = require('node:fs')
 const path = require('node:path')
-const { createEdge, newFlow, newNode } = require('../../lib/atendimento/format.ts')
+const { createEdge, newFlow, newNode, outputHandles, outputLabel } = require('../../lib/atendimento/format.ts')
+const { START_TYPE, categories, componentCatalog } = require('../../lib/atendimento/catalog.ts')
 
 const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging', 'deletable']
 const EDGE_KEYS = ['type', 'source', 'sourceHandle', 'target', 'id']
+const DATA_KEYS = ['type', 'data', 'html']
+const CREATED_AT = /"created_at": "[^"]*"/
+const PALETTE = categories.flatMap(category => componentCatalog.filter(entry => entry.category === category.id && entry.nativeType !== START_TYPE))
+const FILLED = {
+  envio_pergunta: { template: 'Mensagem criada no editor' },
+  envio_mensagem: { title: 'Escolha uma opção', 'text-1': 'Primeira opção' },
+}
 
 function sample() {
   const flow = newFlow(new Date('2026-01-15T12:00:00.000Z'))
@@ -20,6 +28,17 @@ function sample() {
   return flow
 }
 
+function connectedStart(name) {
+  const flow = newFlow(new Date('2026-01-15T12:00:00.000Z'))
+  flow.name = name
+  flow.nodes[0].position = { x: 30, y: 60 }
+  const message = newNode('envio_pergunta', { x: 350, y: 60 }, '2')
+  message.data.data.template = 'Mensagem inicial'
+  flow.nodes.push(message, newNode('finalizar', { x: 680, y: 60 }, '3'))
+  flow.edges = [createEdge([], 'inicio', 'output-0', '2'), createEdge([], '2', 'output-0', '3')]
+  return flow
+}
+
 async function open(page) {
   await page.goto('/flow')
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
@@ -30,20 +49,35 @@ async function upload(page, flow) {
   await expect(page.getByLabel('Nome do fluxo')).toHaveValue(flow.name)
 }
 
-async function exported(page) {
+async function exportedText(page) {
   const before = Date.now()
   const waiting = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportar JSON', exact: true }).click()
   const download = await waiting
-  const json = JSON.parse(fs.readFileSync(await download.path(), 'utf8'))
+  const text = fs.readFileSync(await download.path(), 'utf8')
+  const json = JSON.parse(text)
   const stamp = Date.parse(json.created_at)
   expect(stamp).toBeGreaterThanOrEqual(before - 1000)
   expect(stamp).toBeLessThanOrEqual(Date.now() + 1000)
   expect(download.suggestedFilename()).toBe(`${json.name}-${json.created_at.slice(0, 10)}.json`)
-  return json
+  return text
+}
+
+async function exported(page) {
+  return JSON.parse(await exportedText(page))
+}
+
+async function edgesFrom(page, source) {
+  return page.evaluate(id => JSON.parse(localStorage.getItem('workflow')).edges.filter(edge => edge.source === id).map(edge => [edge.sourceHandle, edge.target, edge.id]).sort(), source)
 }
 
 const withoutStamp = flow => ({ ...flow, created_at: 'ignorado' })
+const withoutRuleIds = node => {
+  const rules = node.data.data.timeRules
+  if (!Array.isArray(rules)) return node
+  for (const rule of rules) expect(rule.id).toMatch(/^rule-\d+$/)
+  return { ...node, data: { ...node.data, data: { ...node.data.data, timeRules: rules.map(rule => ({ ...rule, id: 'regra' })) } } }
+}
 
 test('import and download preserve every field and render all edges without executing HTML', async ({ page }) => {
   const errors = []
@@ -118,6 +152,137 @@ test('editing a menu updates native fields and removing options preserves the co
   await expect(page.getByLabel('Validação do fluxo')).toContainText('Componente sem conexões; ele não será executado.')
 })
 
+test('the library lists the 61 palette components in catalog order, all enabled', async ({ page }) => {
+  expect(PALETTE).toHaveLength(61)
+  await open(page)
+  await page.getByRole('button', { name: 'Todas', exact: true }).click()
+  const library = page.getByLabel('Biblioteca de componentes')
+  const buttons = library.locator('section button')
+  await expect(buttons).toHaveCount(PALETTE.length)
+  const tiles = await buttons.evaluateAll(elements => elements.map(element => ({
+    name: element.getAttribute('aria-label'),
+    draggable: element.getAttribute('draggable'),
+    describedBy: element.getAttribute('aria-describedby'),
+    disabled: element.disabled,
+  })))
+  expect(tiles).toEqual(PALETTE.map(entry => ({ name: entry.label, draggable: 'true', describedBy: null, disabled: false })))
+  const headings = await library.locator('section h3').allTextContents()
+  expect(headings).toEqual(categories.filter(category => PALETTE.some(entry => entry.category === category.id)).map(category => category.label))
+})
+
+test('every palette component created in the editor exports the platform node shape, key order and defaults', async ({ page }) => {
+  test.setTimeout(240000)
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await open(page)
+  const base = connectedStart('Paleta completa')
+  await upload(page, base)
+  await page.getByRole('button', { name: 'Todas', exact: true }).click()
+  const library = page.getByLabel('Biblioteca de componentes')
+  const buttons = library.locator('section button')
+  const panel = page.getByLabel('Configuração do componente')
+  for (const [index, entry] of PALETTE.entries()) {
+    await buttons.nth(index).click()
+    await expect(panel).toContainText(`ID ${index + 4} · ${entry.nativeType}`)
+    if (entry.nativeType === 'envio_pergunta') await page.getByLabel('Mensagem', { exact: true }).fill(FILLED.envio_pergunta.template)
+    if (entry.nativeType === 'envio_mensagem') {
+      await page.getByLabel('Mensagem do menu', { exact: true }).fill(FILLED.envio_mensagem.title)
+      await page.getByLabel('Título da opção 1').fill(FILLED.envio_mensagem['text-1'])
+    }
+  }
+  await expect(library.getByRole('status')).not.toContainText('Envie um JSON')
+  await expect(page.locator('.react-flow__node')).toHaveCount(base.nodes.length + PALETTE.length)
+  await expect(page.locator('.react-flow__edge')).toHaveCount(base.edges.length)
+  await expect(page.getByRole('button', { name: 'Fluxo validado', exact: true })).toBeVisible()
+
+  const text = await exportedText(page)
+  const json = JSON.parse(text)
+  expect(text).toBe(JSON.stringify(json, null, 2))
+  expect(json.nodes.slice(0, base.nodes.length)).toEqual(base.nodes)
+  expect(json.edges).toEqual(base.edges)
+  const cards = new Map(await page.locator('.react-flow__node').evaluateAll(elements => elements.map(element => [element.getAttribute('data-id'), {
+    text: element.textContent,
+    targets: element.querySelectorAll('.react-flow__handle.target').length,
+    outputs: Array.from(element.querySelectorAll('.react-flow__handle.source'), handle => [handle.getAttribute('data-handleid'), handle.parentElement.textContent.trim()]),
+  }])))
+  for (const [index, entry] of PALETTE.entries()) {
+    const id = String(index + 4)
+    const node = json.nodes[base.nodes.length + index]
+    const expected = newNode(entry.nativeType, node.position, id)
+    Object.assign(expected.data.data, FILLED[entry.nativeType] || {})
+    expect(Object.keys(node), entry.label).toEqual(NODE_KEYS)
+    expect(Object.keys(node.data), entry.label).toEqual(DATA_KEYS)
+    expect(Object.keys(node.data.data), entry.label).toEqual(Object.keys(expected.data.data))
+    expect(withoutRuleIds(node), entry.label).toEqual(withoutRuleIds(expected))
+    const card = cards.get(id)
+    expect(card.text, entry.label).toContain(entry.label)
+    expect(card.targets, entry.label).toBe(entry.nativeType === 'note' ? 0 : 1)
+    expect(card.outputs, entry.label).toEqual(outputHandles(node).map(handle => [handle, outputLabel(node, handle)]))
+  }
+
+  await upload(page, { ...json, name: 'Paleta reimportada' })
+  const again = await exported(page)
+  expect(withoutStamp({ ...again, name: json.name })).toEqual(withoutStamp(json))
+  expect(errors).toEqual([])
+})
+
+test('notes never take part in connections', async ({ page }) => {
+  await open(page)
+  const flow = newFlow()
+  flow.name = 'Fluxo com nota'
+  flow.nodes[0].position = { x: 40, y: 80 }
+  const memo = newNode('note', { x: 420, y: 40 }, '2')
+  flow.nodes.push(memo, newNode('finalizar', { x: 420, y: 320 }, '3'))
+  await upload(page, flow)
+  const note = page.locator('.react-flow__node[data-id="2"]')
+  await expect(note).toContainText('Clique para escrever')
+  await expect(note.locator('.react-flow__handle')).toHaveCount(0)
+  const source = page.locator('.react-flow__node[data-id="inicio"] .react-flow__handle.source')
+  await source.dragTo(note)
+  await expect(page.locator('.react-flow__edge')).toHaveCount(0)
+  await source.dragTo(page.locator('.react-flow__node[data-id="3"] .react-flow__handle.target'))
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Fluxo validado', exact: true }).click()
+  await expect(page.getByLabel('Validação do fluxo')).toContainText('Estrutura, campos e conexões prontos para exportar')
+  const json = await exported(page)
+  expect(json.edges).toEqual([createEdge([], 'inicio', 'output-0', '3')])
+  expect(json.nodes[1]).toEqual(memo)
+})
+
+test('removing a weighted path or adding an agent exit moves the connections with the outputs', async ({ page }) => {
+  await open(page)
+  const flow = newFlow()
+  flow.name = 'Saídas dinâmicas'
+  flow.nodes[0].position = { x: 20, y: 20 }
+  const random = newNode('randomizer', { x: 20, y: 170 }, '2')
+  random.data.data.paths = [{ label: 'Caminho A', weight: 40 }, { label: 'Caminho B', weight: 30 }, { label: 'Caminho C', weight: 30 }]
+  const agent = newNode('aiAgentBlock', { x: 20, y: 520 }, '5')
+  Object.assign(agent.data.data, { generative_ai: 'agente-1', generativeAiName: 'Agente de teste', exits: [{ name: 'Resolvido', when: 'Quando o pedido for resolvido', requireFields: false }] })
+  flow.nodes.push(random, newNode('finalizar', { x: 380, y: 20 }, '3'), newNode('finalizar', { x: 380, y: 200 }, '4'), agent, newNode('finalizar', { x: 380, y: 420 }, '6'), newNode('finalizar', { x: 380, y: 620 }, '7'))
+  for (const [source, handle, target] of [['inicio', 'output-0', '2'], ['2', 'output-0', '3'], ['2', 'output-1', '4'], ['2', 'output-2', '5'], ['5', 'output-0', '6'], ['5', 'output-1', '7']]) flow.edges.push(createEdge(flow.edges, source, handle, target))
+  await upload(page, flow)
+  await expect(page.getByRole('button', { name: 'Fluxo validado', exact: true })).toBeVisible()
+
+  await page.locator('.react-flow__node[data-id="2"]').click()
+  await page.getByRole('button', { name: 'Remover caminho 2', exact: true }).click()
+  await expect(page.locator('.react-flow__node[data-id="2"] .react-flow__handle.source')).toHaveCount(2)
+  await expect.poll(() => edgesFrom(page, '2')).toEqual([['output-0', '3', 'xy-edge__2output-0-3'], ['output-1', '5', 'xy-edge__2output-1-5']])
+
+  await page.locator('.react-flow__node[data-id="5"]').click()
+  await page.getByRole('button', { name: 'Adicionar saída', exact: true }).click()
+  await expect(page.locator('.react-flow__node[data-id="5"] .react-flow__handle.source')).toHaveCount(3)
+  await expect.poll(() => edgesFrom(page, '5')).toEqual([['output-0', '6', 'xy-edge__5output-0-6'], ['output-2', '7', 'xy-edge__5output-2-7']])
+  await page.getByRole('button', { name: '2 pendências', exact: true }).click()
+  const issues = page.getByLabel('Validação do fluxo')
+  await expect(issues).toContainText('Conecte a saída “Saída 2”.')
+  await expect(issues).toContainText('Saída 2 do agente: informe o nome.')
+
+  await page.getByRole('button', { name: 'Desfazer', exact: true }).click()
+  await expect.poll(() => edgesFrom(page, '5')).toEqual([['output-0', '6', 'xy-edge__5output-0-6'], ['output-1', '7', 'xy-edge__5output-1-7']])
+  await page.getByRole('button', { name: 'Desfazer', exact: true }).click()
+  await expect.poll(() => edgesFrom(page, '2')).toEqual([['output-0', '3', 'xy-edge__2output-0-3'], ['output-1', '4', 'xy-edge__2output-1-4'], ['output-2', '5', 'xy-edge__2output-2-5']])
+})
+
 test('all 61 palette entries are searchable and every one creates a component', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Todas', exact: true }).click()
@@ -167,19 +332,24 @@ test('malformed imports and unapplied JSON edits do not overwrite the flow', asy
 
 const referenceFiles = (process.env.FLOW_REFERENCE || '').split(path.delimiter).map(file => file.trim()).filter(Boolean)
 for (const [index, file] of (referenceFiles.length ? referenceFiles : ['']).entries()) {
-  test(`reference file ${index + 1}: every node and edge survives the browser round trip`, async ({ page }) => {
+  test(`reference file ${index + 1}: every node and edge survives the browser round trip byte for byte`, async ({ page }) => {
     test.skip(!file, `Defina FLOW_REFERENCE com um ou mais arquivos JSON, separados por "${path.delimiter}".`)
     test.skip(!fs.existsSync(file), `Arquivo ${index + 1} de FLOW_REFERENCE não encontrado.`)
+    const errors = []
+    page.on('pageerror', error => errors.push(error.message))
     await open(page)
     const content = fs.readFileSync(file, 'utf8')
-    const reference = JSON.parse(content.charCodeAt(0) === 0xfeff ? content.slice(1) : content)
+    const raw = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
+    const reference = JSON.parse(raw)
     await page.getByLabel('Importar arquivo JSON').setInputFiles(file)
     await expect(page.getByLabel('Nome do fluxo')).toHaveValue(reference.name)
     await expect(page.locator('.react-flow__node')).toHaveCount(reference.nodes.length)
     await expect(page.locator('.react-flow__edge')).toHaveCount(reference.edges.length)
     await expect(page.getByRole('button', { name: 'Fluxo validado' })).toBeVisible()
-    const json = await exported(page)
-    expect(withoutStamp(json)).toEqual(withoutStamp(reference))
+    const text = await exportedText(page)
+    expect(withoutStamp(JSON.parse(text))).toEqual(withoutStamp(reference))
+    expect(text.replace(CREATED_AT, '')).toBe(raw.replace(CREATED_AT, ''))
+    expect(errors).toEqual([])
   })
 }
 

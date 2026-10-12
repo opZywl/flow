@@ -1,5 +1,5 @@
-name: Component support
-description: Enable a palette component that is still marked as "sem JSON"
+name: Component update
+description: A platform component changed, or the platform has a component the editor does not know yet
 labels: [component]
 body:
   - type: input
@@ -7,6 +7,13 @@ body:
     attributes:
       label: Component
       placeholder: Enviar Arquivo
+    validations:
+      required: true
+  - type: textarea
+    id: difference
+    attributes:
+      label: What is different
+      description: New, renamed or removed fields, a different number of outputs, or a component missing from the library.
     validations:
       required: true
   - type: textarea

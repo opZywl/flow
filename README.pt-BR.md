@@ -50,12 +50,12 @@ IDs e o mesmo padrão de conexões.
 
 | Na tela | O que faz |
 |---|---|
-| biblioteca | todos os componentes da plataforma por categoria, com busca; clique ou arraste para adicionar |
+| biblioteca | os 61 componentes da paleta por categoria, com busca; clique ou arraste para adicionar |
 | canvas | conexões com regras (uma entrada por componente, um destino por saída), seleção múltipla, desfazer e refazer, minimapa |
 | componentes | resumo de cada etapa, saídas com nome e botão de remover ao passar o mouse |
-| painel | campos de cada componente, opções do menu, horários, campos técnicos e o JSON completo |
+| painel | campos de cada componente na ordem da plataforma, com editores para opções do menu, horários, caminhos com peso, condições e listas, além dos campos técnicos e do JSON completo |
 | validação | pendências ao vivo; cada uma leva ao componente que precisa de atenção |
-| prévia | conversa simulada com menus, respostas, resultados de API e horários, sem chamar a plataforma |
+| prévia | conversa simulada com os 62 componentes, em que você escolhe o resultado de cada integração, sem chamar a plataforma |
 | importação | JSON de Atendimento, fluxos antigos deste editor e geração por IA |
 | tema | claro ou escuro, com a cor de destaque escolhida em Cores |
 
@@ -64,22 +64,64 @@ IDs e o mesmo padrão de conexões.
 
 ## Compatibilidade com o JSON de Atendimento
 
-O formato vem de um arquivo exportado pela própria plataforma, e esse arquivo é
-a única fonte que o editor segue:
+O formato vem de arquivos exportados pela própria plataforma, e esses arquivos
+são a única fonte que o editor segue:
 
 - envelope com `name`, `description`, `service_type`, `created_at`, `nodes`, `edges` e `viewport`
-- componentes como `type: "custom"` com `data.type`, `data.data` e `data.html`; o início é sempre `inicio` e os demais recebem IDs numéricos sequenciais
+- componentes com `data.type`, `data.data` e `data.html`, gravados como `type: "custom"`, exceto a Nota (`"note"`) e o Menu de Opções API (`"apiOptionsMenu"`), exatamente como a plataforma grava; o início é sempre `inicio` e os demais recebem IDs numéricos sequenciais
 - conexões `deletable` com `sourceHandle: "output-N"` e id `xy-edge__<origem><saída>-<destino>`
 - `created_at` gravado na exportação, com a mesma serialização da plataforma
 
-Doze componentes têm exemplo real nesse arquivo e são criados exatamente com os
-mesmos campos: Iniciar Fluxo, Menu de Opções, Enviar Mensagem, Transferir para
-Departamento, Aplicar Tag, Transferir para Fluxo, Encerrar Conversa, Condições
-de Tempo, Solicitar Dados, Protocolo, Consulta API e Aguardando Mensagem.
+Os 62 componentes da plataforma têm exemplo real nesses exports, e o editor
+cria cada um exatamente com os mesmos campos, ordem das chaves, valores padrão,
+html e tamanho: 4 de mensagens, 4 de templates, 5 de roteamento e
+transferência, 7 de agendamentos, 3 de tickets, 7 de CRM, 1 de livechat, 5 de
+controle de fluxo, 5 de condições, 2 de IA, 14 de APIs e 5 de coleta de dados.
+A biblioteca mostra 61 deles; o 62º é o início, que todo fluxo já tem.
 
-Os outros cinquenta aparecem na biblioteca como "sem JSON" e passam a funcionar
-assim que houver um export da plataforma com cada um configurado. Regras,
-significado das saídas e a lista completa estão em
+A maioria dos componentes tem uma única saída (Próximo) ou nenhuma, quando
+encerra aquele caminho. Os que têm mais de uma saída estão abaixo; os
+componentes mais antigos da plataforma põem o caminho negativo em `output-0`, e
+os mais novos põem ali o positivo.
+
+<details>
+<summary>Componentes com mais de uma saída</summary>
+
+| Componente | Saídas, na ordem |
+|---|---|
+| Menu de Opções | uma por opção, seguindo `text-1`, `text-2`… (até 10) |
+| Múltipla Condição | uma por condição, seguindo `var-1`, `var-2`… (até 20) |
+| Randomizador (teste A/B) | uma por caminho com peso, no mínimo 2 |
+| Agente de IA | uma por saída do agente, e depois Sem conclusão |
+| Idioma | Português, Inglês, Espanhol, Outro idioma |
+| Condições de Tempo | Fora do horário, Dentro do horário |
+| Solicitar Dados, Consulta API, API de Mensagem, DataStore Local, Enviar Boletos | Falha, Sucesso |
+| Condicional | Falso, Verdadeiro |
+| Enviar Formulário | Respondido, Não respondido |
+| Transferir para Ligação, Continuar no Chat | Sucesso, Falha |
+| Escolher Serviço | Serviço escolhido, Nenhum disponível |
+| Escolher Local | Local escolhido, Nenhum disponível |
+| Escolher Profissional | Profissional escolhido, Nenhum disponível |
+| Escolher Horário | Horário escolhido, Nenhum disponível |
+| Identificar Cliente (agendamentos e CRM) | Identificado, Não identificado |
+| Dados do Cliente | Dados registrados, Dados não registrados |
+| Confirmar Agendamento | Agendado, Não agendado |
+| Consultar Chamados | Chamado escolhido, Nenhum chamado |
+| Abrir Chamado | Chamado aberto, Não aberto |
+| Detalhe do Chamado | Encontrado, Não encontrado |
+| Criar/Atualizar Contato, Capturar Lead, Qualificar Lead, Agendar Follow-up, Inscrever em Lista | Sucesso, Falha |
+| Google Planilhas, Registrar no RD Station, Criar/Atualizar no HubSpot, Menu de Opções API | Sucesso, Falha |
+| Entrada de Dados | Válido, Inválido |
+| Veio do anúncio? | Sim, Não |
+| Consentimento | Aceitou, Recusou |
+
+</details>
+
+A validação só bloqueia a exportação por erros de fato, como estrutura
+quebrada, saídas sem conexão ou valores inválidos. Componente ainda não
+configurado gera aviso, então um export da plataforma com etapas pela metade
+continua indo e voltando sem alteração. A lista completa de componentes, o
+significado das saídas e as regras estão em
 [docs/atendimento-compatibilidade.md](docs/atendimento-compatibilidade.md).
 
 ## Rodando você mesmo
@@ -95,8 +137,8 @@ pnpm build   # build de produção
 pnpm start   # serve o build na porta 3000
 ```
 
-A geração por IA usa a sua própria chave da OpenAI, digitada no diálogo. A
-chave vai só junto com o pedido de geração e não fica guardada no servidor.
+A geração por IA usa a sua própria chave de API, digitada no diálogo. A chave
+vai só junto com a requisição e não fica guardada no servidor.
 
 ## Comandos
 
@@ -110,13 +152,27 @@ chave vai só junto com o pedido de geração e não fica guardada no servidor.
 | `pnpm check:reference -- "<arquivo>"` | confere a ida e volta de um JSON exportado pela plataforma |
 | `pnpm test:e2e` | build de produção e testes de navegador com Playwright |
 
-Aponte `FLOW_REFERENCE` para um JSON exportado pela plataforma e os testes
-unitários e de navegador também validam esse arquivo:
+Aponte `FLOW_REFERENCE` para um ou mais JSON exportados pela plataforma e os
+testes unitários e de navegador também validam esses arquivos. Separe os
+arquivos com o delimitador de caminhos do sistema, `:` no Linux e no macOS e
+`;` no Windows:
 
 ```sh
-FLOW_REFERENCE="caminho/Atendimento.json" pnpm test
-FLOW_REFERENCE="caminho/Atendimento.json" pnpm test:e2e
+FLOW_REFERENCE="caminho/export-1.json:caminho/export-2.json" pnpm test
+FLOW_REFERENCE="caminho/export-1.json:caminho/export-2.json" pnpm test:e2e
 ```
+
+```powershell
+$env:FLOW_REFERENCE = "caminho\export-1.json;caminho\export-2.json"
+pnpm test
+pnpm test:e2e
+```
+
+Cada arquivo vira um teste próprio: ida e volta byte a byte sem erro de
+validação, todo tipo de componente conhecido, prévia respondendo a todas as
+escolhas alcançáveis e a mesma ida e volta pelo navegador. Sem a variável,
+esses testes são ignorados com aviso, assim como um arquivo que não existe.
+Mantenha exports reais fora do repositório: eles têm dados internos.
 
 ## O que tem aqui
 

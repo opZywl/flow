@@ -313,7 +313,7 @@ function outputRows(id: string, data: AtendimentoData, edges: AtendimentoEdge[],
   ]
 }
 
-function noteColor(value: unknown): string {
+export function noteColor(value: unknown): string {
   const color = typeof value === "string" ? value.trim().toLowerCase() : ""
   const known = NOTE_COLORS.get(color)
   if (known) return known

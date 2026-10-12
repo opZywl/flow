@@ -34,6 +34,10 @@
   --flow-danger: 197 31 31;
 }
 
+:root.home-theme-light {
+  color-scheme: light !important;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

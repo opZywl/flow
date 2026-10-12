@@ -52,12 +52,12 @@ The interface is in Brazilian Portuguese, like the platform it targets.
 
 | On screen | What it does |
 |---|---|
-| library | every platform component by category, with search; click or drag to add |
+| library | the 61 palette components by category, with search; click or drag to add |
 | canvas | rule-checked connections (one input per component, one target per output), multi-select, undo and redo, minimap |
 | components | a summary of each step, labeled outputs and a remove button on hover |
-| panel | the fields of each component, menu options, business hours, technical fields and the full JSON |
+| panel | the fields of each component in the platform's order, with editors for menu options, business hours, weighted paths, conditions and lists, plus technical fields and the full JSON |
 | validation | live issues, each one jumps to the component that needs attention |
-| preview | a simulated conversation with menus, answers, API results and business hours, without calling the platform |
+| preview | a simulated conversation covering all 62 components, where you pick the result of each integration, without calling the platform |
 | import | Atendimento JSON, older flows from this editor and AI generation |
 | theme | light or dark, with the accent color you pick in Cores |
 
@@ -67,24 +67,64 @@ imports it.
 
 ## Atendimento JSON compatibility
 
-The format comes from a file exported by the platform itself, and that file is
-the only source the editor follows:
+The format comes from files exported by the platform itself, and those files
+are the only source the editor follows:
 
 - envelope with `name`, `description`, `service_type`, `created_at`, `nodes`, `edges` and `viewport`
-- components as `type: "custom"` with `data.type`, `data.data` and `data.html`; the start is always `inicio` and every other component gets a sequential numeric ID
+- components with `data.type`, `data.data` and `data.html`, written as `type: "custom"` except the note (`"note"`) and the API options menu (`"apiOptionsMenu"`), exactly as the platform writes them; the start is always `inicio` and every other component gets a sequential numeric ID
 - `deletable` connections with `sourceHandle: "output-N"` and the id `xy-edge__<source><handle>-<target>`
 - `created_at` stamped at export time, with the same serialization the platform uses
 
-Twelve components have a real example in that file and are created with
-exactly the same fields: Iniciar Fluxo, Menu de Opções, Enviar Mensagem,
-Transferir para Departamento, Aplicar Tag, Transferir para Fluxo, Encerrar
-Conversa, Condições de Tempo, Solicitar Dados, Protocolo, Consulta API and
-Aguardando Mensagem.
+All 62 platform components have a real example in those exports, and the
+editor creates each one with exactly the same fields, key order, defaults,
+html and size: 4 messages, 4 templates, 5 routing and transfer, 7 scheduling,
+3 tickets, 7 CRM, 1 live chat, 5 flow control, 5 conditions, 2 AI, 14 APIs and
+5 data collection components. The library shows 61 of them; the 62nd is the
+start, which every flow already has.
 
-The other fifty show up in the library as "sem JSON" and start working as soon
-as there is a platform export with each one configured. Rules, output meanings
-and the full list are in
-[docs/atendimento-compatibilidade.md](docs/atendimento-compatibilidade.md).
+Most components have a single output (Próximo) or none, when they end that
+path. The ones with more than one output are listed below; the platform's
+oldest components put the negative path on `output-0`, the newer ones put the
+positive path there.
+
+<details>
+<summary>Components with more than one output</summary>
+
+| Component | Outputs, in order |
+|---|---|
+| Menu de Opções | one per option, following `text-1`, `text-2`… (up to 10) |
+| Múltipla Condição | one per condition, following `var-1`, `var-2`… (up to 20) |
+| Randomizador (teste A/B) | one per weighted path, at least 2 |
+| Agente de IA | one per agent exit, then Sem conclusão |
+| Idioma | Português, Inglês, Espanhol, Outro idioma |
+| Condições de Tempo | Fora do horário, Dentro do horário |
+| Solicitar Dados, Consulta API, API de Mensagem, DataStore Local, Enviar Boletos | Falha, Sucesso |
+| Condicional | Falso, Verdadeiro |
+| Enviar Formulário | Respondido, Não respondido |
+| Transferir para Ligação, Continuar no Chat | Sucesso, Falha |
+| Escolher Serviço | Serviço escolhido, Nenhum disponível |
+| Escolher Local | Local escolhido, Nenhum disponível |
+| Escolher Profissional | Profissional escolhido, Nenhum disponível |
+| Escolher Horário | Horário escolhido, Nenhum disponível |
+| Identificar Cliente (scheduling and CRM) | Identificado, Não identificado |
+| Dados do Cliente | Dados registrados, Dados não registrados |
+| Confirmar Agendamento | Agendado, Não agendado |
+| Consultar Chamados | Chamado escolhido, Nenhum chamado |
+| Abrir Chamado | Chamado aberto, Não aberto |
+| Detalhe do Chamado | Encontrado, Não encontrado |
+| Criar/Atualizar Contato, Capturar Lead, Qualificar Lead, Agendar Follow-up, Inscrever em Lista | Sucesso, Falha |
+| Google Planilhas, Registrar no RD Station, Criar/Atualizar no HubSpot, Menu de Opções API | Sucesso, Falha |
+| Entrada de Dados | Válido, Inválido |
+| Veio do anúncio? | Sim, Não |
+| Consentimento | Aceitou, Recusou |
+
+</details>
+
+Validation only blocks the export on real errors, such as broken structure,
+unconnected outputs or invalid values. A component that is not configured yet
+is a warning, so a platform export with half-finished steps still goes back
+and forth untouched. The full list of components, output meanings and rules is
+in [docs/atendimento-compatibilidade.md](docs/atendimento-compatibilidade.md).
 
 ## Run it yourself
 
@@ -99,8 +139,8 @@ pnpm build   # production build
 pnpm start   # serve the build on port 3000
 ```
 
-AI generation runs on your own OpenAI key, typed into the dialog. The key is
-sent only with the generation request and is not stored by the server.
+AI generation runs on your own API key, typed into the dialog. The key is sent
+only with the request and is not stored by the server.
 
 ## Commands
 
@@ -114,13 +154,26 @@ sent only with the generation request and is not stored by the server.
 | `pnpm check:reference -- "<file>"` | checks the round trip of a JSON exported by the platform |
 | `pnpm test:e2e` | production build plus Playwright browser tests |
 
-Point `FLOW_REFERENCE` at a JSON exported by the platform and the unit and
-browser tests also validate that file:
+Point `FLOW_REFERENCE` at one or more JSON files exported by the platform and
+the unit and browser tests also validate them. Separate the files with the
+system path delimiter, `:` on Linux and macOS and `;` on Windows:
 
 ```sh
-FLOW_REFERENCE="path/to/Atendimento.json" pnpm test
-FLOW_REFERENCE="path/to/Atendimento.json" pnpm test:e2e
+FLOW_REFERENCE="path/to/export-1.json:path/to/export-2.json" pnpm test
+FLOW_REFERENCE="path/to/export-1.json:path/to/export-2.json" pnpm test:e2e
 ```
+
+```powershell
+$env:FLOW_REFERENCE = "path\to\export-1.json;path\to\export-2.json"
+pnpm test
+pnpm test:e2e
+```
+
+Each file becomes its own test: a byte for byte round trip with no blocking
+issue, every component type known, a preview that answers every reachable
+choice and the same round trip through the browser. Without the variable these
+tests are skipped with a notice, and so is a file that does not exist. Keep
+real exports out of the repository: they carry internal data.
 
 ## What's inside
 

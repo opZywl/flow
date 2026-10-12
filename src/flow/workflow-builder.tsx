@@ -8,14 +8,14 @@ import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { START_TYPE, getComponentColor, getComponentLabel } from "@/lib/atendimento/catalog"
+import { NOTE_TYPE, START_TYPE, getComponentColor, getComponentLabel } from "@/lib/atendimento/catalog"
 import { downloadJson } from "@/lib/atendimento/download"
-import { behaviorSignature, createEdge, duplicateNode, exportFileName, exportFlow, importFlow, maxNumericId, newFlow, newNode, outputHandles, outputLabel, removeMenuOption, stampExport, validateFlow } from "@/lib/atendimento/format"
+import { behaviorSignature, createEdge, duplicateNode, exportFileName, exportFlow, importFlow, insertOutput, maxNumericId, newFlow, newNode, outputHandles, outputLabel, removeMenuOption, removeOutput, stampExport, validateFlow } from "@/lib/atendimento/format"
 import type { AtendimentoData, AtendimentoFlow, AtendimentoNode, FlowIssue, JsonObject } from "@/lib/atendimento/types"
 import NodeLibrary from "./node-library"
 import NodeConfigPanel from "./node-config-panel"
 import CustomEdge, { EdgeActionsContext } from "./custom-edge"
-import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, nodeSummary } from "./nodes/atendimento-node"
+import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, nodeSummary, noteColor } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
 export interface WorkflowActions {
@@ -66,9 +66,9 @@ const MOVE_MESSAGE = /^Moved selected node (\w+)\. New position, x: (-?\d+), y: 
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-const formatPoint = (point?: XYPosition | null) => (point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "—")
+const formatPoint = (point?: XYPosition | null) => (point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "(--, --)")
 const isTypingTarget = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
-const minimapColor = (node: Node<AtendimentoData>) => getComponentColor(node.data.type)
+const minimapColor = (node: Node<AtendimentoData>) => (node.data.type === NOTE_TYPE ? noteColor(node.data.data.color) : getComponentColor(node.data.type))
 const minimapClass = (node: Node<AtendimentoData>) => (node.data.type === START_TYPE ? "fill-flow-success" : "")
 
 function translateCanvasAnnouncements(root: HTMLElement) {
@@ -694,7 +694,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const isValidConnection = useCallback((connection: Connection) => {
     const source = findNode(connection.source)
     const target = findNode(connection.target)
-    return Boolean(source && target && source.id !== target.id && target.data.type !== START_TYPE && outputHandles(source, flowRef.current.edges).includes(connection.sourceHandle || ""))
+    return Boolean(source && target && source.id !== target.id && target.data.type !== START_TYPE && target.data.type !== NOTE_TYPE && source.data.type !== NOTE_TYPE && outputHandles(source, flowRef.current.edges).includes(connection.sourceHandle || ""))
   }, [findNode])
 
   const connect = useCallback((connection: Connection) => {
@@ -858,6 +858,16 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     if (!panelId || !ensureApplied()) return
     commit((current) => removeMenuOption(current, panelId, option))
   }, [commit, ensureApplied, panelId])
+
+  const removePanelOutput = useCallback((index: number, data: JsonObject) => {
+    if (!panelId || !ensureApplied()) return
+    commit((current) => removeOutput(current, panelId, index, data))
+  }, [commit, ensureApplied, panelId])
+
+  const insertPanelOutput = useCallback((index: number, data: JsonObject) => {
+    if (!panelId) return
+    commit((current) => insertOutput(current, panelId, index, data))
+  }, [commit, panelId])
 
   const closePanel = useCallback(() => {
     if (!ensureApplied()) return
@@ -1086,6 +1096,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             updateData={updateData}
             onDraft={trackDraft}
             removeOption={removeOption}
+            removeOutput={removePanelOutput}
+            insertOutput={insertPanelOutput}
             onClose={closePanel}
             onRemove={removePanelNode}
             onDuplicate={duplicate}

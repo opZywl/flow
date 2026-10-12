@@ -690,7 +690,7 @@
         "key": "customFields",
         "label": "Salvar resposta no campo",
         "kind": "text",
-        "placeholder": "Ex.: name, empresa ou custom:ID:campo",
+        "placeholder": "Ex.: name ou custom:ID:campo",
         "hint": "A resposta fica disponível nas mensagens seguintes como @@@campo.",
         "suggestions": [
           "name",
@@ -3223,7 +3223,7 @@
         "itemFields": [
           {
             "key": "header",
-            "label": "Coluna"
+            "label": "Nome da coluna"
           },
           {
             "key": "value",
