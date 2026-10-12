@@ -77,7 +77,8 @@ const MOVE_MESSAGE = /^Moved selected node (\w+)\. New position, x: (-?\d+), y: 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
 const formatPoint = (point?: XYPosition | null) => (point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "(--, --)")
-const isTypingTarget = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+const isTextField = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+const isTypingTarget = (target: EventTarget | null) => isTextField(target) || (target instanceof HTMLElement && (target.getAttribute("role") === "combobox" || Boolean(target.closest('[role="listbox"]'))))
 const minimapColor = (node: Node<AtendimentoData>) => (node.data.type === NOTE_TYPE ? noteColor(node.data.data.color) : getComponentColor(node.data.type))
 const minimapClass = (node: Node<AtendimentoData>) => (node.data.type === START_TYPE ? "fill-flow-success" : "")
 const overlaps = (first: Box, second: Box, gap: number) =>
@@ -662,7 +663,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
 
   useEffect(() => {
     const releaseCanvasKeys = (event: FocusEvent) => {
-      if (!isTypingTarget(event.target)) return
+      if (!isTextField(event.target)) return
       window.dispatchEvent(new Event("blur"))
       window.dispatchEvent(new Event("focus"))
     }

@@ -8,6 +8,7 @@ import { isObject, nextOptionDigit, optionIndices } from "@/lib/atendimento/form
 import { cleanNumberText, numberMessage, numberRule, numericText, parseNumber, type NumberRule } from "@/lib/atendimento/numbers"
 import type { AtendimentoNode, ComponentDefinition, FieldSeverity, FieldSpec, ItemFieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
+import { FlowSelect } from "./flow-select"
 import { categoryTint, componentIcon, noteColor } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
@@ -904,17 +905,17 @@ function MenuTargetField({ id, spec, value, onSelect }: {
   const hint = menus.length ? spec.hint : "Adicione um Menu de Opções ao fluxo para escolher o destino."
   return (
     <Field id={id} label={spec.label} hint={hint}>
-      <select
+      <FlowSelect
         id={id}
         aria-describedby={hint ? hintOf(id) : undefined}
-        className={ui.select}
         value={current}
-        onChange={(event) => { if (event.target.value) onSelect(event.target.value, menus) }}
-      >
-        {current === "" && <option value="" className={ui.option}>{menus.length ? "Selecione um menu" : "Nenhum menu no fluxo"}</option>}
-        {menus.map((menu) => <option key={menu.id} value={menu.id} className={ui.option}>{menuLabel(menu)}</option>)}
-        {current !== "" && !known && <option value={current} className={ui.option}>ID {current} (não está no fluxo)</option>}
-      </select>
+        placeholder={menus.length ? "Selecione um menu" : "Nenhum menu no fluxo"}
+        options={[
+          ...menus.map((menu) => ({ value: menu.id, label: menuLabel(menu) })),
+          ...(current !== "" && !known ? [{ value: current, label: `ID ${current} (não está no fluxo)` }] : []),
+        ]}
+        onValueChange={(next) => { if (next) onSelect(next, menus) }}
+      />
     </Field>
   )
 }
@@ -1243,15 +1244,13 @@ export default function NodeConfigPanel({ node, updateData, removeOption, remove
       const extra = current && !options.some((option) => option.value === current) ? [{ value: current, label: `${current} (valor do arquivo)` }] : []
       return (
         <Field key={spec.key} id={id} label={spec.label} hint={spec.hint}>
-          <select
+          <FlowSelect
             id={id}
             aria-describedby={hintId}
-            className={ui.select}
             value={current}
-            onChange={(event) => setField(spec, event.target.value === "" && value === undefined ? undefined : event.target.value)}
-          >
-            {[...blank, ...options, ...extra].map((option) => <option key={option.value} value={option.value} className={ui.option}>{option.label}</option>)}
-          </select>
+            options={[...blank, ...options, ...extra]}
+            onValueChange={(next) => setField(spec, next === "" && value === undefined ? undefined : next)}
+          />
         </Field>
       )
     }

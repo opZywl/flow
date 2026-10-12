@@ -9,6 +9,7 @@ const ROOT = path.resolve(__dirname, '..')
 const STUBS = {
   '@/components/ui/dialog': { Dialog: () => null, DialogContent: () => null, DialogDescription: () => null, DialogHeader: () => null, DialogTitle: () => null },
   '@/hooks/use-toast': { toast: () => undefined },
+  './flow-select': { FlowSelect: () => null },
   './nodes/atendimento-node': { categoryTint: (value) => value, componentIcon: () => () => null, nodeSummary: () => '' },
   'lucide-react': new Proxy({}, { get: () => () => null }),
 }

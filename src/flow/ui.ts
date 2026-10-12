@@ -18,7 +18,6 @@ export const ui = {
     "min-h-24 w-full rounded-lg border border-flow-border bg-flow-surface px-2.5 py-2 text-sm text-flow-fg placeholder:text-flow-muted transition hover:border-flow-accent/50 focus-visible:border-flow-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/25",
   select:
     "h-9 w-full rounded-lg border border-flow-border bg-flow-surface px-2 text-sm text-flow-fg transition hover:border-flow-accent/50 focus-visible:border-flow-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/25",
-  option: "bg-flow-surface text-flow-fg",
   label: "mb-1 block text-xs font-semibold text-flow-muted-strong",
   hint: "mt-1 text-[11px] leading-4 text-flow-muted",
   error: "mt-1 text-[11px] font-medium leading-4 text-flow-danger",

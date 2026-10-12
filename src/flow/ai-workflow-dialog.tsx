@@ -56,6 +56,7 @@ import { downloadJson, downloadText } from "@/lib/atendimento/download"
 import { exportFileName, exportFlow, importFlow, isObject, stampExport, validateFlow } from "@/lib/atendimento/format"
 import type { AtendimentoFlow, AtendimentoNode, FlowIssue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
+import { FlowSelect, type FlowSelectOption } from "./flow-select"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
@@ -679,6 +680,19 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
   const providerListing = listing?.provider === provider ? listing : null
   const accountModels = listed?.filter((entry) => !info.presets.some((preset) => preset.id === entry.id)) ?? []
   const knownModel = info.presets.some((preset) => preset.id === model) || accountModels.some((entry) => entry.id === model)
+  const modelOptions: FlowSelectOption[] = [
+    ...(knownModel || !model ? [] : [{ value: model, label: model }]),
+    ...info.presets.map((preset) => ({
+      value: preset.id,
+      label: `${preset.name} (${listed && !listed.some((entry) => entry.id === preset.id) ? "não encontrado na conta" : preset.note})`,
+      group: "Recomendados",
+    })),
+    ...accountModels.map((entry) => ({
+      value: entry.id,
+      label: entry.vision === false ? `${entry.name} (sem imagens)` : entry.name,
+      group: "Disponíveis na sua conta",
+    })),
+  ]
   const summary = useMemo(() => (result ? summarize(result) : null), [result])
   const showingResult = view === "result" && result !== null && summary !== null
 
@@ -748,14 +762,13 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     clearFieldError("apiKey")
   }
 
-  const changeModel = (event: ChangeEvent<HTMLSelectElement>) => {
-    const value = event.target.value
+  const changeModel = (value: string) => {
     setModels((current) => ({ ...current, [provider]: value }))
     clearFieldError("model", "image")
   }
 
-  const changeSize = (event: ChangeEvent<HTMLSelectElement>) => {
-    setSize(SIZE_OPTIONS.find((entry) => entry.value === event.target.value)?.value ?? "auto")
+  const changeSize = (value: string) => {
+    setSize(SIZE_OPTIONS.find((entry) => entry.value === value)?.value ?? "auto")
     clearFieldError("size", "count")
   }
 
@@ -1474,40 +1487,20 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     Modelo
                   </label>
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    <select
+                    <FlowSelect
                       id={idFor("model")}
                       value={model}
-                      onChange={changeModel}
+                      onValueChange={changeModel}
+                      placeholder="Selecione um modelo"
+                      options={modelOptions}
                       aria-invalid={fieldErrors.model ? true : undefined}
                       aria-describedby={describedBy(
                         idFor("model-hint"),
                         listingStatus && idFor("models-status"),
                         fieldErrors.model && idFor("model-error"),
                       )}
-                      className={cn(ui.select, "min-w-0 sm:flex-1", fieldBase, fieldErrors.model && invalidField)}
-                    >
-                      {knownModel ? null : (
-                        <option value={model} className={ui.option}>
-                          {model}
-                        </option>
-                      )}
-                      <optgroup label="Recomendados" className={ui.option}>
-                        {info.presets.map((preset) => (
-                          <option key={preset.id} value={preset.id} className={ui.option}>
-                            {preset.name} ({listed && !listed.some((entry) => entry.id === preset.id) ? "não encontrado na conta" : preset.note})
-                          </option>
-                        ))}
-                      </optgroup>
-                      {accountModels.length > 0 ? (
-                        <optgroup label="Disponíveis na sua conta" className={ui.option}>
-                          {accountModels.map((entry) => (
-                            <option key={entry.id} value={entry.id} className={ui.option}>
-                              {entry.vision === false ? `${entry.name} (sem imagens)` : entry.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ) : null}
-                    </select>
+                      className={cn("min-w-0 sm:flex-1", fieldErrors.model && invalidField)}
+                    />
                     <button
                       type="button"
                       onClick={() => void fetchModels()}
@@ -1699,20 +1692,15 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     <label htmlFor={idFor("size")} className={ui.label}>
                       Tamanho do fluxo
                     </label>
-                    <select
+                    <FlowSelect
                       id={idFor("size")}
                       value={size}
-                      onChange={changeSize}
+                      onValueChange={changeSize}
+                      options={SIZE_OPTIONS}
                       aria-invalid={fieldErrors.size ? true : undefined}
                       aria-describedby={describedBy(idFor("size-hint"), fieldErrors.size && idFor("size-error"))}
-                      className={cn(ui.select, fieldBase, fieldErrors.size && invalidField)}
-                    >
-                      {SIZE_OPTIONS.map((entry) => (
-                        <option key={entry.value} value={entry.value} className={ui.option}>
-                          {entry.label}
-                        </option>
-                      ))}
-                    </select>
+                      className={fieldErrors.size ? invalidField : undefined}
+                    />
                     <p id={idFor("size-hint")} className={ui.hint}>
                       {sizeOption.hint}
                     </p>
