@@ -56,6 +56,7 @@ const CONNECTION_LINE_STYLE = { stroke: "rgb(var(--flow-accent))", strokeWidth: 
 const CANVAS_CLASS = String.raw`[&_.react-flow\_\_nodesselection-rect]:border-flow-accent/70 [&_.react-flow\_\_nodesselection-rect]:bg-flow-accent/10 [&_.react-flow\_\_selection]:border-flow-accent/70 [&_.react-flow\_\_selection]:bg-flow-accent/10`
 const MINIMAP_CLASS = "!m-3 overflow-hidden rounded-xl border border-flow-border !bg-flow-surface shadow-sm [&_path]:fill-flow-bg/70"
 const DEFAULT_NODE_SIZE: Size = { width: 280, height: 160 }
+const REVEAL_WINDOW = 2000
 const COLUMN_STEP = 360
 const ROW_STEP = 180
 const NODE_GAP = 40
@@ -278,6 +279,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const executed = useRef<string | null>(null)
   const dragOrigin = useRef<AtendimentoFlow | null>(null)
   const removalBatch = useRef(false)
+  const pendingReveal = useRef<{ id: string; until: number } | null>(null)
   const lookup = useRef<{ nodes: AtendimentoNode[]; byId: Map<string, AtendimentoNode> } | null>(null)
   const handlers = useRef<Handlers | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -736,7 +738,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       setSelectedNodes([node.id])
       setSelectedEdges([])
       setDrafts({})
-      if (!position) requestAnimationFrame(() => requestAnimationFrame(() => revealNode(node.id)))
+      if (!position) {
+        pendingReveal.current = { id: node.id, until: Date.now() + REVEAL_WINDOW }
+        requestAnimationFrame(() => requestAnimationFrame(() => revealNode(node.id)))
+      }
     } catch (cause) {
       toast({ title: "Componente indisponível", description: (cause as Error).message, variant: "destructive" })
     }
@@ -790,6 +795,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       }
       return next
     })
+    const pending = pendingReveal.current
+    if (pending && dimensions.some((entry) => entry.id === pending.id)) {
+      if (Date.now() > pending.until) pendingReveal.current = null
+      else requestAnimationFrame(() => revealNode(pending.id))
+    }
     if (selections.size) setSelectedNodes((current) => {
       const next = new Set(current)
       for (const [id, selected] of selections) {
@@ -805,7 +815,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
         return position ? { ...node, position: { x: position.x, y: position.y } } : node
       }) }, "silent")
     }
-  }, [ensureApplied, removeNodes, setDocument])
+  }, [ensureApplied, removeNodes, revealNode, setDocument])
 
   const handleEdgeChanges = useCallback((changes: EdgeChange[]) => {
     const selections = new Map<string, boolean>()
