@@ -48,7 +48,7 @@ const OPENAI_VISION = /^(gpt-4o|gpt-4\.1|gpt-4\.5|gpt-([5-9]|\d{2,})|o[1-9])/
 const OPENAI_TEXT_ONLY = /^(o1-mini|o3-mini)/
 const GOOGLE_SKIP = /(embedding|aqa|imagen|tts|image|live|transcribe|translate|native-audio|computer-use|robotics|nano-banana|deep-research|antigravity|omni|veo|lyria)/
 const KEY_MESSAGE = /api[ _-]?key|x-api-key|unauthori[sz]ed|authenticat|API_KEY_INVALID|invalid[ _-]?key|incorrect[ _-]?key/i
-const BILLING_MESSAGE = /insufficient_quota|credit balance|spending limit|out of credits|payment required/i
+const BILLING_MESSAGE = /insufficient_quota|credit balance|spending limit|out of credits|have any credits|payment required/i
 const NETWORK_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT", "EPIPE", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_CLOSED"])
 const MASK = "[chave oculta]"
 const SECRET_PATTERNS = [/sk-ant-[\w-]+/g, /sk-[\w-]{6,}/g, /AIza[\w-]{20,}/g, /xai-[\w-]{10,}/g]
@@ -192,6 +192,7 @@ function classify(status: number, message: string): FailureCode {
   if (status === 429 && !/insufficient_quota/i.test(message)) return "rate_limit"
   if (status >= 400 && status < 500 && (status === 402 || BILLING_MESSAGE.test(message))) return "billing"
   if (status === 401) return "invalid_key"
+  if (status === 403 && /permission_error|does not have permission/i.test(message)) return "forbidden"
   if ((status === 400 || status === 403) && KEY_MESSAGE.test(message)) return "invalid_key"
   if (status === 403) return "forbidden"
   if (status === 408 || status === 504) return "timeout"

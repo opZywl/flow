@@ -359,7 +359,6 @@ const LLM_MISTAKES = {
   'ligação para id inexistente': { ...SCHEDULE, edges: [...SCHEDULE.edges, e('book', 'Não agendado', 'nao_existe'), e('fantasma', '', 'fim'), e('slot', '2', 'menu_principal')] },
   'nó solto e ilha sem início': { ...BILLING, nodes: [...BILLING.nodes, n('solto', 'envio_pergunta', { template: 'Mensagem perdida.' }), n('solto2', 'tags', { tags: 'VIP' }), n('sozinho', 'departamentos', { name: 'Ninguém' })], edges: [...BILLING.edges.filter((edge) => edge.to !== 'pix'), e('solto', '', 'solto2'), e('solto2', '', 'pix')] },
   'menu com 12 opções': { name: 'Menu grande', nodes: [n('menu', 'envio_mensagem', { title: 'Escolha', options: options(...twelve) }), ...twelve.map((_, index) => n(`d${index + 1}`, 'departamentos', { name: `Equipe ${index + 1}` }))], edges: [e('inicio', '', 'menu'), ...twelve.map((text, index) => e('menu', text, `d${index + 1}`))] },
-  'RI vazia': { name: '', description: '', nodes: [], edges: [] },
   'resposta em cerca de código': '```json\n' + JSON.stringify(TICKETS) + '\n```',
   'valores fora de texto e config em mapa': JSON.stringify({ name: 'Mapa', nodes: [{ id: 'espera', type: 'WAITING_TIME', config: { waiting_time: 5 } }, { id: 'menu', type: 'Menu de Opções', config: { title: 'Escolha', options: ['A', 'B'], buttons: false } }], edges: [{ source: 'inicio', target: 'espera' }, { source: 'espera', sourceHandle: 1, target: 'menu' }] }),
 }
@@ -401,6 +400,24 @@ for (const [label, ri] of Object.entries(LLM_MISTAKES)) {
     assert.ok(used() >= 1)
   })
 }
+
+test('RI vazia em todas as rodadas vira erro no campo da descrição', async () => {
+  const used = model({ name: '', description: '', nodes: [], edges: [] })
+  const out = await client.requestGeneration(BASE, signal(), () => {})
+  assert.equal(out.ok, false)
+  assert.equal(out.rejection.code, 'invalid_output')
+  assert.equal(out.rejection.field, 'description')
+  assert.equal(out.rejection.failure.title, 'O modelo não gerou nenhum componente para esta descrição.')
+  assert.match(out.rejection.failure.title, PT_TEXT)
+  assert.ok(used() >= 1 && used() <= 3)
+})
+
+test('RI vazia seguida de uma correção completa entrega o fluxo completo', async () => {
+  const used = model({ name: '', description: '', nodes: [], edges: [] }, TICKETS)
+  const flow = assertImportable(await client.requestGeneration(BASE, signal(), () => {}), 'RI vazia e correção')
+  assert.ok(flow.nodes.length >= TICKETS.nodes.length)
+  assert.ok(used() >= 2)
+})
 
 test('o menu com 12 opções fica com 10 e avisa as descartadas', async () => {
   const out = await generateFrom(LLM_MISTAKES['menu com 12 opções'])

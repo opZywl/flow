@@ -302,6 +302,159 @@ test('resposta cortada por tamanho e bloqueio de conteúdo não geram novas roda
   assert.equal(calls.length, 1)
 })
 
+const REFUSAL = 'I can’t help with that request.'
+
+function refusalStream(provider, withEvents = true) {
+  const model = MODELS[provider]
+  return sse([
+    { type: 'response.created', response: { id: 'resp_1', created_at: 1760000000, model, object: 'response', status: 'in_progress', output: [] } },
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'msg_1', role: 'assistant', status: 'in_progress', content: [] } },
+    ...(withEvents ? [
+      { type: 'response.content_part.added', item_id: 'msg_1', output_index: 0, content_index: 0, part: { type: 'refusal', refusal: '' } },
+      { type: 'response.refusal.delta', item_id: 'msg_1', output_index: 0, content_index: 0, delta: REFUSAL },
+      { type: 'response.refusal.done', item_id: 'msg_1', output_index: 0, content_index: 0, refusal: REFUSAL },
+      { type: 'response.content_part.done', item_id: 'msg_1', output_index: 0, content_index: 0, part: { type: 'refusal', refusal: REFUSAL } },
+    ] : []),
+    { type: 'response.output_item.done', output_index: 0, item: { type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'refusal', refusal: REFUSAL }] } },
+    { type: 'response.completed', response: { id: 'resp_1', created_at: 1760000000, model, object: 'response', status: 'completed', incomplete_details: null, output: [], usage: { input_tokens: 11, output_tokens: 5, total_tokens: 16 } } },
+  ])
+}
+
+for (const [provider, withEvents] of [['openai', true], ['xai', true], ['xai', false]]) {
+  test(`recusa da ${provider}${withEvents ? '' : ' só no item final'} vira content_filter sem novas rodadas`, async () => {
+    responder = () => refusalStream(provider, withEvents)
+    const { response, data, text } = await run(payload(provider))
+    assert.equal(response.status, 422)
+    assert.deepEqual(data, { success: false, code: 'content_filter', error: 'O provedor bloqueou a resposta.', details: 'Revise a descrição e tente novamente.' })
+    assert.equal(calls.length, 1)
+    assertNoKey(text, KEYS[provider])
+  })
+}
+
+test('texto do modelo que cita refusal não é tratado como recusa', async () => {
+  const quoted = { ...RI, description: 'Trata "type":"refusal" e response.failed como texto comum' }
+  responder = () => reply.openai(JSON.stringify(quoted))
+  const { data } = await run(payload('openai'))
+  assert.equal(data.success, true)
+  assert.equal(calls.length, 1)
+})
+
+for (const provider of ['openai', 'xai']) {
+  test(`response.failed da ${provider} vira provider_unavailable sem novas rodadas`, async () => {
+    responder = () => sse([
+      { type: 'response.created', response: { id: 'resp_1', created_at: 1760000000, model: MODELS[provider], object: 'response', status: 'in_progress', output: [] } },
+      { type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'msg_1', role: 'assistant', status: 'in_progress', content: [] } },
+      { type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, content_index: 0, delta: '{"name":"Atend' },
+      { type: 'response.failed', response: { id: 'resp_1', created_at: 1760000000, model: MODELS[provider], object: 'response', status: 'failed', error: { code: 'server_error', message: 'The server had an error.' }, incomplete_details: null, output: [], usage: { input_tokens: 11, output_tokens: 3, total_tokens: 14 } } },
+    ])
+    const { response, data } = await run(payload(provider))
+    assert.equal(response.status, 502)
+    assert.deepEqual(data, { success: false, code: 'provider_unavailable', error: 'O provedor está indisponível no momento.', details: 'Tente novamente em alguns instantes.' })
+    assert.equal(calls.length, 1)
+  })
+}
+
+function withoutStop(text) {
+  return sse([
+    { type: 'message_start', message: { id: 'msg_1', model: MODELS.anthropic, usage: { input_tokens: 11 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    ...pieces(text).map((part) => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: part } })),
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 22 } },
+  ])
+}
+
+test('Claude sem message_stop não trava a geração e segue na rodada seguinte', { timeout: 10000 }, async () => {
+  responder = (call, index) => index === 0 ? withoutStop(JSON.stringify(RI)) : reply.anthropic(JSON.stringify(RI))
+  const { response, data } = await run(payload('anthropic'))
+  assert.equal(response.status, 200)
+  assert.equal(data.success, true)
+  assert.equal(data.rounds, 2)
+  assert.equal(calls.length, 2)
+})
+
+test('Claude com corpo vazio ou cortado sem message_stop responde em vez de travar', { timeout: 10000 }, async () => {
+  for (const make of [() => new Response('', { status: 200, headers: { 'content-type': 'text/event-stream' } }), () => withoutStop(JSON.stringify(RI).slice(0, 120))]) {
+    calls.length = 0
+    responder = make
+    const { response, data } = await run(payload('anthropic'))
+    assert.equal(response.status, 422)
+    assert.equal(data.code, 'invalid_output')
+    assert.equal(calls.length, 3)
+  }
+
+  calls.length = 0
+  responder = () => withoutStop(JSON.stringify(RI).slice(0, 120))
+  const { data } = await run(payload('anthropic', { stream: true }))
+  const last = events(data).at(-1)
+  assert.equal(last.type, 'result')
+  assert.equal(last.result.code, 'invalid_output')
+})
+
+function dropped(provider) {
+  const head = {
+    openai: reply.openai,
+    anthropic: reply.anthropic,
+    google: reply.google,
+    xai: reply.xai,
+  }[provider]
+  const encoder = new TextEncoder()
+  return (async () => {
+    const full = await head(JSON.stringify(RI)).text()
+    const part = full.slice(0, Math.floor(full.length / 3))
+    const socket = Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' })
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(part))
+        setTimeout(() => controller.error(new TypeError('terminated', { cause: socket })), 5)
+      },
+    })
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  })()
+}
+
+for (const provider of ['openai', 'anthropic', 'google', 'xai']) {
+  test(`queda da conexão no meio do streaming da ${provider} vira network`, async () => {
+    responder = () => dropped(provider)
+    const { response, data, text } = await run(payload(provider))
+    assert.equal(response.status, 502)
+    assert.deepEqual(data, { success: false, code: 'network', error: 'Não foi possível conectar ao provedor.', details: 'Verifique a conexão com a internet e tente novamente.' })
+    assert.equal(text.includes('Failed to process'), false)
+    assertNoKey(text, KEYS[provider])
+  })
+}
+
+test('prazo de leitura do corpo esgotado no streaming vira timeout', async () => {
+  responder = async () => {
+    const full = await reply.openai(JSON.stringify(RI)).text()
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(full.slice(0, 200)))
+        setTimeout(() => controller.error(Object.assign(new TypeError('terminated'), { cause: Object.assign(new Error('Body Timeout Error'), { code: 'UND_ERR_BODY_TIMEOUT' }) })), 5)
+      },
+    })
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }
+  const { response, data } = await run(payload('openai'))
+  assert.equal(response.status, 504)
+  assert.equal(data.code, 'timeout')
+})
+
+test('RI sem componentes em todas as rodadas falha com mensagem clara', async () => {
+  responder = () => reply.google(JSON.stringify({ name: 'Vazio', description: '', nodes: [], edges: [] }))
+  const { response, data } = await run(payload('google', { prompt: 'asdf qwer' }))
+  assert.equal(response.status, 422)
+  assert.deepEqual(data, { success: false, code: 'invalid_output', error: 'O modelo não gerou nenhum componente para esta descrição.', details: 'Descreva as etapas do atendimento e gere novamente.', field: 'prompt' })
+})
+
+test('RI vazia numa rodada e completa na correção devolve o fluxo completo', async () => {
+  responder = (call, index) => reply.google(JSON.stringify(index === 0 ? { name: 'Vazio', description: '', nodes: [], edges: [] } : RI))
+  const { response, data } = await run(payload('google'))
+  assert.equal(response.status, 200)
+  assert.equal(data.success, true)
+  assert.ok(data.workflow.nodes.some((node) => node.data.type === 'departamentos'))
+})
+
 test('gera com Claude em NDJSON, com progresso e imagem de referência', async () => {
   responder = () => reply.anthropic(JSON.stringify(RI))
   const { response, data, text } = await run(payload('anthropic', { image: PNG, stream: true }))
@@ -444,6 +597,8 @@ const PROVIDER_ERRORS = [
   ['google', 429, { error: { code: 429, message: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 10, model: gemini-3.8-flash\nPlease retry in 38.2s.', status: 'RESOURCE_EXHAUSTED' } }, 'rate_limit', 'Limite de uso atingido no provedor.', 'Aguarde cerca de 39 segundos e tente novamente. Se o limite continuar, verifique o plano da conta do Google.'],
   ['google', 429, { error: { code: 429, message: 'You exceeded your current quota, please check your plan and billing details.', status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '12s' }] } }, 'rate_limit', 'Limite de uso atingido no provedor.', 'Aguarde cerca de 12 segundos e tente novamente. Se o limite continuar, verifique o plano da conta do Google.'],
   ['anthropic', 529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, 'provider_unavailable', 'O provedor está indisponível no momento.', 'Tente novamente em alguns instantes.'],
+  ['anthropic', 403, { type: 'error', error: { type: 'permission_error', message: 'Your API key does not have permission to use the specified resource.' } }, 'forbidden', 'A chave não tem acesso a este modelo ou recurso.', 'Verifique as permissões da conta da Anthropic.'],
+  ['xai', 403, { code: 'The caller does not have permission to execute the specified operation', error: "Your newly created teams doesn't have any credits yet. You can purchase credits on https://console.x.ai/team/00000000-0000-0000-0000-000000000000." }, 'billing', 'Saldo insuficiente na conta do provedor.', 'Adicione créditos na conta da xAI e tente novamente.'],
   ['xai', 503, { error: { message: 'Service unavailable' } }, 'provider_unavailable', 'O provedor está indisponível no momento.', 'Tente novamente em alguns instantes.'],
   ['openai', 400, { error: { message: `Invalid input: Bearer ${KEYS.openai} rejected.`, type: 'invalid_request_error', code: 'invalid_value' } }, 'provider_error', 'O provedor recusou a solicitação.', 'Detalhe do provedor: Invalid input: [chave oculta] rejected.'],
 ]
@@ -724,6 +879,8 @@ const LISTING_ERRORS = [
   ['google', 400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }, 'invalid_key', 'A chave da API foi recusada.', 'Confira a chave do Google e tente novamente.'],
   ['xai', 400, { code: 'Client specified an invalid argument', error: 'Incorrect API key provided: xa***mn.' }, 'invalid_key', 'A chave da API foi recusada.', 'Confira a chave da xAI e tente novamente.'],
   ['anthropic', 403, { type: 'error', error: { type: 'permission_error', message: 'Your organization does not have access.' } }, 'forbidden', 'A chave não tem acesso à lista de modelos.', 'Verifique as permissões da conta da Anthropic.'],
+  ['anthropic', 403, { type: 'error', error: { type: 'permission_error', message: 'Your API key does not have permission to use the specified resource.' } }, 'forbidden', 'A chave não tem acesso à lista de modelos.', 'Verifique as permissões da conta da Anthropic.'],
+  ['xai', 403, { code: 'The caller does not have permission to execute the specified operation', error: "Your newly created teams doesn't have any credits yet. You can purchase credits on https://console.x.ai/team/00000000-0000-0000-0000-000000000000." }, 'billing', 'Saldo insuficiente na conta do provedor.', 'Adicione créditos na conta da xAI e tente novamente.'],
   ['openai', 429, { error: { message: 'Rate limit reached' } }, 'rate_limit', 'Limite de uso atingido no provedor.', 'Aguarde alguns instantes ou verifique os créditos da conta da OpenAI.'],
   ['google', 429, { error: { code: 429, message: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 10, model: gemini-3.8-flash\nPlease retry in 38.2s.', status: 'RESOURCE_EXHAUSTED' } }, 'rate_limit', 'Limite de uso atingido no provedor.', 'Aguarde cerca de 39 segundos e tente novamente. Se o limite continuar, verifique o plano da conta do Google.'],
   ['google', 429, { error: { code: 429, message: 'You exceeded your current quota, please check your plan and billing details.', status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '12s' }] } }, 'rate_limit', 'Limite de uso atingido no provedor.', 'Aguarde cerca de 12 segundos e tente novamente. Se o limite continuar, verifique o plano da conta do Google.'],

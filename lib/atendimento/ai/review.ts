@@ -1,4 +1,4 @@
-import { getComponentLabel } from "../catalog"
+import { START_ID, getComponentLabel } from "../catalog"
 import { validateFlow } from "../format"
 import type { AtendimentoFlow } from "../types"
 import { assembleFlow, finalizeFlow, type AssembleOptions, type AssembledFlow } from "./assemble"
@@ -25,6 +25,7 @@ export const PLATFORM_PATTERNS: readonly RegExp[] = [
   /^Informe o nome (do|da) (departamento|tag|fluxo de destino|template|agente|agente de IA|lista|tabulação)\./,
   /^Informe a URL/,
   /^Informe a planilha\./,
+  /^Selecione o agente de IA\./,
   /^API não validada/,
 ]
 
@@ -62,7 +63,7 @@ export function reviewFlow(assembled: AssembledFlow): GenerationIssue[] {
     const type = issue.nodeId ? types.get(issue.nodeId) : undefined
     add({
       severity: issue.severity,
-      scope: issue.severity === "error" ? "ia" : platformScope(issue.message),
+      scope: platformScope(issue.message),
       message: issue.message,
       ...(issue.nodeId ? { nodeId: issue.nodeId } : {}),
       ...(riId ? { riId } : {}),
@@ -106,8 +107,27 @@ export function evaluateRi(ri: RiFlow, options: AssembleOptions = {}): RoundEval
   return { ri, assembled, issues, pending: correctionItems(assembled, issues), score: scoreOf(issues) }
 }
 
+const finals = new WeakMap<RoundEvaluation, { errors: number; reached: number }>()
+
+function finalOf(evaluation: RoundEvaluation): { errors: number; reached: number } {
+  const known = finals.get(evaluation)
+  if (known) return known
+  const { flow } = finalizeFlow(evaluation.assembled)
+  const reached = new Set([START_ID])
+  for (const id of reached) for (const edge of flow.edges) if (edge.source === id) reached.add(edge.target)
+  const result = { errors: validateFlow(flow).filter((issue) => issue.severity === "error").length, reached: reached.size - 1 }
+  finals.set(evaluation, result)
+  return result
+}
+
 export function pickBetter(current: RoundEvaluation | null | undefined, candidate: RoundEvaluation): RoundEvaluation {
-  return current && compareScores(current.score, candidate.score) < 0 ? current : candidate
+  if (!current) return candidate
+  const before = finalOf(current)
+  const after = finalOf(candidate)
+  if (after.reached * 2 < before.reached) return current
+  if (before.reached * 2 < after.reached) return candidate
+  if (before.errors !== after.errors) return before.errors < after.errors ? current : candidate
+  return compareScores(current.score, candidate.score) < 0 ? current : candidate
 }
 
 export function needsCorrection(evaluation: RoundEvaluation): boolean {

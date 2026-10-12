@@ -47,10 +47,16 @@ interface Rejection {
   failure: GenerateFailure
 }
 
+interface StreamWatch {
+  refusal: boolean
+  failed: boolean
+}
+
 interface ModelSetup {
   model: LanguageModel
   providerOptions: ProviderOptions
   systemOptions?: ProviderOptions
+  watch: StreamWatch
 }
 
 interface Counts {
@@ -80,8 +86,13 @@ const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+={0,2})$/
 const SIGNATURES: Record<ImageType, number[]> = { "image/png": [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "image/jpeg": [0xff, 0xd8, 0xff] }
 const TEXT_ONLY: Partial<Record<ProviderId, RegExp>> = { openai: /^(o1-mini|o1-preview|o3-mini|gpt-3\.5|gpt-4(-0314|-0613)?$)/ }
+const REFUSAL_EVENT = /"type"\s*:\s*"(?:response\.refusal\.|refusal")/
+const FAILED_EVENT = /"type"\s*:\s*"response\.failed"/
+const WATCH_TAIL = 48
+const EMPTY_FLOW = "O modelo não gerou nenhum componente para esta descrição."
+const PERMISSION_MESSAGE = /permission_error|does not have permission/i
 const KEY_MESSAGE = /api[ _-]?key|x-api-key|unauthori[sz]ed|authenticat|API_KEY_INVALID|invalid[ _-]?key|incorrect[ _-]?key/i
-const BILLING_MESSAGE = /insufficient_quota|credit balance|spending limit|out of credits|payment required/i
+const BILLING_MESSAGE = /insufficient_quota|credit balance|spending limit|out of credits|have any credits|payment required/i
 const MODEL_MESSAGE = /model_not_found|not_found_error|\bmodel\b[^.\n]{0,80}\b(not found|does not exist|not exist)/i
 const RATE_MESSAGE = /rate[ _-]?limit|too many requests|resource_exhausted|exceeded your current quota/i
 const BUSY_MESSAGE = /overloaded|server_error|api_error|internal|unavailable/i
@@ -117,24 +128,64 @@ const BASE_URLS: Record<ProviderId, string> = {
   xai: "https://api.x.ai/v1",
 }
 
+class EmptyFlowError extends Error {
+  constructor() {
+    super(EMPTY_FLOW)
+    this.name = "EmptyFlowError"
+  }
+}
+
+function newWatch(): StreamWatch {
+  return { refusal: false, failed: false }
+}
+
+function observe(watch: StreamWatch): typeof fetch {
+  return async (input, init) => {
+    const response = await fetch(input, init)
+    if (!response.ok || !response.body) return response
+    const decoder = new TextDecoder()
+    let tail = ""
+    const body = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        const text = tail + decoder.decode(chunk, { stream: true })
+        if (REFUSAL_EVENT.test(text)) watch.refusal = true
+        if (FAILED_EVENT.test(text)) watch.failed = true
+        tail = text.slice(-WATCH_TAIL)
+        controller.enqueue(chunk)
+      },
+    }))
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers })
+  }
+}
+
 const FACTORIES: Record<ProviderId, (model: string, apiKey: string) => ModelSetup> = {
-  openai: (model, apiKey) => ({
-    model: createOpenAI({ apiKey, baseURL: BASE_URLS.openai }).responses(model),
-    providerOptions: { ...RI_PROVIDER_OPTIONS.openai },
-  }),
+  openai: (model, apiKey) => {
+    const watch = newWatch()
+    return {
+      model: createOpenAI({ apiKey, baseURL: BASE_URLS.openai, fetch: observe(watch) }).responses(model),
+      providerOptions: { ...RI_PROVIDER_OPTIONS.openai },
+      watch,
+    }
+  },
   anthropic: (model, apiKey) => ({
     model: createAnthropic({ apiKey, baseURL: BASE_URLS.anthropic })(model),
     providerOptions: { ...RI_PROVIDER_OPTIONS.anthropic },
     systemOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    watch: newWatch(),
   }),
   google: (model, apiKey) => ({
     model: createGoogleGenerativeAI({ apiKey, baseURL: BASE_URLS.google })(model),
     providerOptions: { ...RI_PROVIDER_OPTIONS.google },
+    watch: newWatch(),
   }),
-  xai: (model, apiKey) => ({
-    model: createXai({ apiKey, baseURL: BASE_URLS.xai }).responses(model),
-    providerOptions: { ...RI_PROVIDER_OPTIONS.xai },
-  }),
+  xai: (model, apiKey) => {
+    const watch = newWatch()
+    return {
+      model: createXai({ apiKey, baseURL: BASE_URLS.xai, fetch: observe(watch) }).responses(model),
+      providerOptions: { ...RI_PROVIDER_OPTIONS.xai },
+      watch,
+    }
+  },
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value)
@@ -281,6 +332,7 @@ function classify(status: number | undefined, text: string): FailureCode {
   if (status === 429 && !/insufficient_quota/i.test(text)) return "rate_limit"
   if (status >= 400 && status < 500 && (status === 402 || BILLING_MESSAGE.test(text))) return "billing"
   if (status === 401) return "invalid_key"
+  if (status === 403 && PERMISSION_MESSAGE.test(text)) return "forbidden"
   if ((status === 400 || status === 403) && KEY_MESSAGE.test(text)) return "invalid_key"
   if (status === 403) return "forbidden"
   if (status === 404 || (status === 400 && MODEL_MESSAGE.test(text))) return "model_not_found"
@@ -328,14 +380,17 @@ function describeFailure(error: unknown, input: GenerationInput, abort: Abort): 
   if (abort.client.aborted) return failure("aborted", input.provider)
   if (abort.deadline.aborted) return failure("timeout", input.provider)
   const cause = unwrap(error)
+  if (cause instanceof EmptyFlowError) return { success: false, code: "invalid_output", error: EMPTY_FLOW, details: "Descreva as etapas do atendimento e gere novamente.", field: "prompt" }
   if (NoObjectGeneratedError.isInstance(cause)) {
     if (cause.finishReason === "length") return failure("output_too_long", input.provider)
     if (cause.finishReason === "content-filter") return failure("content_filter", input.provider)
+    if (cause.finishReason === "error") return failure("provider_unavailable", input.provider)
     return failure("invalid_output", input.provider)
   }
   if (APICallError.isInstance(cause)) {
     const text = `${cause.message} ${(cause.responseBody ?? "").slice(0, 2000)}`
-    const code = cause.statusCode === undefined && isTimeout(cause.cause) ? "timeout" : classify(cause.statusCode, text)
+    const status = cause.statusCode !== undefined && cause.statusCode >= 400 ? cause.statusCode : undefined
+    const code = status === undefined && isTimeout(cause.cause) ? "timeout" : classify(status, text)
     const wait = code === "rate_limit" ? rateLimitWait(text, cause.responseHeaders?.["retry-after"]) : undefined
     return failure(code, input.provider, redact(cause.message, input.apiKey), wait)
   }
@@ -349,7 +404,37 @@ function describeFailure(error: unknown, input: GenerationInput, abort: Abort): 
 }
 
 function isFormatFailure(error: unknown): error is NoObjectGeneratedError {
-  return NoObjectGeneratedError.isInstance(error) && error.finishReason !== "length" && error.finishReason !== "content-filter"
+  return NoObjectGeneratedError.isInstance(error) && error.finishReason !== "length" && error.finishReason !== "content-filter" && error.finishReason !== "error"
+}
+
+function stopped(finishReason: "content-filter" | "error" | "unknown", source?: unknown): NoObjectGeneratedError {
+  const known = NoObjectGeneratedError.isInstance(source) ? source : undefined
+  return new NoObjectGeneratedError({
+    cause: source instanceof Error ? source : undefined,
+    text: known?.text ?? "",
+    response: known?.response ?? { id: "", timestamp: new Date(), modelId: "" },
+    usage: known?.usage ?? { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
+    finishReason,
+  })
+}
+
+function unfinished(): Promise<never> {
+  return new Promise((_, reject) => setTimeout(() => reject(stopped("unknown")), 0))
+}
+
+async function settle(object: PromiseLike<RiFlow>, watch: StreamWatch, signal: AbortSignal): Promise<RiFlow> {
+  let ri: RiFlow
+  try {
+    ri = await Promise.race([object, unfinished()])
+  } catch (error) {
+    if (signal.aborted) throw error
+    if (watch.refusal) throw stopped("content-filter", error)
+    if (watch.failed) throw stopped("error", error)
+    throw error
+  }
+  if (watch.refusal) throw stopped("content-filter")
+  if (watch.failed) throw stopped("error")
+  return ri
 }
 
 function addUsage(total: GenerationUsage, usage: LanguageModelUsage | undefined) {
@@ -369,6 +454,8 @@ function section(title: string, body: string, note?: string): string {
 }
 
 async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: AbortSignal, onPartial: (counts: Counts) => void): Promise<{ ri: RiFlow; usage: LanguageModelUsage }> {
+  setup.watch.refusal = false
+  setup.watch.failed = false
   const result = streamObject({
     model: setup.model,
     schema: riSchema,
@@ -395,7 +482,7 @@ async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: Ab
     }
   }
   await follow().catch(() => undefined)
-  const ri = await result.object
+  const ri = await settle(result.object, setup.watch, signal)
   onPartial({ nodes: ri.nodes.length, edges: ri.edges.length })
   return { ri, usage: await result.usage }
 }
@@ -452,6 +539,7 @@ async function runGeneration(input: GenerationInput, abort: Abort, progress: Pro
     progress({ stage: "corrigindo", round: round + 1, maxRounds: MAX_ROUNDS, pending: issues.filter((issue) => issue.scope === "ia").length })
   }
   if (!best) throw new Error("Nenhuma rodada produziu um fluxo.")
+  if (best.ri.nodes.length === 0) throw new EmptyFlowError()
   const { workflow, issues } = concludeGeneration(best)
   return {
     success: true,

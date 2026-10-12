@@ -575,7 +575,11 @@ test('the start is linked automatically, accepts an explicit start and keeps a s
   assert.deepEqual(taken.flow.edges.map(entry => [entry.source, entry.target]), [['inicio', '2'], ['2', '3']])
 
   const unnamed = assemble(flowOf([node('', 'envio_pergunta', { template: 'Olá.' }), node('c1', 'finalizar')], []))
-  assert.deepEqual(noteMessages(unnamed), ['O 1º componente veio sem id e passou a usar “c1”.', 'O id “c1” já está em uso; este componente passou a usar “c1_2”.'])
+  assert.deepEqual(noteMessages(unnamed), [
+    'O 1º componente veio sem id e passou a usar “c1”.',
+    'O id “c1” já está em uso; este componente passou a usar “c1_2”.',
+    'O início não estava ligado e foi ligado a “c1”, o componente que alcança mais passos. Revise.',
+  ])
 })
 
 test('connections back to a menu become Retornar ao Menu and shared endings are cloned', () => {
@@ -786,6 +790,7 @@ test('review scopes: errors and fixable warnings go to the AI, platform data sta
     'Informe o ID do template.',
     'Informe o ID do widget do chat.',
     'Informe o nome da tabulação.',
+    'Selecione o agente de IA.',
     'Informe o nome da tag.',
     'Informe o nome do agente.',
     'Informe o nome do departamento.',
@@ -877,6 +882,199 @@ test('correction messages cite the RI id, the component and the pending item, an
   assert.equal(describeFormatProblem({ cause: { cause: invalid.error } }), 'description: campo ausente; nodes.0.type: "inventado" não é um tipo da lista')
   assert.equal(describeFormatProblem({ name: 'AI_NoObjectGeneratedError', cause: { name: 'AI_JSONParseError' } }), 'o texto não é um JSON válido')
   assert.equal(formatFailurePrompt(new Error('x')), 'A resposta anterior não está no formato da RI: a resposta não seguiu o esquema. Responda de novo, só com a RI completa.')
+})
+
+test('a protocol by URL without the URL falls back to Automático and the missing URL stays with the user', () => {
+  const ri = flowOf([node('proto', 'protocolo', { opt: 'URL', text: 'Seu protocolo é {protocol}.' }), node('fim', 'finalizar')], [edge('inicio', '', 'proto'), edge('proto', '', 'fim')])
+  const evaluation = evaluateRi(ri, { now: NOW })
+  assert.equal(byRi(evaluation.assembled, 'proto').data.data.opt, 'Automático')
+  assert.deepEqual(evaluation.issues.map(issue => [issue.severity, issue.scope, issue.riId, issue.message]), [
+    ['warning', 'plataforma', 'proto', 'Sem a URL da API de protocolo no pedido, o tipo passou para Automático. Informe a URL no editor para usar o tipo URL.'],
+  ])
+  assert.equal(needsCorrection(evaluation), false)
+  const outcome = concludeGeneration(evaluation)
+  assert.deepEqual(errorsOf(outcome.workflow), [])
+  assert.ok(exportFlow(outcome.workflow).length > 0)
+
+  const given = assemble(flowOf([node('proto', 'protocolo', { opt: 'URL', url_api: 'https://example.com/protocolos', text: 'Protocolo {protocol}.' })], [edge('inicio', '', 'proto')]))
+  assert.equal(byRi(given, 'proto').data.data.opt, 'URL')
+
+  const manual = assemble(flowOf([node('proto', 'protocolo', { text: 'Protocolo {protocol}.' }), node('fim', 'finalizar')], [edge('inicio', '', 'proto'), edge('proto', '', 'fim')]))
+  byRi(manual, 'proto').data.data.opt = 'URL'
+  const review = reviewFlow(manual)
+  assert.deepEqual(review.map(issue => [issue.severity, issue.scope, issue.message]), [['error', 'plataforma', 'Informe a URL da API de protocolo.']])
+  assert.equal(needsCorrection({ issues: review }), false)
+})
+
+test('a wrong label on a single output uses that output, and one unknown label takes the only free output', () => {
+  const single = assemble(flowOf([
+    node('a', 'envio_pergunta', { template: 'Olá.' }),
+    node('b', 'envio_pergunta', { template: 'Tudo bem?' }),
+    node('c', 'envio_pergunta', { template: 'Até logo.' }),
+    node('fim', 'finalizar'),
+  ], [edge('inicio', '', 'a'), edge('a', '0', 'b'), edge('b', 'Continuar', 'c'), edge('c', 'Sim', 'fim')]))
+  assert.deepEqual([linkOf(single, 'a', 'b')?.sourceHandle, linkOf(single, 'b', 'c')?.sourceHandle, linkOf(single, 'c', 'fim')?.sourceHandle], ['output-0', 'output-0', 'output-0'])
+  assert.deepEqual(single.notes.map(note => [note.level, note.riId, note.message]), [
+    ['hint', 'a', 'A saída “0” não existe; foi usada a única saída, “Próximo”.'],
+    ['hint', 'b', 'A saída “Continuar” não existe; foi usada a única saída, “Próximo”.'],
+    ['hint', 'c', 'A saída “Sim” não existe; foi usada a única saída, “Próximo”.'],
+  ])
+  const review = reviewFlow(single)
+  assert.deepEqual(review, [])
+  assert.equal(correctionItems(single, review).length, 3)
+  const final = finalizeFlow(single)
+  assert.deepEqual(final.notes.filter(note => note.level !== 'hint'), [])
+  assert.equal(final.flow.nodes.length, 5)
+
+  const free = assemble(flowOf([node('api', 'consulta_api', { url_api: 'https://example.com/api' }), node('ok', 'finalizar'), node('erro', 'finalizar')], [edge('inicio', '', 'api'), edge('api', 'Sucesso', 'ok'), edge('api', 'Deu erro', 'erro')]))
+  assert.deepEqual([linkOf(free, 'api', 'ok')?.sourceHandle, linkOf(free, 'api', 'erro')?.sourceHandle], ['output-1', 'output-0'])
+  assert.deepEqual(free.notes.map(note => [note.scope, note.riId, note.message]), [['ajuste', 'api', 'A saída “Deu erro” não existe; a conexão para “erro” foi ligada à única saída livre, “Falha”. Revise.']])
+
+  const twoWrong = assemble(flowOf([node('api', 'consulta_api', { url_api: 'https://example.com/api' }), node('ok', 'finalizar'), node('erro', 'finalizar')], [edge('inicio', '', 'api'), edge('api', 'Talvez', 'ok'), edge('api', 'Deu erro', 'erro')]))
+  assert.equal(twoWrong.flow.edges.filter(entry => entry.source === byRi(twoWrong, 'api').id).length, 0)
+  assert.deepEqual(twoWrong.notes.map(note => note.scope), ['ia', 'ia'])
+})
+
+test('without a start link the start goes to the root that reaches the most components', () => {
+  const ri = flowOf([
+    node('fora', 'envio_pergunta', { template: 'Atendemos de segunda a sexta.' }),
+    node('fim_fora', 'finalizar'),
+    node('horario', 'timeConditions', { timeRules: JSON.stringify([{ weekDays: 'segunda a sexta', startTime: '08:00', endTime: '18:00' }]) }),
+    node('menu', 'envio_mensagem', { title: 'Escolha', options: '["Vendas","Suporte"]' }),
+    node('vendas', 'departamentos', { name: 'Vendas' }),
+    node('suporte', 'departamentos', { name: 'Suporte' }),
+  ], [edge('fora', '', 'fim_fora'), edge('horario', 'Dentro do horário', 'menu'), edge('menu', 'Vendas', 'vendas'), edge('menu', 'Suporte', 'suporte')])
+  const assembled = assemble(ri)
+  assert.equal(linkOf(assembled, 'inicio', 'horario')?.sourceHandle, 'output-0')
+  assert.deepEqual(assembled.notes.map(note => [note.scope, note.riId, note.message]), [['ajuste', 'horario', 'O início não estava ligado e foi ligado a “horario”, o componente que alcança mais passos. Revise.']])
+  const final = finalizeFlow(assembled)
+  const reachable = new Set([START_ID])
+  for (const id of reachable) for (const entry of final.flow.edges) if (entry.source === id) reachable.add(entry.target)
+  for (const id of ['horario', 'menu', 'vendas', 'suporte']) assert.ok(reachable.has(byRi(final, id).id), id)
+})
+
+test('a partial or empty correction never replaces a complete round, and a real fix still wins', () => {
+  const nodes = [
+    node('boas_vindas', 'envio_pergunta', { template: 'Olá.' }),
+    node('menu', 'envio_mensagem', { title: 'Escolha', options: '["Vendas","Suporte","Financeiro"]' }),
+    node('vendas', 'departamentos', { name: 'Vendas' }),
+    node('suporte', 'departamentos', { name: 'Suporte' }),
+    node('financeiro', 'envio_pergunta', { template: 'Boletos.' }),
+    node('fim', 'finalizar'),
+  ]
+  const edges = [edge('inicio', '', 'boas_vindas'), edge('boas_vindas', '', 'menu'), edge('menu', 'Vendas', 'vendas'), edge('menu', 'Suporte', 'suporte'), edge('menu', 'Financeiro', 'financeiro')]
+  const complete = evaluateRi(flowOf(nodes, edges), { now: NOW })
+  const partial = evaluateRi(flowOf([node('financeiro', 'envio_pergunta', { template: 'Boletos.' }), node('fim', 'finalizar')], [edge('financeiro', '', 'fim')]), { now: NOW })
+  const empty = evaluateRi(flowOf([], []), { now: NOW })
+  assert.ok(compareScores(partial.score, complete.score) < 0)
+  assert.ok(compareScores(empty.score, complete.score) < 0)
+  assert.equal(pickBetter(complete, partial), complete)
+  assert.equal(pickBetter(complete, empty), complete)
+  assert.equal(pickBetter(empty, complete), complete)
+  const fixed = evaluateRi(flowOf(nodes, [...edges, edge('financeiro', '', 'fim')]), { now: NOW })
+  assert.equal(pickBetter(complete, fixed), fixed)
+  assert.equal(pickBetter(fixed, complete), fixed)
+})
+
+test('a time rule that crosses midnight becomes valid rules instead of a blocking error', () => {
+  const night = configure('timeConditions', { timeRules: JSON.stringify([{ weekDays: 'segunda a sexta', startTime: '22:00', endTime: '06:00' }]) })
+  assert.deepEqual(night.data.timeRules, [
+    { id: 'rule-1', weekDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], startTime: '22:00', endTime: '23:59' },
+    { id: 'rule-2', weekDays: ['tuesday', 'wednesday', 'thursday', 'friday', 'saturday'], startTime: '00:00', endTime: '06:00' },
+  ])
+  assert.deepEqual(night.notes, [{ level: 'hint', message: 'A regra das 22:00 às 06:00 passa da meia-noite e foi dividida em duas: 22:00 às 23:59 e 00:00 às 06:00 do dia seguinte.' }])
+  const sunday = configure('timeConditions', { timeRules: JSON.stringify([{ weekDays: ['sunday'], startTime: '23:00', endTime: '01:00' }]) })
+  assert.deepEqual(sunday.data.timeRules.map(rule => rule.weekDays), [['sunday'], ['monday']])
+  const midnight = configure('timeConditions', { timeRules: JSON.stringify([{ weekDays: ['saturday'], startTime: '18:00', endTime: '00:00' }]) })
+  assert.deepEqual(midnight.data.timeRules, [{ id: 'rule-1', weekDays: ['saturday'], startTime: '18:00', endTime: '23:59' }])
+  assert.deepEqual(midnight.notes, [{ level: 'hint', message: 'A regra das 18:00 às 00:00 passou a terminar às 23:59.' }])
+
+  const evaluation = evaluateRi(flowOf([node('plantao', 'timeConditions', { timeRules: JSON.stringify([{ weekDays: 'todos', startTime: '22:00', endTime: '07:00' }]) }), node('fora', 'finalizar'), node('dentro', 'finalizar')], [edge('inicio', '', 'plantao'), edge('plantao', '1', 'fora'), edge('plantao', '2', 'dentro')]), { now: NOW })
+  assert.deepEqual(errorsOf(evaluation.assembled.flow), [])
+  assert.equal(needsCorrection(evaluation), false)
+  assert.ok(exportFlow(concludeGeneration(evaluation).workflow).length > 0)
+})
+
+test('response_map accepts a variable map and Portuguese keys, and empty mappings are reported', () => {
+  const api = { url_api: 'https://example.com/pedidos' }
+  const mapped = configure('consulta_api', { ...api, response_map: JSON.stringify({ status_pedido: 'pedido.status', 'pedido.previsao': 'previsao' }) })
+  assert.deepEqual(mapped.data.response_map, [
+    { path: 'pedido.status', key: '', sample: '', variable: 'status_pedido' },
+    { path: 'pedido.previsao', key: '', sample: '', variable: 'previsao' },
+  ])
+  assert.deepEqual(mapped.notes, [])
+  const item = configure('consulta_api', { ...api, response_map: JSON.stringify({ path: 'pedido.status', variable: 'status' }) })
+  assert.deepEqual(item.data.response_map, [{ path: 'pedido.status', key: '', sample: '', variable: 'status' }])
+  const aliases = configure('consulta_api', { ...api, response_map: JSON.stringify([{ campo: 'pedido.status', chave: 'status', exemplo: 'entregue', variavel: 'status_pedido' }, { caminho: 'pedido.id' }]) })
+  assert.deepEqual(aliases.data.response_map, [
+    { path: 'pedido.status', key: 'status', sample: 'entregue', variable: 'status_pedido' },
+    { path: 'pedido.id', key: '', sample: '', variable: '' },
+  ])
+  assert.deepEqual(aliases.notes, [{ level: 'warning', message: 'Cada item de response_map precisa de path e variable.' }])
+  const columns = configure('googleSheetsAppend', { spreadsheet: 'planilha-1', columns: JSON.stringify(['Nota', 'Contato']) })
+  assert.deepEqual(columns.data.columns, [{ header: 'Nota', value: '' }, { header: 'Contato', value: '' }])
+  assert.deepEqual(columns.notes, [{ level: 'warning', message: 'Cada coluna de columns precisa de header e value; use {{variavel}} no value.' }])
+})
+
+test('a menu message above 1024 characters is split into a message before the menu', () => {
+  const notice = Array.from({ length: 16 }, (_, index) => `Item ${index + 1}: seus dados são tratados conforme a LGPD e usados só para este atendimento.`).join(' ')
+  const title = `${notice}\n\nEscolha uma opção:`
+  assert.ok(title.length > 1024)
+  const ri = flowOf([node('menu', 'envio_mensagem', { title, options: '["Vendas","Suporte"]' }), node('vendas', 'departamentos', { name: 'Vendas' }), node('suporte', 'departamentos', { name: 'Suporte' })], [edge('inicio', '', 'menu'), edge('menu', 'Vendas', 'vendas'), edge('menu', 'Suporte', 'suporte')])
+  const assembled = assemble(ri)
+  assert.ok(errorsOf(assembled.flow).some(issue => issue.message.endsWith('o limite é 1024.')))
+  const final = finalizeFlow(assembled)
+  const menu = byRi(final, 'menu')
+  const lead = final.flow.nodes.find(entry => entry.data.type === 'envio_pergunta')
+  assert.equal(menu.data.data.title, 'Escolha uma opção:')
+  assert.equal(lead.data.data.template, notice)
+  assert.deepEqual(final.flow.edges.filter(entry => entry.target === lead.id || entry.target === menu.id).map(entry => [entry.source, entry.target]), [[START_ID, lead.id], [lead.id, menu.id]])
+  assert.deepEqual(final.notes.map(note => [note.scope, note.riId, note.message]), [['ajuste', 'menu', 'A mensagem do menu passava de 1024 caracteres; o começo foi para um Enviar Mensagem antes do menu. Revise.']])
+  assert.deepEqual(errorsOf(final.flow), [])
+  assert.ok(exportFlow(final.flow).length > 0)
+
+  const flat = 'palavra '.repeat(200).trim()
+  const plain = finalizeFlow(assemble(flowOf([node('menu', 'envio_mensagem', { title: flat, options: '["A"]' }), node('fim', 'finalizar')], [edge('inicio', '', 'menu'), edge('menu', 'A', 'fim')])))
+  const plainMenu = byRi(plain, 'menu')
+  const plainLead = plain.flow.nodes.find(entry => entry.data.type === 'envio_pergunta')
+  assert.ok(plainMenu.data.data.title.length <= 1024)
+  assert.equal(`${plainLead.data.data.template} ${plainMenu.data.data.title}`, flat)
+  assert.deepEqual(errorsOf(plain.flow), [])
+})
+
+test('required keys left empty are sent back to the model once, without repeating what the validation already says', () => {
+  const assembled = assemble(flowOf([
+    node('espera', 'waitForAnswer', { logToActivity: 'sim' }),
+    node('crm', 'crmContact'),
+    node('msg', 'envio_pergunta'),
+    node('fim', 'finalizar'),
+  ], [edge('inicio', '', 'espera'), edge('espera', '', 'crm'), edge('crm', 'Sucesso', 'msg'), edge('msg', '', 'fim')]))
+  assert.deepEqual(assembled.notes.map(note => [note.scope, note.riId, note.message]), [
+    ['ia', 'espera', 'Preencha customFields (Salvar resposta no campo), que é obrigatório.'],
+    ['ia', 'crm', 'Preencha successMessage (Mensagem de sucesso), que é obrigatório.'],
+    ['ia', 'crm', 'Preencha errorMessage (Mensagem de erro), que é obrigatório.'],
+  ])
+  const evaluation = evaluateRi(flowOf([node('espera', 'waitForAnswer', { logToActivity: 'sim' }), node('fim', 'finalizar')], [edge('inicio', '', 'espera'), edge('espera', '', 'fim')]), { now: NOW })
+  assert.equal(needsCorrection(evaluation), true)
+  assert.ok(evaluation.pending.includes('[espera] Aguardando Mensagem: Preencha customFields (Salvar resposta no campo), que é obrigatório.'))
+  assert.equal(reviewFlow(assembled).filter(issue => issue.riId === 'msg' && issue.message.startsWith('Preencha')).length, 1)
+})
+
+test('a menu option linked to the menu itself becomes Retornar ao Menu', () => {
+  const assembled = assemble(flowOf([
+    node('menu', 'envio_mensagem', { title: 'Menu', options: '["Horários","Ver as opções de novo"]' }),
+    node('horarios', 'envio_pergunta', { template: 'Das 8h às 18h.' }),
+    node('fim', 'finalizar'),
+  ], [edge('inicio', '', 'menu'), edge('menu', 'Horários', 'horarios'), edge('menu', 'Ver as opções de novo', 'menu'), edge('horarios', '', 'fim')]))
+  const menu = byRi(assembled, 'menu')
+  const back = assembled.flow.nodes.find(entry => entry.data.type === 'voltar')
+  assert.deepEqual(assembled.flow.edges.find(entry => entry.target === back.id), { type: 'deletable', source: menu.id, sourceHandle: 'output-1', target: back.id, id: `xy-edge__${menu.id}output-1-${back.id}` })
+  assert.equal(back.data.data.targetNodeId, menu.id)
+  assert.equal(back.data.data.targetNodeName, 'Menu')
+  assert.deepEqual(assembled.notes.map(note => [note.scope, note.riId, note.message]), [['ajuste', 'menu', 'A conexão de volta ao menu “Menu” foi trocada por Retornar ao Menu.']])
+  assert.deepEqual(validateFlow(assembled.flow), [])
+  const final = finalizeFlow(assembled)
+  assert.ok(!final.flow.nodes.some(entry => entry.data.type === 'finalizar' && entry.id !== byRi(final, 'fim').id))
 })
 
 test('repairRiText fixes fences, non text values, config maps and type names', () => {
@@ -988,7 +1186,8 @@ test('the system prompt is generated from the catalog: every type, every accepte
     const listed = [...block.matchAll(/^- ([^:]+):/gm)].map(match => match[1])
     assert.deepEqual(listed, acceptedKeys(type), type)
     for (const key of fixedKeys(type)) assert.ok(!listed.includes(key), `${type}.${key}`)
-    if (!definition.outputRule && definition.outputLabels.length === 0) assert.ok(block.includes('Sem saídas: encerra o caminho.'), type)
+    if (type === 'note') assert.ok(block.includes('Sem entradas nem saídas: fica fora do caminho.') && !block.includes('encerra o caminho'), type)
+    else if (!definition.outputRule && definition.outputLabels.length === 0) assert.ok(block.includes('Sem saídas: encerra o caminho.'), type)
     for (const label of definition.outputRule ? [] : definition.outputLabels) assert.ok(block.includes(JSON.stringify(label)), `${type} ${label}`)
   }
   for (const rule of [

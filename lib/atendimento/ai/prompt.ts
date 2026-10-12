@@ -1,4 +1,4 @@
-import { categories, componentCatalog, expectedFieldTypes } from "../catalog"
+import { NOTE_TYPE, categories, componentCatalog, expectedFieldTypes } from "../catalog"
 import type { ComponentDefinition, FieldSpec, JsonValue } from "../types"
 import { AUTO_COMPONENT_LIMIT, COUNT_LIMITS, RI_LIMITS, SIZE_RANGES, type GenerationSize } from "./contracts"
 import { guideOf, type ComponentGuide } from "./guide"
@@ -181,10 +181,12 @@ function fieldLine(definition: ComponentDefinition, field: FieldSpec, guide: Com
   const fallback = TEXT_KINDS.has(field.kind) ? stringValue(defaults[field.key]) : undefined
   if (fallback) parts.push(`padrão ${fallback}`)
   const hint = field.hint ? ` ${field.hint}` : ""
-  return `- ${field.key}: ${parts.join(", ")}. ${field.label}.${hint}`
+  const usual = field.suggestions?.length ? ` Valores usuais: ${field.suggestions.map((value) => JSON.stringify(value)).join(", ")}.` : ""
+  return `- ${field.key}: ${parts.join(", ")}. ${field.label}.${hint}${usual}`
 }
 
 function outputsLine(definition: ComponentDefinition, guide: ComponentGuide | undefined): string {
+  if ((definition.nativeType ?? definition.id) === NOTE_TYPE) return "Sem entradas nem saídas: fica fora do caminho."
   if (definition.outputRule) return `Saídas: ${guide?.dynamic ?? "dinâmicas."}`
   const labels = definition.outputLabels ?? []
   if (!labels.length) return "Sem saídas: encerra o caminho."

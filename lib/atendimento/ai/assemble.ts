@@ -1,11 +1,12 @@
 import { MENU_TYPE, NOTE_TYPE, START_ID, START_TYPE, TIME_TYPE, getComponentLabel, getDefinition } from "../catalog"
-import { createEdge, duplicateNode, isObject, newFlow, newNode, nextNodeId, optionIndices, outputHandles, outputLabel } from "../format"
+import { createEdge, duplicateNode, isObject, newFlow, newNode, nextNodeId, optionIndices, outputHandles, outputLabel, validateFlow } from "../format"
 import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode, JsonObject } from "../types"
 import { LIMITS, RI_LIMITS, type IssueScope } from "./contracts"
+import { guideOf } from "./guide"
 import { layoutFlow } from "./layout"
 import { canonicalType, coerceRi, type RiFlow } from "./ri"
 import { compactKey, foldText, listQuoted, quote, shorten } from "./text"
-import { configureNode, settleData, type NoteLevel } from "./values"
+import { acceptedKeys, configureNode, settleData, type NoteLevel } from "./values"
 
 export interface AssemblyNote {
   level: NoteLevel
@@ -36,6 +37,10 @@ const START_ALIASES = new Set(["inicio", "start", "iniciarfluxo", "triggermessag
 const NAMED_OUTPUT = /^(?:opcao|opção|saida|saída|caminho|condicao|condição|opt|output|option|path|exit)[\s_-]*(\d+)$/
 const DIRECT_OUTPUT = /^output-(\d+)$/i
 const FALLBACK_NAME = "Fluxo gerado por IA"
+const PROTOCOL_TYPE = "protocolo"
+const MESSAGE_TYPE = "envio_pergunta"
+const MENU_TITLE_LIMIT = 1024
+const UNCHECKED_KINDS = new Set(["menuOptions", "conditionPairs", "menuNode"])
 
 const labelKey = (value: string) => foldText(value).replace(/^["'“”‘’]+|["'“”‘’.]+$/g, "").trim()
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -108,22 +113,13 @@ function routeMenuReturns(flow: AtendimentoFlow, riIds: Map<string, string>, not
     if (incoming.length < 2) continue
     const below = descendants(flow.edges, menu.id)
     const kept = incoming.find((edge) => !below.has(edge.source)) ?? incoming[0]
-    const title = String(menu.data.data.title ?? "").trim() || `ID ${menu.id}`
     for (const edge of incoming) {
       if (edge === kept) continue
       const node = newNode(RETURN_TYPE, { x: 0, y: 0 }, nextNodeId(flow.nodes))
       node.data.data = returnData(menu.id)
       flow.nodes.push(node)
       retarget(flow, edge, node.id)
-      const origin = riIds.get(edge.source)
-      notes.push({
-        level: "warning",
-        scope: "ajuste",
-        message: `A conexão de volta ao menu ${quote(title)} foi trocada por Retornar ao Menu.`,
-        nodeId: node.id,
-        ...(origin ? { riId: origin } : {}),
-        type: RETURN_TYPE,
-      })
+      notes.push(returnNote(menu, node, riIds.get(edge.source)))
     }
   }
 }
@@ -175,6 +171,68 @@ function numberTimeRules(flow: AtendimentoFlow, now: Date): void {
     if (node.data.type !== TIME_TYPE || !Array.isArray(rules)) continue
     node.data.data.timeRules = rules.map((rule) => (isObject(rule) ? { ...rule, id: `rule-${sequence++}` } : rule))
   }
+}
+
+function returnNote(menu: AtendimentoNode, back: AtendimentoNode, origin: string | undefined): AssemblyNote {
+  const title = String(menu.data.data.title ?? "").trim() || `ID ${menu.id}`
+  return {
+    level: "warning",
+    scope: "ajuste",
+    message: `A conexão de volta ao menu ${quote(title)} foi trocada por Retornar ao Menu.`,
+    nodeId: back.id,
+    ...(origin ? { riId: origin } : {}),
+    type: RETURN_TYPE,
+  }
+}
+
+const isEmptyValue = (value: unknown) =>
+  value === undefined || value === null || (typeof value === "string" && value.trim() === "") || (Array.isArray(value) && value.length === 0) || (isObject(value) && Object.keys(value).length === 0)
+
+function requireKeys(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, notes: AssemblyNote[]): void {
+  const flagged = new Set<string>()
+  for (const issue of validateFlow(flow)) for (const field of issue.fields ?? []) flagged.add(JSON.stringify([issue.nodeId ?? "", field.split(".")[0]]))
+  for (const node of flow.nodes) {
+    const type = node.data.type
+    const required = guideOf(type)?.required
+    if (!required?.length) continue
+    const accepted = acceptedKeys(type)
+    const fields = getDefinition(type)?.fields ?? []
+    for (const key of required) {
+      const field = fields.find((entry) => entry.key === key)
+      if (!field || UNCHECKED_KINDS.has(field.kind) || !accepted.includes(key)) continue
+      if (flagged.has(JSON.stringify([node.id, key])) || !isEmptyValue(node.data.data[key])) continue
+      const origin = riIds.get(node.id)
+      notes.push({ level: "warning", scope: "ia", message: `Preencha ${key} (${field.label}), que é obrigatório.`, nodeId: node.id, ...(origin ? { riId: origin } : {}), type })
+    }
+  }
+}
+
+function linkStart(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, notes: AssemblyNote[]): void {
+  if (flow.edges.some((edge) => edge.source === START_ID)) return
+  const entered = new Set(flow.edges.map((edge) => edge.target))
+  const candidates = flow.nodes.filter((node) => node.id !== START_ID && node.data.type !== NOTE_TYPE)
+  const roots = candidates.filter((node) => !entered.has(node.id))
+  let first: AtendimentoNode | undefined
+  let best = -1
+  for (const node of roots.length ? roots : candidates) {
+    const size = descendants(flow.edges, node.id).size
+    if (size > best) {
+      first = node
+      best = size
+    }
+  }
+  if (!first) return
+  flow.edges.unshift(createEdge(flow.edges, START_ID, "output-0", first.id))
+  if (roots.length === 1) return
+  const origin = riIds.get(first.id)
+  notes.push({
+    level: "warning",
+    scope: "ajuste",
+    message: `O início não estava ligado e foi ligado a ${quote(origin ?? first.id)}, o componente que alcança mais passos. Revise.`,
+    nodeId: first.id,
+    ...(origin ? { riId: origin } : {}),
+    type: first.data.type,
+  })
 }
 
 function resolveOutput(node: AtendimentoNode, handles: readonly string[], output: string, busy: ReadonlySet<string>): string | undefined {
@@ -248,6 +306,17 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
     platformIds.set(riId, node.id)
     riIds.set(node.id, riId)
     for (const note of outcome.notes) notes.push({ level: note.level, scope: "ia", message: note.message, riId, nodeId: node.id, type })
+    if (type === PROTOCOL_TYPE && node.data.data.opt === "URL" && String(node.data.data.url_api ?? "").trim() === "") {
+      node.data.data.opt = "Automático"
+      notes.push({
+        level: "warning",
+        scope: "plataforma",
+        message: "Sem a URL da API de protocolo no pedido, o tipo passou para Automático. Informe a URL no editor para usar o tipo URL.",
+        riId,
+        nodeId: node.id,
+        type,
+      })
+    }
     if (type === RETURN_TYPE) returns.push({ node, target: outcome.menuTarget ?? "", riId })
   })
   if (dropped) notes.push({ level: "warning", scope: "ia", message: `O fluxo aceita até ${RI_LIMITS.nodes} componentes; ${dropped} foram descartados.` })
@@ -294,6 +363,7 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
   const edgeLimit = ri.edges.length > RI_LIMITS.edges
   if (edgeLimit) notes.push({ level: "warning", scope: "ia", message: `O fluxo aceita até ${RI_LIMITS.edges} conexões; ${ri.edges.length - RI_LIMITS.edges} foram descartadas.` })
   const used = new Map<string, Map<string, string>>()
+  const unresolved = new Map<string, Array<{ target: string; output: string; to: string; note: AssemblyNote }>>()
   for (const edge of ri.edges.slice(0, RI_LIMITS.edges)) {
     const from = edge.from.trim()
     const to = edge.to.trim()
@@ -302,7 +372,11 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
     const sourceNode = source ? nodes.get(source) : undefined
     const sourceType = sourceNode?.data.type
     const origin = source ? riIds.get(source) : undefined
-    const report = (message: string) => notes.push({ level: "warning", scope: "ia", message, ...(origin ? { riId: origin } : {}), ...(source ? { nodeId: source } : {}), ...(sourceType ? { type: sourceType } : {}) })
+    const report = (message: string, level: NoteLevel = "warning"): AssemblyNote => {
+      const note: AssemblyNote = { level, scope: "ia", message, ...(origin ? { riId: origin } : {}), ...(source ? { nodeId: source } : {}), ...(sourceType ? { type: sourceType } : {}) }
+      notes.push(note)
+      return note
+    }
     if (!source || !sourceNode) {
       notes.push({ level: "warning", scope: "ia", message: `A conexão de ${quote(from)} para ${quote(to)} foi descartada: o id ${quote(from)} não existe.` })
       continue
@@ -320,7 +394,8 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
       report(`A conexão para ${quote(to)} foi descartada: nada se liga ao Iniciar Fluxo.`)
       continue
     }
-    if (source === target) {
+    const loop = source === target && sourceType === MENU_TYPE
+    if (source === target && !loop) {
       report(`A conexão para ${quote(to)} foi descartada: um componente não se liga a ele mesmo.`)
       continue
     }
@@ -330,12 +405,18 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
       continue
     }
     const busy = used.get(source) ?? new Map<string, string>()
-    const handle = resolveOutput(sourceNode, handles, edge.output, new Set(busy.keys()))
+    const output = edge.output.trim()
     const labels = handles.map((entry) => outputLabel(sourceNode, entry))
+    let handle = resolveOutput(sourceNode, handles, edge.output, new Set(busy.keys()))
+    if (!handle && output && handles.length === 1) {
+      handle = handles[0]
+      report(`A saída ${quote(output)} não existe; foi usada a única saída, ${quote(labels[0])}.`, "hint")
+    }
     if (!handle) {
-      report(edge.output.trim()
-        ? `A conexão para ${quote(to)} foi descartada: a saída ${quote(edge.output.trim())} não existe. Saídas: ${listQuoted(labels)}.`
+      const note = report(output
+        ? `A conexão para ${quote(to)} foi descartada: a saída ${quote(output)} não existe. Saídas: ${listQuoted(labels)}.`
         : `A conexão para ${quote(to)} foi descartada: informe a saída. Saídas: ${listQuoted(labels)}.`)
+      if (output && !loop) unresolved.set(source, [...(unresolved.get(source) ?? []), { target, output, to, note }])
       continue
     }
     const taken = busy.get(handle)
@@ -343,18 +424,41 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
       report(`A conexão para ${quote(to)} foi descartada: a saída ${quote(outputLabel(sourceNode, handle))} já está ligada a ${quote(riIds.get(taken) ?? taken)}.`)
       continue
     }
-    busy.set(handle, target)
+    let destination = target
+    if (loop) {
+      const back = newNode(RETURN_TYPE, { x: 0, y: 0 }, nextNodeId(flow.nodes))
+      back.data.data = returnData(source)
+      flow.nodes.push(back)
+      destination = back.id
+      notes.push(returnNote(sourceNode, back, origin))
+    }
+    busy.set(handle, destination)
     used.set(source, busy)
-    flow.edges.push(createEdge(flow.edges, source, handle, target))
+    flow.edges.push(createEdge(flow.edges, source, handle, destination))
   }
 
-  if (!flow.edges.some((edge) => edge.source === START_ID)) {
-    const entered = new Set(flow.edges.map((edge) => edge.target))
-    const candidates = flow.nodes.filter((node) => node.id !== START_ID && node.data.type !== NOTE_TYPE)
-    const first = candidates.find((node) => !entered.has(node.id)) ?? candidates[0]
-    if (first) flow.edges.unshift(createEdge(flow.edges, START_ID, "output-0", first.id))
+  for (const [source, pending] of unresolved) {
+    const sourceNode = nodes.get(source)
+    if (!sourceNode || pending.length !== 1) continue
+    const busy = used.get(source) ?? new Map<string, string>()
+    const free = outputHandles(sourceNode).filter((handle) => !busy.has(handle))
+    if (free.length !== 1) continue
+    const [entry] = pending
+    busy.set(free[0], entry.target)
+    used.set(source, busy)
+    flow.edges.push(createEdge(flow.edges, source, free[0], entry.target))
+    const index = notes.indexOf(entry.note)
+    if (index >= 0) {
+      notes[index] = {
+        ...entry.note,
+        scope: "ajuste",
+        message: `A saída ${quote(entry.output)} não existe; a conexão para ${quote(entry.to)} foi ligada à única saída livre, ${quote(outputLabel(sourceNode, free[0]))}. Revise.`,
+      }
+    }
   }
 
+  linkStart(flow, riIds, notes)
+  requireKeys(flow, riIds, notes)
   routeMenuReturns(flow, riIds, notes)
   cloneSharedTails(flow, riIds)
   settleReturns(flow)
@@ -399,6 +503,40 @@ function fillRequired(node: AtendimentoNode): string[] {
   return filled
 }
 
+function titleCut(title: string): number {
+  const floor = title.length - MENU_TITLE_LIMIT
+  const fits = (end: number) => end >= floor && end < title.length && title.slice(0, end).trim() !== "" && title.slice(end).trim() !== ""
+  const ends = (pattern: RegExp) => [...title.matchAll(pattern)].map((match) => (match.index ?? 0) + match[0].length).filter(fits)
+  for (const pattern of [/\n[ \t]*\n\s*/g, /\n\s*/g, /[.!?:;]\s+/g]) {
+    const found = ends(pattern)
+    if (found.length) return found[found.length - 1]
+  }
+  return ends(/\s+/g)[0] ?? floor
+}
+
+function splitLongMenus(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, notes: AssemblyNote[]): void {
+  for (const menu of flow.nodes.filter((node) => node.data.type === MENU_TYPE)) {
+    const title = String(menu.data.data.title ?? "")
+    if (title.length <= MENU_TITLE_LIMIT) continue
+    const cut = titleCut(title)
+    const lead = newNode(MESSAGE_TYPE, { x: 0, y: 0 }, nextNodeId(flow.nodes))
+    lead.data.data.template = title.slice(0, cut).trim()
+    menu.data.data.title = title.slice(cut).trim()
+    flow.nodes.push(lead)
+    for (const edge of flow.edges.filter((entry) => entry.target === menu.id)) retarget(flow, edge, lead.id)
+    flow.edges.push(createEdge(flow.edges, lead.id, "output-0", menu.id))
+    const origin = riIds.get(menu.id)
+    notes.push({
+      level: "warning",
+      scope: "ajuste",
+      message: `A mensagem do menu passava de ${MENU_TITLE_LIMIT} caracteres; o começo foi para um Enviar Mensagem antes do menu. Revise.`,
+      nodeId: lead.id,
+      ...(origin ? { riId: origin } : {}),
+      type: MESSAGE_TYPE,
+    })
+  }
+}
+
 function detachUnreachable(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, notes: AssemblyNote[]): void {
   const reachable = new Set([START_ID, ...descendants(flow.edges, START_ID)])
   const detached = new Set(flow.edges.filter((edge) => !reachable.has(edge.source)).map((edge) => edge.source))
@@ -435,6 +573,7 @@ export function finalizeFlow(assembled: AssembledFlow): AssembledFlow {
       type: node.data.type,
     })
   }
+  splitLongMenus(flow, riIds, notes)
   detachUnreachable(flow, riIds, notes)
   const reachable = new Set([START_ID, ...descendants(flow.edges, START_ID)])
   for (const node of [...flow.nodes]) {

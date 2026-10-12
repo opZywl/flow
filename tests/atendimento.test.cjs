@@ -469,6 +469,9 @@ const SPEC = {
     outputs: [],
     measured: [260, 102],
     html: true,
+    configure: { 'df-OpenAI': 'ChatGPT' },
+    pending: [['warning', 'Selecione o agente de IA.']],
+    blank: { 'df-OpenAI': ['warning', 'Selecione o agente de IA.'] },
   },
   googleSheetsAppend: {
     defaults: { spreadsheet: '', sheetName: '', columns: [{ header: 'Data', value: '{{DATE_TIME_BRAZIL}}' }, { header: 'Nome', value: '{{nome}}' }, { header: 'Telefone', value: '{{telefone}}' }], resultVar: '' },

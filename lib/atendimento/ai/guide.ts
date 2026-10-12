@@ -45,7 +45,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     does: "Verifica se o momento atual está dentro dos horários de atendimento.",
     required: ["timeRules"],
     outputs: ["fora de todas as regras de horário", "dentro de alguma regra"],
-    rules: ["weekDays em inglês, de monday a sunday; horários HH:MM, com o início antes do fim."],
+    rules: ["weekDays em inglês, de monday a sunday; horários HH:MM, com o início antes do fim.", "Horário que passa da meia-noite vira duas regras. Exemplo: das 22:00 às 07:00 de segunda a sexta fica das 22:00 às 23:59 de segunda a sexta e das 00:00 às 07:00 de terça a sábado."],
   },
   solicitar_dados: {
     does: "Pede um dado ao contato (CPF, CNPJ ou outro), valida em uma API e repete até o limite de tentativas.",
@@ -59,7 +59,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     required: ["text"],
     platform: ["url_api"],
     outputs: NEXT,
-    rules: ["{protocol} no texto é trocado pelo número.", "opt \"URL\" exige url_api."],
+    rules: ["{protocol} no texto é trocado pelo número.", "Use opt \"URL\" só quando o pedido informar a URL da API em url_api; sem ela, use \"Automático\"."],
   },
   consulta_api: {
     does: "Chama uma API com dados do atendimento e guarda campos da resposta em variáveis.",
@@ -77,7 +77,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     does: "Envia um arquivo por URL, como PDF, áudio ou vídeo.",
     platform: ["url"],
     outputs: NEXT,
-    rules: ["filename e mime_type vazios são deduzidos da URL.", "voice_note \"true\" só com áudio OGG."],
+    rules: ["Com filename vazio, o nome vem do fim do caminho da URL. Com mime_type vazio, o tipo vem da extensão desse nome, só nas extensões comuns como pdf, mp3, ogg, mp4, jpg, png, docx e xlsx. Se a URL não termina em um nome com uma dessas extensões, informe filename e mime_type.", "voice_note \"true\" só com áudio OGG."],
   },
   envio_imagem: {
     does: "Envia uma imagem por URL, com legenda opcional.",
@@ -191,9 +191,8 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   crmLeadUpdate: {
     does: "Atualiza o status, as tags ou o valor de um lead.",
-    required: ["setStatus"],
     outputs: ["lead atualizado", "falha ao atualizar"],
-    rules: ["Defina ao menos um entre setStatus, addTags e setValue."],
+    rules: ["Defina ao menos um entre setStatus, addTags e setValue, só os que o pedido mandar alterar."],
   },
   crmActivity: {
     does: "Cria uma atividade de acompanhamento no CRM.",
@@ -266,12 +265,15 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   rdStationConversion: {
     does: "Registra uma conversão no RD Station.",
     required: ["conversionIdentifier", "email"],
+    platform: ["customFields"],
     outputs: ["conversão registrada", "falha ao registrar"],
   },
   hubspotUpsertContact: {
     does: "Cria ou atualiza o contato no HubSpot.",
     required: ["email"],
+    platform: ["properties"],
     outputs: ["contato registrado", "falha ao registrar"],
+    rules: ["lifecyclestage aceita só os valores usuais listados, em inglês e sem traduzir. Sem estágio no pedido, deixe vazio."],
   },
   multiple_condicional_api: {
     does: "Compara variáveis com valores; cada condição gera uma saída. Não há saída para quando nenhuma condição vale.",
@@ -280,7 +282,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     rules: ["var é o nome da variável, sem {{ }}."],
   },
   Data_Input_Condicional: {
-    does: "Valida um campo informado pelo contato.",
+    does: "Aguarda a resposta do contato, guarda o texto em field e segue por Válido ou Inválido. Faça a pergunta antes, com Enviar Mensagem; não coloque Aguardando Mensagem antes dele, porque ele mesmo aguarda a resposta.",
     required: ["field"],
     platform: ["conditions"],
     outputs: ["valor válido", "valor inválido"],
@@ -330,6 +332,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   trackEvent: {
     does: "Registra um evento de métrica do atendimento.",
     required: ["eventName"],
+    platform: ["properties"],
     outputs: NEXT,
   },
   tabulation: {

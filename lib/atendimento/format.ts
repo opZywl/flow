@@ -775,6 +775,9 @@ const CHECKS = new Map<string, Check>([
     if (!nonempty(data.sequenceId) && data.allSequences !== true) report("Informe o ID da lista ou marque Remover de todas as listas.", "warning", "sequenceId", "allSequences")
   }],
   ["aiAgentBlock", checkAgent],
+  ["OpenAI", ({ data, report }) => {
+    if (!nonempty(data.aiModel) && !nonempty(data["df-OpenAI"])) report("Selecione o agente de IA.", "warning", "df-OpenAI", "aiModel")
+  }],
 ])
 
 export function validateFlow(flow: AtendimentoFlow): FlowIssue[] {

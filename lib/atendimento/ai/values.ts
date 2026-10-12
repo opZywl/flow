@@ -98,6 +98,13 @@ const MIME_TYPES = new Map([
   ["txt", "text/plain"],
   ["zip", "application/zip"],
 ])
+const RESPONSE_ALIASES = {
+  path: ["path", "caminho", "campo", "jsonPath", "field"],
+  key: ["key", "chave"],
+  sample: ["sample", "exemplo"],
+  variable: ["variable", "variavel", "var"],
+}
+const RESPONSE_KEYS = new Set(Object.values(RESPONSE_ALIASES).flat().map((name) => name.toLowerCase()))
 const VARIABLE_KEYS = new Set(["variable", "variableName", "varPrefix", "condicional_api.key"])
 const STRICT_VARIABLES = new Set(["webchatHandoff.outputVar"])
 const VARIABLE_TEXT = /^[^\s{}"'`<>@#]+$/
@@ -324,7 +331,7 @@ export function timeOf(value: unknown): string | undefined {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
 }
 
-function timeRulesOf(raw: string, context: ConfigContext): JsonObject[] | undefined {
+function timeRulesOf(raw: string, context: ConfigContext, notes: ValueNote[]): JsonObject[] | undefined {
   const parsed = parseLoose(raw)
   if (!parsed.ok) return undefined
   const items = Array.isArray(parsed.value) ? parsed.value : isRecord(parsed.value) ? [parsed.value] : []
@@ -336,7 +343,18 @@ function timeRulesOf(raw: string, context: ConfigContext): JsonObject[] | undefi
     const startTime = timeOf(pickValue(item, ["startTime", "start", "inicio", "from", "de", "abertura"]))
     const endTime = timeOf(pickValue(item, ["endTime", "end", "fim", "to", "ate", "fechamento"]))
     if (!weekDays || !weekDays.length || !startTime || !endTime) return undefined
-    rules.push({ id: context.ruleId(), weekDays, startTime, endTime })
+    if (startTime <= endTime) {
+      rules.push({ id: context.ruleId(), weekDays, startTime, endTime })
+      continue
+    }
+    if (endTime === "00:00") {
+      rules.push({ id: context.ruleId(), weekDays, startTime, endTime: "23:59" })
+      notes.push({ level: "hint", message: `A regra das ${startTime} às 00:00 passou a terminar às 23:59.` })
+      continue
+    }
+    const following = DAY_ORDER.filter((day) => weekDays.includes(DAY_ORDER[(DAY_ORDER.indexOf(day) + DAY_ORDER.length - 1) % DAY_ORDER.length]))
+    rules.push({ id: context.ruleId(), weekDays, startTime, endTime: "23:59" }, { id: context.ruleId(), weekDays: following, startTime: "00:00", endTime })
+    notes.push({ level: "hint", message: `A regra das ${startTime} às ${endTime} passa da meia-noite e foi dividida em duas: ${startTime} às 23:59 e 00:00 às ${endTime} do dia seguinte.` })
   }
   return rules
 }
@@ -442,7 +460,7 @@ function itemValue(spec: ItemFieldSpec, value: unknown, fallback: JsonValue): Js
   return textOf(value)
 }
 
-function objectListOf(field: FieldSpec, raw: string): JsonObject[] | undefined {
+function objectListOf(field: FieldSpec, raw: string, notes: ValueNote[]): JsonObject[] | undefined {
   const specs = field.itemFields ?? []
   if (!specs.length) return undefined
   const { list, map } = entriesOf(raw)
@@ -456,14 +474,29 @@ function objectListOf(field: FieldSpec, raw: string): JsonObject[] | undefined {
   }
   for (const item of list ?? []) sources.push(isRecord(item) ? item : { [specs[0].key]: item })
   if (!sources.length) return undefined
-  return sources.map((source) => {
+  const items = sources.map((source) => {
     const item = itemBase(field)
     for (const spec of specs) item[spec.key] = itemValue(spec, pickValue(source, ITEM_ALIASES[spec.key] ?? [spec.key]), item[spec.key] ?? "")
     return item
   })
+  if (field.key === "columns" && items.some((item) => !textOf(item.value))) {
+    notes.push({ level: "warning", message: "Cada coluna de columns precisa de header e value; use {{variavel}} no value." })
+  }
+  return items
 }
 
-function jsonOf(type: string, key: string, raw: string): JsonValue | undefined {
+function responseMapOf(value: Record<string, unknown>): unknown {
+  if (Object.keys(value).some((name) => RESPONSE_KEYS.has(name.toLowerCase()))) return [value]
+  const entries = Object.entries(value)
+  if (!entries.length || !entries.every(([, entry]) => typeof entry === "string")) return [value]
+  return entries.map(([name, entry]) => {
+    const text = String(entry)
+    const pathLike = (candidate: string) => /[.[]/.test(candidate)
+    return pathLike(text) || !pathLike(name) ? { path: text, variable: name } : { path: name, variable: text }
+  })
+}
+
+function jsonOf(type: string, key: string, raw: string, notes: ValueNote[]): JsonValue | undefined {
   const expected = expectedFieldTypes(type, key)?.[0]
   const parsed = parseLoose(raw)
   if (key === "selectedIds") {
@@ -473,17 +506,20 @@ function jsonOf(type: string, key: string, raw: string): JsonValue | undefined {
   }
   if (!parsed.ok) return undefined
   let value = parsed.value
+  if (key === "response_map" && isRecord(value)) value = responseMapOf(value)
   if (expected === "array" && isRecord(value)) value = [value]
   if (expected === "array" && !Array.isArray(value)) return undefined
   if (expected === "object" && !isRecord(value)) return undefined
   if (key === "response_map" && Array.isArray(value)) {
     if (!value.every(isRecord)) return undefined
-    return value.map((entry) => ({
-      path: textOf(entry.path),
-      key: textOf(entry.key),
-      sample: textOf(entry.sample),
-      variable: cleanVariable(textOf(pickValue(entry, ["variable", "variavel", "var"]))),
+    const items = value.map((entry) => ({
+      path: textOf(pickValue(entry, RESPONSE_ALIASES.path)),
+      key: textOf(pickValue(entry, RESPONSE_ALIASES.key)),
+      sample: textOf(pickValue(entry, RESPONSE_ALIASES.sample)),
+      variable: cleanVariable(textOf(pickValue(entry, RESPONSE_ALIASES.variable))),
     }))
+    if (items.some((item) => !item.path || !item.variable)) notes.push({ level: "warning", message: "Cada item de response_map precisa de path e variable." })
+    return items
   }
   return value as JsonValue
 }
@@ -643,14 +679,14 @@ export function configureNode(type: string, config: readonly RiConfigEntry[], co
         break
       }
       case "json": {
-        const value = jsonOf(type, field.key, source)
+        const value = jsonOf(type, field.key, source, notes)
         const expected = expectedFieldTypes(type, field.key)?.[0] === "object" ? "um objeto JSON" : "uma lista JSON"
         if (value === undefined) reject(expected)
         else set(value)
         break
       }
       case "timeRules": {
-        const rules = timeRulesOf(source, context)
+        const rules = timeRulesOf(source, context, notes)
         if (!rules) reject("uma lista JSON de regras {\"weekDays\":[\"monday\"],\"startTime\":\"08:00\",\"endTime\":\"18:00\"}")
         else set(rules)
         break
@@ -692,7 +728,7 @@ export function configureNode(type: string, config: readonly RiConfigEntry[], co
         break
       }
       case "objectList": {
-        const items = objectListOf(field, source)
+        const items = objectListOf(field, source, notes)
         if (!items) reject(`uma lista JSON de itens {${(field.itemFields ?? []).map((item) => `"${item.key}"`).join(",")}}`)
         else set(items)
         break
