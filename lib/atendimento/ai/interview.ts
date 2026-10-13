@@ -21,6 +21,8 @@ export interface InterviewMessage {
 
 export type InterviewAction = "ask" | "generate" | "edit" | "finish"
 
+export type InterviewScope = "builder" | "copilot"
+
 export interface InterviewTurn {
   message: string
   suggestions: string[]
@@ -36,6 +38,8 @@ export interface InterviewInput {
   fill?: boolean
   history: InterviewMessage[]
   flow?: AtendimentoFlow | null
+  scope?: InterviewScope
+  proposal?: boolean
 }
 
 export interface InterviewHooks {

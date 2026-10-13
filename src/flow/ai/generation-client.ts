@@ -526,6 +526,8 @@ export async function requestTurn(input: InterviewInput, signal: AbortSignal, en
       fill: input.fill,
       history: input.history,
       flow: input.flow ?? null,
+      ...(input.scope ? { scope: input.scope } : {}),
+      ...(input.proposal ? { proposal: true } : {}),
     },
     { transport: "browser", signal },
   )
