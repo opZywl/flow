@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic"
 import Link from "next/link"
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
-import { ArrowRightLeft, Bot, Camera, ImageIcon, Link2, Loader2, Maximize2, Minus, Moon, Palette, Play, RotateCcw, Search, SendHorizontal, Sparkles, Sun, Workflow, X, type LucideIcon } from "lucide-react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
+import { ArrowRightLeft, Bot, Camera, ImageIcon, Link2, Loader2, Maximize2, Minus, Moon, Palette, Play, RotateCcw, Search, SendHorizontal, Sparkles, Sun, WandSparkles, Workflow, X, type LucideIcon } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -12,12 +12,14 @@ import { behaviorSignature, exportFileName, importFlow, isObject } from "@/lib/a
 import { emptyPreview, replyPreview, startPreview, type PreviewState } from "@/lib/atendimento/simulator"
 import type { AtendimentoFlow } from "@/lib/atendimento/types"
 import { useTheme } from "../ThemeContext"
+import type { CopilotAttention } from "./ai/copilot-store"
 import EraDialog from "./era-dialog"
 import WorkflowBuilder, { type PreviewKind, type WorkflowActions } from "./workflow-builder"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
 const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
+const AICopilot = dynamic(() => import("./ai-copilot"), { ssr: false })
 
 type LivePreviewProps = {
   onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => void
@@ -31,6 +33,7 @@ const warm = (load: () => Promise<unknown>) => () => {
 }
 
 const warmAI = warm(() => import("./ai-workflow-dialog"))
+const warmCopilot = warm(() => import("./ai-copilot"))
 const warmColors = warm(() => import("../ColorPanel"))
 
 const WORKFLOW_KEY = "workflow"
@@ -39,6 +42,8 @@ const BACKGROUND_KEY = "flow-background-image"
 const BACKGROUND_VARIABLE = "--flow-background-image"
 const HEADER_HEIGHT = 56
 const BOT_GAP = 16
+const COPILOT_WIDTH = 384
+const WIDE_QUERY = "(min-width: 1024px)"
 const SEARCH_LIMIT = 50
 const IMAGE_TIMEOUT = 15000
 
@@ -176,6 +181,18 @@ function filterItems(items: SearchItem[], query: string): SearchItem[] {
   const exact = items.filter((item) => normalizeText(item.id) === term)
   const partial = items.filter((item) => normalizeText(item.id) !== term && item.text.includes(term))
   return [...exact, ...partial]
+}
+
+function useMediaQuery(query: string): boolean {
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      const list = window.matchMedia(query)
+      list.addEventListener("change", notify)
+      return () => list.removeEventListener("change", notify)
+    },
+    [query],
+  )
+  return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => false)
 }
 
 function useStoredWorkflow(): StoredWorkflow {
@@ -479,8 +496,13 @@ interface FlowHeaderProps {
   botOpen: boolean
   capturing: boolean
   hasBackground: boolean
+  copilotId: string
+  copilotOpen: boolean
+  copilotMounted: boolean
+  copilotAttention: CopilotAttention | null
   onSearch: (query: string) => void
   onOpenAI: () => void
+  onToggleCopilot: () => void
   onOpenBot: () => void
   onOpenEra: () => void
   onChangeBackground: () => void
@@ -488,7 +510,7 @@ interface FlowHeaderProps {
   onResetBackground: () => void
 }
 
-function FlowHeader({ botOpen, capturing, hasBackground, onSearch, onOpenAI, onOpenBot, onOpenEra, onChangeBackground, onSaveImage, onResetBackground }: FlowHeaderProps) {
+function FlowHeader({ botOpen, capturing, hasBackground, copilotId, copilotOpen, copilotMounted, copilotAttention, onSearch, onOpenAI, onToggleCopilot, onOpenBot, onOpenEra, onChangeBackground, onSaveImage, onResetBackground }: FlowHeaderProps) {
   const { theme, toggleTheme, showColorPanel, setShowColorPanel } = useTheme()
   const stored = useStoredWorkflow()
 
@@ -526,6 +548,26 @@ function FlowHeader({ botOpen, capturing, hasBackground, onSearch, onOpenAI, onO
         >
           <Sparkles className="h-4 w-4" aria-hidden />
           <span className="hidden md:inline">Gerar com IA</span>
+        </button>
+        <button
+          type="button"
+          onClick={onToggleCopilot}
+          onPointerEnter={warmCopilot}
+          onFocus={warmCopilot}
+          aria-expanded={copilotOpen}
+          aria-controls={copilotMounted ? copilotId : undefined}
+          data-copilot-trigger=""
+          title="Copiloto"
+          className={cn(ui.button, "relative px-2 md:px-3", copilotOpen && ui.toolButtonActive)}
+        >
+          <WandSparkles className="h-4 w-4" aria-hidden />
+          <span className="sr-only md:not-sr-only">Copiloto</span>
+          {copilotAttention ? (
+            <>
+              <span aria-hidden className={cn("absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full ring-2 ring-flow-menu", copilotAttention === "failed" ? "bg-flow-danger" : "bg-flow-accent")} />
+              <span className="sr-only">{copilotAttention === "failed" ? ", edição não concluída" : ", edição pronta para revisar"}</span>
+            </>
+          ) : null}
         </button>
         <span aria-hidden className={cn(ui.divider, "hidden sm:block")} />
         <button type="button" onClick={onOpenBot} aria-label="Abrir prévia" title="Abrir prévia" className={cn(ui.toolButton, botOpen && ui.toolButtonActive)}>
@@ -646,7 +688,7 @@ function BackgroundForm({ initial, onCancel, onApply }: { initial: string; onCan
   )
 }
 
-function YenFlowBot({ isOpen, openRequest, onClose, onStart }: { isOpen: boolean; openRequest: number; onClose: () => void; onStart: () => void }) {
+function YenFlowBot({ isOpen, openRequest, offset, onClose, onStart }: { isOpen: boolean; openRequest: number; offset: number; onClose: () => void; onStart: () => void }) {
   const [messages, setMessages] = useState<BotMessage[]>([])
   const [input, setInput] = useState("")
   const [isMinimized, setIsMinimized] = useState(false)
@@ -729,10 +771,10 @@ function YenFlowBot({ isOpen, openRequest, onClose, onStart }: { isOpen: boolean
   const clampPosition = useCallback((next: { x: number; y: number }) => {
     const panel = panelRef.current
     if (!panel) return next
-    const maxX = Math.max(0, window.innerWidth - panel.offsetWidth - BOT_GAP * 2)
+    const maxX = Math.max(0, window.innerWidth - offset - panel.offsetWidth - BOT_GAP * 2)
     const maxY = Math.max(0, window.innerHeight - panel.offsetHeight - BOT_GAP * 2 - HEADER_HEIGHT)
     return { x: Math.min(Math.max(next.x, 0), maxX), y: Math.min(Math.max(next.y, 0), maxY) }
-  }, [])
+  }, [offset])
 
   useEffect(() => {
     if (!isOpen) return
@@ -788,7 +830,7 @@ function YenFlowBot({ isOpen, openRequest, onClose, onStart }: { isOpen: boolean
       ref={panelRef}
       aria-label="Assistente de prévia"
       className={cn(ui.card, "fixed z-50 flex w-96 max-w-[calc(100vw_-_2rem)] flex-col overflow-hidden shadow-xl duration-200 animate-in fade-in-0 slide-in-from-bottom-2 motion-reduce:animate-none")}
-      style={{ right: BOT_GAP + position.x, bottom: BOT_GAP + position.y }}
+      style={{ right: BOT_GAP + offset + position.x, bottom: BOT_GAP + position.y }}
     >
       <div
         onPointerDown={startDrag}
@@ -894,6 +936,10 @@ function FlowLayout() {
   const [botRequest, setBotRequest] = useState(0)
   const [aiOpen, setAiOpen] = useState(false)
   const [aiLoaded, setAiLoaded] = useState(false)
+  const [dialogBusy, setDialogBusy] = useState(false)
+  const [copilotOpen, setCopilotOpen] = useState(false)
+  const [copilotLoaded, setCopilotLoaded] = useState(false)
+  const [copilotAttention, setCopilotAttention] = useState<CopilotAttention | null>(null)
   const [eraOpen, setEraOpen] = useState(false)
   const [backgroundDialog, setBackgroundDialog] = useState(false)
   const [background, setBackground] = useState<string | null>(null)
@@ -901,6 +947,8 @@ function FlowLayout() {
   const actionsRef = useRef<WorkflowActions | null>(null)
   const containerRef = useRef<HTMLElement>(null)
   const capturingRef = useRef(false)
+  const copilotId = useId()
+  const wide = useMediaQuery(WIDE_QUERY)
 
   useEffect(() => {
     try {
@@ -934,9 +982,22 @@ function FlowLayout() {
   }, [])
 
   const openAI = useCallback(() => {
+    setCopilotOpen(false)
     setAiLoaded(true)
     setAiOpen(true)
   }, [])
+
+  const changeAiOpen = useCallback((open: boolean) => {
+    if (open) setCopilotOpen(false)
+    setAiOpen(open)
+  }, [])
+
+  const toggleCopilot = useCallback(() => {
+    setCopilotLoaded(true)
+    setCopilotOpen((open) => !open)
+  }, [])
+
+  const closeCopilot = useCallback(() => setCopilotOpen(false), [])
 
   const openEra = useCallback(() => setEraOpen(true), [])
 
@@ -1021,19 +1082,39 @@ function FlowLayout() {
         botOpen={botOpen}
         capturing={capturing}
         hasBackground={Boolean(background)}
+        copilotId={copilotId}
+        copilotOpen={copilotOpen}
+        copilotMounted={copilotLoaded}
+        copilotAttention={copilotAttention}
         onSearch={searchComponent}
         onOpenAI={openAI}
+        onToggleCopilot={toggleCopilot}
         onOpenBot={openBot}
         onOpenEra={openEra}
         onChangeBackground={openBackgroundDialog}
         onSaveImage={saveCanvasImage}
         onResetBackground={resetBackground}
       />
-      <main ref={containerRef} className="relative isolate min-h-0 flex-1 overflow-hidden bg-flow-bg">
-        {builder}
-      </main>
-      <YenFlowBot isOpen={botOpen} openRequest={botRequest} onClose={closeBot} onStart={runPreview} />
-      {aiLoaded && <AIWorkflowDialog open={aiOpen} onOpenChange={setAiOpen} onWorkflowGenerated={handleGenerated} {...livePreview} />}
+      <div className="relative flex min-h-0 flex-1">
+        <main ref={containerRef} className="relative isolate min-h-0 min-w-0 flex-1 overflow-hidden bg-flow-bg">
+          {builder}
+        </main>
+        {copilotLoaded && (
+          <AICopilot
+            id={copilotId}
+            open={copilotOpen}
+            onClose={closeCopilot}
+            getCurrentFlow={getCurrentFlow}
+            onLivePreview={handleLivePreview}
+            onWorkflowEdited={handleEdited}
+            onOpenGenerate={openAI}
+            dialogBusy={dialogBusy}
+            onAttentionChange={setCopilotAttention}
+          />
+        )}
+      </div>
+      <YenFlowBot isOpen={botOpen} openRequest={botRequest} offset={copilotOpen && wide ? COPILOT_WIDTH : 0} onClose={closeBot} onStart={runPreview} />
+      {aiLoaded && <AIWorkflowDialog open={aiOpen} onOpenChange={changeAiOpen} onWorkflowGenerated={handleGenerated} onBusyChange={setDialogBusy} {...livePreview} />}
       <EraDialog open={eraOpen} onOpenChange={setEraOpen} />
       {showColorPanel && <ColorPanel />}
       <Dialog open={backgroundDialog} onOpenChange={setBackgroundDialog}>

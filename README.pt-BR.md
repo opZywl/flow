@@ -57,6 +57,7 @@ IDs e o mesmo padrão de conexões.
 | validação | pendências ao vivo, mostradas também abaixo do campo a que se referem; cada uma leva ao componente que precisa de atenção |
 | prévia | conversa simulada com os 62 componentes, em que você escolhe o resultado de cada integração, sem chamar a plataforma |
 | importação | JSON de Atendimento, fluxos antigos deste editor e geração por IA |
+| copiloto | painel lateral em que a IA edita o fluxo aberto a partir do seu pedido, com a mesma chave da geração por IA; as mudanças aparecem no canvas até você aplicar ou descartar |
 | tema | claro ou escuro, com a cor de destaque escolhida em Cores |
 
 `Ctrl+Z` desfaz, `Ctrl+Y` refaz, `Ctrl+S` salva, `Ctrl+K` busca no fluxo e

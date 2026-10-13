@@ -59,6 +59,7 @@ The interface is in Brazilian Portuguese, like the platform it targets.
 | validation | live issues, also shown under the field they refer to; each one jumps to the component that needs attention |
 | preview | a simulated conversation covering all 62 components, where you pick the result of each integration, without calling the platform |
 | import | Atendimento JSON, older flows from this editor and AI generation |
+| copilot | a side panel where the AI edits the open flow from your request, with the same API key as AI generation; the changes show on the canvas until you apply or discard them |
 | theme | light or dark, with the accent color you pick in Cores |
 
 `Ctrl+Z` undoes, `Ctrl+Y` redoes, `Ctrl+S` saves, `Ctrl+K` searches the flow

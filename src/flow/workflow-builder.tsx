@@ -200,7 +200,7 @@ const CanvasStatus = memo(function CanvasStatus({ container, count, start }: { c
 
 const PREVIEW_TEXT: Record<PreviewKind, { live: string; done: string }> = {
   create: { live: "Gerando com IA. O fluxo aparece aqui conforme é criado.", done: "Fluxo gerado. Importe ou descarte na janela da IA." },
-  edit: { live: "Editando com IA. As mudanças aparecem aqui conforme chegam.", done: "Edição pronta. Aplique ou descarte na janela da IA." },
+  edit: { live: "Editando com IA. As mudanças aparecem aqui conforme chegam.", done: "Edição pronta. Aplique ou descarte no Copiloto." },
 }
 
 function PreviewBanner({ nodes, edges, done, kind }: { nodes: number; edges: number; done: boolean; kind: PreviewKind }) {
