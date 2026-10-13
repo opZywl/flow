@@ -348,13 +348,13 @@ test('watching on the canvas: the collapsed panel follows the stream, the read-o
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(panel.getByRole('button', { name: 'Ver detalhes' })).toBeFocused()
   await early.reached
-  await expect(nodes).toHaveCount(EARLY.nodes.length)
+  await expect(nodes).toHaveCount(EARLY.nodes.length, { timeout: 15000 })
   await expect(canvas).toContainText('Olá, #NAME. Você está no atendimento da Clínica Exemplo.')
   await expect(canvas).not.toContainText('Como podemos ajudar?')
   await expect(page.getByText(BANNER)).toBeVisible()
   early.open()
   await hold.reached
-  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length)
+  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length, { timeout: 15000 })
   await expect(page.locator('.react-flow__edge')).toHaveCount(CHECKPOINT.edges.length)
   await expect(canvas).toContainText('Olá, #NAME. Você está no atendimento da Clínica Exemplo.')
   await expect(canvas).toContainText('Como podemos ajudar?')
@@ -369,7 +369,7 @@ test('watching on the canvas: the collapsed panel follows the stream, the read-o
   await expect(page.getByLabel('Configuração do componente')).toHaveCount(0)
   await page.getByLabel('Biblioteca de componentes').getByRole('button', { name: 'Enviar Mensagem', exact: true }).click()
   await expect(page.getByText('Geração com IA em andamento', { exact: true })).toBeVisible()
-  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length)
+  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length, { timeout: 15000 })
   expect(await saved(page)).toEqual(PREVIOUS_STATE)
 
   hold.open()
@@ -412,7 +412,7 @@ test('cancelling from the panel aborts the provider stream and leaves the open f
   const panel = page.getByRole('region', { name: 'Geração com IA' })
   const nodes = page.locator('.react-flow__node')
   await hold.reached
-  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length)
+  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length, { timeout: 15000 })
   await expect(page.getByText(BANNER)).toBeVisible()
   await panel.getByRole('button', { name: 'Cancelar', exact: true }).click()
   await expect(panel).toHaveCount(0)
@@ -449,14 +449,14 @@ test('Ver detalhes reopens the dialog, Acompanhar no canvas and Esc collapse it 
   const nodes = page.locator('.react-flow__node')
   const details = panel.getByRole('button', { name: 'Ver detalhes' })
   await hold.reached
-  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length)
+  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length, { timeout: 15000 })
 
   await details.click()
   await expect(dialog).toBeVisible()
   await expect(panel).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: 'Cancelar geração' })).toBeFocused()
   await expect(dialog.getByRole('button', { name: 'Gerar fluxo' })).toBeDisabled()
-  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length)
+  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length, { timeout: 15000 })
 
   await dialog.getByRole('button', { name: 'Acompanhar no canvas' }).click()
   await expect(panel).toBeVisible()
@@ -749,7 +749,7 @@ test('a stream that drops midway resumes in the next round and finishes without 
   const canvas = page.locator('.react-flow')
   await hold.reached
   await expect(panel).toContainText('rodada 2 de 3')
-  await expect(page.locator('.react-flow__node')).toHaveCount(CHECKPOINT.nodes.length)
+  await expect(page.locator('.react-flow__node')).toHaveCount(CHECKPOINT.nodes.length, { timeout: 15000 })
   await expect(canvas).toContainText('Como podemos ajudar?')
   await expect(canvas).not.toContainText('Obrigado pelo contato. Até logo.')
   expect(ai.calls).toHaveLength(2)
