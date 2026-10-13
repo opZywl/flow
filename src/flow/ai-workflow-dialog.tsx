@@ -42,43 +42,78 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from "@/hooks/use-toast"
 import {
   COUNT_LIMITS,
-  DEFAULT_EFFORT,
   EFFORTS,
   LIMITS,
-  MAX_ROUNDS,
   SIZE_RANGES,
   type Effort,
-  type GenerateFailure,
   type GenerateRequest,
   type GenerationChanges,
   type GenerationIssue,
   type GenerationMode,
   type GenerationProgress,
   type GenerationSize,
-  type GenerationStage,
-  type GenerationUsage,
-  type IssueScope,
   type ModelInfo,
-  type ModelsRequest,
-  type RequestField,
 } from "@/lib/atendimento/ai/contracts"
-import { PROVIDERS, defaultEffort, effortsFor, type ProviderId, type ProviderInfo } from "@/lib/atendimento/ai/providers"
+import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
 import type { InterviewInput } from "@/lib/atendimento/ai/interview"
 import { START_TYPE, getCategory, getComponentColor, getComponentLabel } from "@/lib/atendimento/catalog"
 import { downloadJson, downloadText } from "@/lib/atendimento/download"
-import { exportFileName, exportFlow, importFlow, isObject, stampExport, validateFlow } from "@/lib/atendimento/format"
-import type { AtendimentoFlow, AtendimentoNode, FlowIssue } from "@/lib/atendimento/types"
+import { exportFileName, exportFlow, importFlow, stampExport, validateFlow } from "@/lib/atendimento/format"
+import type { AtendimentoFlow, AtendimentoNode } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
 import { InterviewPanel, useInterview, type BuildAction, type InterviewHandle, type InterviewRunSummary, type InterviewTurnResult } from "./ai-interview"
-import { FlowSelect, type FlowSelectOption } from "./flow-select"
+import {
+  type Field,
+  type FieldErrors,
+  type LiveCounts,
+  type Failure,
+  type Rejection,
+  type Received,
+  type FlowDiff,
+  type JobOutcome,
+  type Listing,
+  type IssueGroup,
+  type PreviewFeed,
+  EFFORT_OPTIONS,
+  FILL_HINTS,
+  PLATFORM_HINTS,
+  ISSUE_GROUPS,
+  formatNumber,
+  plural,
+  isModelId,
+  clock,
+  NO_CHANGES,
+  hasComponents,
+  documentKey,
+  changeLabels,
+  messageLines,
+  modelName,
+  modelVision,
+  modelChoices,
+  pickEffort,
+  effortChoices,
+  keyWarning,
+  stageText,
+  progressText,
+  requestField,
+  loadEngine,
+  generateFlow,
+  requestTurn,
+  failureField,
+  previewFeed,
+  requestModels,
+  mergeIssues,
+  issueSubject,
+  issueLine,
+  apiKeyError,
+} from "./ai/generation-client"
+import { useAiSetting } from "./ai/settings-store"
+import { FlowSelect } from "./flow-select"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
-type Field = "provider" | "apiKey" | "model" | "effort" | "mode" | "description" | "image" | "size" | "count" | "name" | "fill"
-type FieldErrors = Partial<Record<Field, string>>
 type View = "form" | "result"
 type Tone = "success" | "warning" | "danger"
-type LiveCounts = { nodes: number; edges: number }
 type PreviewKind = "create" | "edit"
 type Mode = GenerationMode | "chat"
 type ChangeMark = "added" | "changed"
@@ -89,50 +124,6 @@ interface ReferenceImage {
   width: number
   height: number
   dataUrl: string
-}
-
-interface Failure {
-  title: string
-  details?: string
-  items: string[]
-}
-
-interface Rejection {
-  code: string
-  failure: Failure
-  field?: Field
-}
-
-interface Received {
-  flow: AtendimentoFlow
-  issues: GenerationIssue[]
-  rounds: number
-  usage?: GenerationUsage
-  transcript: string
-  model: string
-  partial: boolean
-  mode: GenerationMode
-  changes?: GenerationChanges
-}
-
-interface FlowDiff {
-  added: string[]
-  changed: string[]
-  removed: string[]
-}
-
-type Outcome = { ok: true; received: Received } | { ok: false; rejection: Rejection }
-
-type JobOutcome = { ok: true; received: Received; diff?: FlowDiff } | { ok: false; rejection: Rejection }
-
-type Listed = { ok: true; models: ModelInfo[] } | { ok: false; error: string; details?: string }
-
-interface Listing {
-  provider: ProviderId
-  state: "loading" | "done" | "error"
-  count?: number
-  error?: string
-  details?: string
 }
 
 interface Generated extends Received {
@@ -154,13 +145,6 @@ interface TypeUsage {
   label: string
   color: string
   count: number
-}
-
-interface IssueGroup {
-  scope: IssueScope
-  title: string
-  hint: string
-  items: GenerationIssue[]
 }
 
 interface Summary {
@@ -186,48 +170,10 @@ interface AIWorkflowDialogProps {
   onLivePreview?: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => void
   getCurrentFlow?: () => AtendimentoFlow | null
   onWorkflowEdited?: (workflow: AtendimentoFlow) => boolean
+  onBusyChange?: (busy: boolean) => void
 }
 
-type RunnerModule = typeof import("@/lib/atendimento/ai/runner")
-type PreviewModule = typeof import("@/lib/atendimento/ai/preview")
-type EditModule = typeof import("@/lib/atendimento/ai/edit")
-
-interface Engine {
-  runGeneration: RunnerModule["runGeneration"]
-  previewFlow: PreviewModule["previewFlow"]
-  previewEdit: PreviewModule["previewEdit"]
-  diffFlows: EditModule["diffFlows"]
-}
-
-type InterviewModule = Pick<typeof import("@/lib/atendimento/ai/interview"), "interviewTurn">
-
-interface PreviewFeed {
-  push: (ri: unknown) => void
-  stop: () => void
-}
-
-const GENERATE_URL = "/api/generate-workflow"
-const MODELS_URL = "/api/ai-models"
 const FIELD_ORDER: readonly Field[] = ["provider", "apiKey", "model", "effort", "mode", "description", "image", "size", "count", "name", "fill"]
-const REQUEST_FIELDS: Readonly<Record<RequestField, Field>> = {
-  provider: "provider",
-  apiKey: "apiKey",
-  model: "model",
-  effort: "effort",
-  prompt: "description",
-  image: "image",
-  size: "size",
-  count: "count",
-  name: "name",
-  mode: "mode",
-  base: "mode",
-  fill: "fill",
-}
-const STAGES: readonly GenerationStage[] = ["preparando", "gerando", "montando", "validando", "corrigindo"]
-const SCOPES: readonly IssueScope[] = ["ia", "plataforma", "ajuste"]
-const KEY_CHARACTERS = /^[\x21-\x7E]+$/
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
-const MIN_KEY_LENGTH = 8
 const UNSAFE_FILE_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f]/g
 const safeFileName = (fileName: string) => fileName.replace(UNSAFE_FILE_CHARACTERS, "-")
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"]
@@ -236,14 +182,6 @@ const MAX_SOURCE_BYTES = 10 * 1024 * 1024
 const MAX_IMAGE_SIDE = 2048
 const MAX_SENT_BYTES = Math.min(LIMITS.imageBytes, 3 * 1024 * 1024)
 const JPEG_QUALITIES = [0.9, 0.8, 0.7]
-const PREVIEW_INTERVAL_MS = 250
-
-const EFFORT_OPTIONS: Readonly<Record<Effort, { label: string; hint: string }>> = {
-  low: { label: "Rápido", hint: "Responde mais rápido e gasta menos tokens. Bom para fluxos simples." },
-  medium: { label: "Equilibrado", hint: "Equilíbrio entre velocidade e qualidade. Atende bem a maioria dos fluxos." },
-  high: { label: "Alto", hint: "O modelo raciocina mais antes de responder. Fluxos grandes saem mais completos, mas a geração demora mais." },
-  max: { label: "Máximo", hint: "Todo o raciocínio que o modelo oferece. É o mais lento e o que mais gasta tokens." },
-}
 
 const sizeRange = (size: keyof typeof SIZE_RANGES) => `${SIZE_RANGES[size][0]} a ${SIZE_RANGES[size][1]} componentes`
 
@@ -271,28 +209,6 @@ const CHAT_INTRO_EDIT =
   "Conte o que você quer mudar no fluxo aberto. A IA pergunta o que faltar e aplica as mudanças no canvas. Desfazer (Ctrl+Z) volta ao fluxo anterior."
 const CHAT_INTRO_CREATE =
   "Conte o que o seu atendimento precisa fazer. A IA pergunta o que faltar, como as opções do menu e as mensagens, e monta o fluxo no editor quando tudo estiver decidido."
-const TURN_UNAVAILABLE: GenerateFailure = {
-  success: false,
-  code: "unknown",
-  error: "Não foi possível carregar a conversa com a IA.",
-  details: "Recarregue a página e tente de novo.",
-}
-
-const FILL_HINTS = {
-  on: "Nomes, IDs e URLs saem sempre preenchidos. Os valores provisórios aparecem em Dados da plataforma para você conferir.",
-  off: "Dados cadastrados na plataforma, como nomes, IDs e URLs, ficam em branco para você completar no editor.",
-} as const
-
-const PLATFORM_HINTS = {
-  on: "Valores provisórios de nomes, IDs e URLs. Troque cada um pelo valor cadastrado na plataforma.",
-  off: "Dados cadastrados na plataforma, como IDs, nomes e URLs, que o pedido não informou. Complete no editor.",
-} as const
-
-const ISSUE_GROUPS: ReadonlyArray<Omit<IssueGroup, "items">> = [
-  { scope: "ia", title: "Revise", hint: "Pontos que a IA não resolveu nas rodadas de correção." },
-  { scope: "plataforma", title: "Dados da plataforma", hint: PLATFORM_HINTS.off },
-  { scope: "ajuste", title: "Ajustes automáticos", hint: "Mudanças feitas na montagem para manter o fluxo válido. Confira cada uma." },
-]
 
 const MARKS: Record<ChangeMark, { label: string; className: string }> = {
   added: { label: "Novo", className: "bg-flow-success/15 text-flow-success" },
@@ -305,468 +221,19 @@ const TONES: Record<Tone, { box: string; badge: string; Icon: LucideIcon }> = {
   danger: { box: "border-flow-danger/40 bg-flow-danger/10", badge: "bg-flow-danger/15 text-flow-danger", Icon: XCircle },
 }
 
-const STATUS_FAILURES: Readonly<Partial<Record<number, Failure>>> = {
-  413: { title: "A solicitação é grande demais.", details: "Use uma imagem menor ou reduza a descrição.", items: [] },
-  504: {
-    title: "O servidor demorou demais para responder.",
-    details: "Tente um modelo mais rápido ou um fluxo menor.",
-    items: [],
-  },
-}
-
-const INTERRUPTED: Outcome = {
-  ok: false,
-  rejection: {
-    code: "network",
-    failure: { title: "A conexão foi interrompida antes do fim da geração.", details: "Tente gerar o fluxo novamente.", items: [] },
-  },
-}
-
 const fieldBase = "block disabled:cursor-not-allowed disabled:opacity-60"
 const invalidField =
   "border-flow-danger hover:border-flow-danger focus-visible:border-flow-danger focus-visible:ring-flow-danger/25"
 const warningText = "mt-1 text-[11px] leading-4 text-flow-warning"
-
-const text = (value: unknown): string => (typeof value === "string" ? value : "")
-const formatNumber = (value: number) => value.toLocaleString("pt-BR")
-const plural = (count: number, one: string, many: string) => `${formatNumber(count)} ${count === 1 ? one : many}`
-const isModelId = (value: string) => MODEL_ID.test(value) && !value.includes("..")
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
-const NO_CHANGES: GenerationChanges = { added: 0, changed: 0, removed: 0 }
-
-function hasComponents(flow: AtendimentoFlow | null | undefined): flow is AtendimentoFlow {
-  return Boolean(flow && Array.isArray(flow.nodes) && flow.nodes.some((node) => node.data.type !== START_TYPE))
-}
-
-function documentKey(flow: AtendimentoFlow): string {
-  return JSON.stringify({ ...flow, viewport: null })
-}
-
-function changeLabels(changes: GenerationChanges): [string, string, string] {
-  return [
-    plural(changes.added, "componente novo", "componentes novos"),
-    plural(changes.changed, "alterado", "alterados"),
-    plural(changes.removed, "removido", "removidos"),
-  ]
-}
-
-function readCount(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
-}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
   return `${(bytes / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`
 }
 
-function messageLines(error: unknown): string[] {
-  const message = error instanceof Error ? error.message : String(error)
-  return message
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-}
-
 function codeFence(content: string): string {
   const longest = Math.max(0, ...Array.from(content.matchAll(/`+/g), (match) => match[0].length))
   return "`".repeat(Math.max(3, longest + 1))
-}
-
-function modelName(info: ProviderInfo, id: string, listed?: readonly ModelInfo[]): string {
-  return info.presets.find((preset) => preset.id === id)?.name ?? listed?.find((entry) => entry.id === id)?.name ?? id
-}
-
-function modelVision(info: ProviderInfo, id: string, listed?: readonly ModelInfo[]): boolean | undefined {
-  const preset = info.presets.find((entry) => entry.id === id)
-  return preset ? preset.vision : listed?.find((entry) => entry.id === id)?.vision
-}
-
-function modelChoices(info: ProviderInfo, model: string, listed?: readonly ModelInfo[]): FlowSelectOption[] {
-  const accountModels = listed?.filter((entry) => !info.presets.some((preset) => preset.id === entry.id)) ?? []
-  const known = info.presets.some((preset) => preset.id === model) || accountModels.some((entry) => entry.id === model)
-  return [
-    ...(known || !model ? [] : [{ value: model, label: model }]),
-    ...info.presets.map((preset) => ({
-      value: preset.id,
-      label: `${preset.name} (${listed && !listed.some((entry) => entry.id === preset.id) ? "não encontrado na conta" : preset.note})`,
-      group: "Recomendados",
-    })),
-    ...accountModels.map((entry) => ({
-      value: entry.id,
-      label: entry.vision === false ? `${entry.name} (sem imagens)` : entry.name,
-      group: "Disponíveis na sua conta",
-    })),
-  ]
-}
-
-function pickEffort(choice: Effort | null, provider: ProviderId, model: string): Effort {
-  const allowed = effortsFor(provider, model)
-  if (choice && allowed.includes(choice)) return choice
-  if (choice) {
-    const lower = EFFORTS.slice(0, EFFORTS.indexOf(choice)).reverse().find((entry) => allowed.includes(entry))
-    if (lower) return lower
-  }
-  const fallback = defaultEffort(provider, model)
-  return allowed.includes(fallback) ? fallback : allowed[0] ?? DEFAULT_EFFORT
-}
-
-function effortChoices(provider: ProviderId, model: string): FlowSelectOption[] {
-  const allowed = effortsFor(provider, model)
-  return (allowed.length ? allowed : [DEFAULT_EFFORT]).map((value) => ({ value, label: EFFORT_OPTIONS[value].label }))
-}
-
-function prefixLength(info: ProviderInfo, key: string): number {
-  return info.keyPrefix && key.startsWith(info.keyPrefix) ? info.keyPrefix.length : 0
-}
-
-function keyWarning(info: ProviderInfo, value: string): string {
-  const key = value.trim()
-  if (!key) return ""
-  const best = Math.max(...PROVIDERS.map((entry) => prefixLength(entry, key)))
-  const owners = best > 0 ? PROVIDERS.filter((entry) => prefixLength(entry, key) === best) : []
-  if (owners.length === 1 && owners[0].id !== info.id) return `Esta chave parece ser ${owners[0].of}. Confira o provedor escolhido.`
-  if (info.keyPrefix && !key.startsWith(info.keyPrefix)) return `Chaves ${info.of} costumam começar com ${info.keyPrefix}.`
-  return ""
-}
-
-function stageText(progress: GenerationProgress | null, editing = false): string {
-  if (!progress) return "Enviando a solicitação."
-  const round = `rodada ${progress.round} de ${progress.maxRounds}`
-  if (progress.stage === "preparando") return editing ? "Preparando a edição." : "Preparando a geração."
-  if (progress.stage === "gerando") return editing ? `Editando o fluxo, ${round}.` : `Gerando o fluxo, ${round}.`
-  if (progress.stage === "montando") return editing ? "Aplicando as mudanças no fluxo aberto." : "Montando o fluxo no formato de Atendimento."
-  if (progress.stage === "validando") return editing ? "Validando os locais e as conexões." : "Validando o fluxo."
-  if (progress.resumed) return `Retomando a geração interrompida, ${round}.`
-  return progress.pending
-    ? `Corrigindo ${plural(progress.pending, "pendência", "pendências")}, ${round}.`
-    : `Corrigindo as pendências, ${round}.`
-}
-
-function progressText(progress: GenerationProgress | null, live?: LiveCounts | null, editing = false): string {
-  if (editing) return stageText(progress, true)
-  if (progress?.stage !== "gerando" || (!live && progress.nodes === undefined && progress.edges === undefined)) return stageText(progress)
-  const nodes = plural(live?.nodes ?? progress.nodes ?? 0, "componente", "componentes")
-  const edges = plural(live?.edges ?? progress.edges ?? 0, "conexão", "conexões")
-  return `Gerando o fluxo, rodada ${progress.round} de ${progress.maxRounds}: ${nodes} e ${edges}.`
-}
-
-function readProgress(value: unknown): GenerationProgress | null {
-  if (!isObject(value)) return null
-  const stage = STAGES.find((entry) => entry === value.stage)
-  if (!stage) return null
-  return {
-    stage,
-    round: readCount(value.round) || 1,
-    maxRounds: readCount(value.maxRounds) || MAX_ROUNDS,
-    nodes: readCount(value.nodes),
-    edges: readCount(value.edges),
-    pending: readCount(value.pending),
-    ...(value.resumed === true ? { resumed: true } : {}),
-  }
-}
-
-function readIssues(value: unknown): GenerationIssue[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((entry): GenerationIssue[] => {
-    if (!isObject(entry)) return []
-    const message = text(entry.message).trim()
-    if (!message) return []
-    return [
-      {
-        severity: entry.severity === "error" ? "error" : "warning",
-        scope: SCOPES.find((scope) => scope === entry.scope) ?? "ia",
-        message,
-        nodeId: text(entry.nodeId) || undefined,
-        riId: text(entry.riId) || undefined,
-        type: text(entry.type) || undefined,
-      },
-    ]
-  })
-}
-
-function readChanges(value: unknown): GenerationChanges | undefined {
-  if (!isObject(value)) return undefined
-  const added = readCount(value.added)
-  const changed = readCount(value.changed)
-  const removed = readCount(value.removed)
-  if (added === undefined && changed === undefined && removed === undefined) return undefined
-  return { added: added ?? 0, changed: changed ?? 0, removed: removed ?? 0 }
-}
-
-function readUsage(value: unknown): GenerationUsage | undefined {
-  if (!isObject(value)) return undefined
-  const inputTokens = readCount(value.inputTokens) ?? 0
-  const outputTokens = readCount(value.outputTokens) ?? 0
-  const totalTokens = readCount(value.totalTokens) || inputTokens + outputTokens
-  return totalTokens > 0 ? { inputTokens, outputTokens, totalTokens } : undefined
-}
-
-function requestField(value: unknown): Field | undefined {
-  return Object.entries(REQUEST_FIELDS).find(([key]) => key === value)?.[1]
-}
-
-function readOutcome(value: unknown, status: number): Outcome {
-  if (isObject(value) && value.success === true) {
-    try {
-      return {
-        ok: true,
-        received: {
-          flow: importFlow(value.workflow),
-          issues: readIssues(value.issues),
-          rounds: readCount(value.rounds) || 1,
-          usage: readUsage(value.usage),
-          transcript: text(value.transcript),
-          model: isObject(value.model) ? text(value.model.id) : "",
-          partial: value.partial === true,
-          mode: value.mode === "edit" ? "edit" : "create",
-          changes: readChanges(value.changes),
-        },
-      }
-    } catch (error) {
-      return {
-        ok: false,
-        rejection: {
-          code: "invalid_output",
-          failure: { title: "O fluxo recebido não está no formato de Atendimento.", items: messageLines(error) },
-        },
-      }
-    }
-  }
-  if (isObject(value) && text(value.error).trim()) {
-    return {
-      ok: false,
-      rejection: {
-        code: text(value.code) || "unknown",
-        field: requestField(value.field),
-        failure: { title: text(value.error).trim(), details: text(value.details).trim() || undefined, items: [] },
-      },
-    }
-  }
-  return {
-    ok: false,
-    rejection: {
-      code: "unknown",
-      failure: STATUS_FAILURES[status] ?? {
-        title: "Resposta inesperada do servidor.",
-        details: `Código HTTP ${status}. Tente novamente.`,
-        items: [],
-      },
-    },
-  }
-}
-
-function readEvent(line: string, onProgress: (progress: GenerationProgress) => void): Outcome | null {
-  if (!line.trim()) return null
-  let event: unknown
-  try {
-    event = JSON.parse(line)
-  } catch {
-    return null
-  }
-  if (!isObject(event)) return null
-  if (event.type === "result") return readOutcome(event.result, 200)
-  if (event.type === "progress") {
-    const progress = readProgress(event.progress)
-    if (progress) onProgress(progress)
-  }
-  return null
-}
-
-async function readEvents(
-  body: ReadableStream<Uint8Array>,
-  signal: AbortSignal,
-  onProgress: (progress: GenerationProgress) => void,
-): Promise<Outcome> {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
-  let outcome: Outcome | null = null
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
-      for (const line of lines) outcome = readEvent(line, onProgress) ?? outcome
-    }
-    outcome = readEvent(buffer + decoder.decode(), onProgress) ?? outcome
-  } catch (error) {
-    if (signal.aborted) throw error
-  } finally {
-    reader.releaseLock()
-  }
-  return outcome ?? INTERRUPTED
-}
-
-async function requestGeneration(
-  request: GenerateRequest,
-  signal: AbortSignal,
-  onProgress: (progress: GenerationProgress) => void,
-): Promise<Outcome> {
-  const response = await fetch(GENERATE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/x-ndjson, application/json" },
-    body: JSON.stringify({ ...request, stream: true } satisfies GenerateRequest),
-    cache: "no-store",
-    signal,
-  })
-  const type = response.headers.get("content-type") ?? ""
-  if (response.ok && response.body && type.includes("ndjson")) return readEvents(response.body, signal, onProgress)
-  return readOutcome(await response.json().catch(() => null), response.status)
-}
-
-async function loadEngine(): Promise<Engine | null> {
-  try {
-    const [runner, preview, edit] = await Promise.all([
-      import("@/lib/atendimento/ai/runner"),
-      import("@/lib/atendimento/ai/preview"),
-      import("@/lib/atendimento/ai/edit"),
-    ])
-    return { runGeneration: runner.runGeneration, previewFlow: preview.previewFlow, previewEdit: preview.previewEdit, diffFlows: edit.diffFlows }
-  } catch {
-    return null
-  }
-}
-
-async function generateFlow(
-  request: GenerateRequest,
-  signal: AbortSignal,
-  onProgress: (progress: GenerationProgress) => void,
-  onPartial?: (ri: unknown) => void,
-  engine?: Engine | null,
-): Promise<Outcome> {
-  const loaded = engine === undefined ? await loadEngine() : engine
-  if (!loaded) return requestGeneration(request, signal, onProgress)
-  let reached = false
-  const direct: typeof fetch = async (input, init) => {
-    const response = await fetch(input, init)
-    reached = true
-    return response
-  }
-  const response = await loaded.runGeneration(
-    {
-      provider: request.provider,
-      model: request.model,
-      apiKey: request.apiKey,
-      prompt: request.prompt,
-      image: request.image ?? null,
-      size: request.size,
-      count: request.count,
-      name: request.name,
-      effort: request.effort ?? DEFAULT_EFFORT,
-      ...(request.fill !== undefined ? { fill: request.fill } : {}),
-      ...(request.mode ? { mode: request.mode } : {}),
-      ...(request.base !== undefined ? { base: request.base } : {}),
-    },
-    { transport: "browser", signal, fetch: direct, onProgress, onPartial },
-  )
-  if (!response.success && response.code === "network" && !reached && !signal.aborted) {
-    try {
-      return await requestGeneration(request, signal, onProgress)
-    } catch (error) {
-      if (signal.aborted) throw error
-    }
-  }
-  return readOutcome(response, 200)
-}
-
-async function loadInterview(): Promise<InterviewModule | null> {
-  try {
-    const loaded = await import("@/lib/atendimento/ai/interview")
-    return { interviewTurn: loaded.interviewTurn }
-  } catch {
-    return null
-  }
-}
-
-async function requestTurn(input: InterviewInput, signal: AbortSignal, engine?: InterviewModule | null): Promise<InterviewTurnResult> {
-  const loaded = engine === undefined ? await loadInterview() : engine
-  if (!loaded) return { ok: false, failure: TURN_UNAVAILABLE }
-  return loaded.interviewTurn(
-    {
-      provider: input.provider,
-      model: input.model,
-      apiKey: input.apiKey,
-      effort: input.effort,
-      fill: input.fill,
-      history: input.history,
-      flow: input.flow ?? null,
-    },
-    { transport: "browser", signal },
-  )
-}
-
-function failureField(code: string, field?: Field): Field | undefined {
-  return field ?? (code === "invalid_key" ? "apiKey" : code === "model_not_found" ? "model" : undefined)
-}
-
-function previewFeed(
-  build: (ri: unknown) => AtendimentoFlow | null,
-  send: (flow: AtendimentoFlow) => void,
-  interval = PREVIEW_INTERVAL_MS,
-): PreviewFeed {
-  let pending: unknown = null
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let last = Number.NEGATIVE_INFINITY
-  let stopped = false
-  const flush = () => {
-    timer = undefined
-    if (stopped || pending === null) return
-    const ri = pending
-    pending = null
-    last = Date.now()
-    let flow: AtendimentoFlow | null = null
-    try {
-      flow = build(ri)
-    } catch {
-      flow = null
-    }
-    if (flow) send(flow)
-  }
-  return {
-    push(ri) {
-      if (stopped || ri === null || ri === undefined) return
-      pending = ri
-      if (timer !== undefined) return
-      timer = setTimeout(flush, Math.max(0, last + interval - Date.now()))
-    },
-    stop() {
-      stopped = true
-      pending = null
-      if (timer !== undefined) clearTimeout(timer)
-      timer = undefined
-    },
-  }
-}
-
-function readModels(list: unknown[]): ModelInfo[] {
-  const seen = new Set<string>()
-  return list.flatMap((entry): ModelInfo[] => {
-    if (!isObject(entry)) return []
-    const id = text(entry.id).trim()
-    if (!isModelId(id) || seen.has(id)) return []
-    seen.add(id)
-    const name = text(entry.name).trim() || id
-    return [typeof entry.vision === "boolean" ? { id, name, vision: entry.vision } : { id, name }]
-  })
-}
-
-async function requestModels(provider: ProviderId, apiKey: string, signal: AbortSignal): Promise<Listed> {
-  const request: ModelsRequest = { provider, apiKey }
-  const response = await fetch(MODELS_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(request),
-    cache: "no-store",
-    signal,
-  })
-  const data: unknown = await response.json().catch(() => null)
-  if (response.ok && isObject(data) && Array.isArray(data.models)) return { ok: true, models: readModels(data.models) }
-  if (isObject(data) && text(data.error).trim()) {
-    return { ok: false, error: text(data.error).trim(), details: text(data.details).trim() || undefined }
-  }
-  return { ok: false, error: "Não foi possível buscar os modelos.", details: `Código HTTP ${response.status}. Tente novamente.` }
 }
 
 function acceptsImage(file: File): boolean {
@@ -837,16 +304,6 @@ function usedTypes(flow: AtendimentoFlow): TypeUsage[] {
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "pt-BR"))
 }
 
-function mergeIssues(received: GenerationIssue[], blocking: FlowIssue[]): GenerationIssue[] {
-  const signature = (issue: { severity: string; nodeId?: string; message: string }) =>
-    JSON.stringify([issue.severity, issue.nodeId ?? "", issue.message])
-  const known = new Set(received.map(signature))
-  const missing = blocking
-    .filter((issue) => !known.has(signature(issue)))
-    .map((issue): GenerationIssue => ({ severity: "error", scope: "ia", message: issue.message, nodeId: issue.nodeId }))
-  return [...missing, ...received].sort((a, b) => Number(b.severity === "error") - Number(a.severity === "error"))
-}
-
 function summarize(result: Generated): Summary {
   const blocking = validateFlow(result.flow).filter((issue) => issue.severity === "error")
   const issues = mergeIssues(result.issues, blocking)
@@ -884,17 +341,6 @@ function summarize(result: Generated): Summary {
     marks,
     removed,
   }
-}
-
-function issueSubject(issue: GenerationIssue, nodes: ReadonlyMap<string, AtendimentoNode>): string {
-  if (!issue.nodeId) return ""
-  const type = nodes.get(issue.nodeId)?.data.type ?? issue.type
-  return `${type ? getComponentLabel(type) : "Componente"} · ID ${issue.nodeId}`
-}
-
-function issueLine(issue: GenerationIssue, nodes: ReadonlyMap<string, AtendimentoNode>): string {
-  const subject = issueSubject(issue, nodes)
-  return `${issue.severity === "error" ? "Erro" : "Aviso"}: ${subject ? `${subject}: ` : ""}${issue.message}`
 }
 
 function promptDocument(result: Generated, summary: Summary): string {
@@ -956,12 +402,13 @@ export default function AIWorkflowDialog({
   onLivePreview,
   getCurrentFlow,
   onWorkflowEdited,
+  onBusyChange,
 }: AIWorkflowDialogProps) {
   const baseId = useId()
-  const [provider, setProvider] = useState<ProviderId>(PROVIDERS[0].id)
-  const [keys, setKeys] = useState<Partial<Record<ProviderId, string>>>({})
-  const [models, setModels] = useState<Partial<Record<ProviderId, string>>>({})
-  const [fetched, setFetched] = useState<Partial<Record<ProviderId, { key: string; models: ModelInfo[] }>>>({})
+  const [provider, setProvider] = useAiSetting("provider")
+  const [keys, setKeys] = useAiSetting("keys")
+  const [models, setModels] = useAiSetting("models")
+  const [fetched, setFetched] = useAiSetting("fetched")
   const [listing, setListing] = useState<Listing | null>(null)
   const [showKey, setShowKey] = useState(false)
   const [prompt, setPrompt] = useState("")
@@ -971,9 +418,9 @@ export default function AIWorkflowDialog({
   const [size, setSize] = useState<GenerationSize>("auto")
   const [count, setCount] = useState("10")
   const [name, setName] = useState("")
-  const [effortChoice, setEffortChoice] = useState<Effort | null>(null)
+  const [effortChoice, setEffortChoice] = useAiSetting("effortChoice")
   const [mode, setMode] = useState<Mode>("create")
-  const [fill, setFill] = useState(true)
+  const [fill, setFill] = useAiSetting("fill")
   const [canEdit, setCanEdit] = useState(() => {
     try {
       return hasComponents(getCurrentFlow?.() ?? null)
@@ -1015,6 +462,8 @@ export default function AIWorkflowDialog({
   const previewShownRef = useRef(false)
   const livePreviewRef = useRef(onLivePreview)
   livePreviewRef.current = onLivePreview
+  const busyChangeRef = useRef(onBusyChange)
+  busyChangeRef.current = onBusyChange
   const currentFlowRef = useRef(getCurrentFlow)
   currentFlowRef.current = getCurrentFlow
   const openRef = useRef(open)
@@ -1113,6 +562,10 @@ export default function AIWorkflowDialog({
   }, [open])
 
   useEffect(() => {
+    busyChangeRef.current?.(generating)
+  }, [generating])
+
+  useEffect(() => {
     if (!generating) return
     const started = Date.now()
     const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
@@ -1188,16 +641,7 @@ export default function AIWorkflowDialog({
     clearFieldError("size", "count")
   }
 
-  const keyError = (key: string) =>
-    !key
-      ? `Informe a chave da API ${info.of}.`
-      : !KEY_CHARACTERS.test(key)
-        ? "A chave da API tem caracteres inválidos."
-        : key.length < MIN_KEY_LENGTH
-          ? "A chave da API parece incompleta. Confira o valor copiado."
-          : key.length > LIMITS.apiKey
-            ? "A chave da API é longa demais."
-            : ""
+  const keyError = (key: string) => apiKeyError(info, key)
 
   const clearLoading = (target: Listing["provider"]) =>
     setListing((current) => (current?.provider === target && current.state === "loading" ? null : current))
