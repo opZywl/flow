@@ -28,6 +28,7 @@ import {
   KeyRound,
   Loader2,
   Maximize2,
+  MessagesSquare,
   Minimize2,
   RefreshCw,
   RotateCcw,
@@ -47,6 +48,7 @@ import {
   MAX_ROUNDS,
   SIZE_RANGES,
   type Effort,
+  type GenerateFailure,
   type GenerateRequest,
   type GenerationChanges,
   type GenerationIssue,
@@ -61,11 +63,13 @@ import {
   type RequestField,
 } from "@/lib/atendimento/ai/contracts"
 import { PROVIDERS, defaultEffort, effortsFor, type ProviderId, type ProviderInfo } from "@/lib/atendimento/ai/providers"
+import type { InterviewInput } from "@/lib/atendimento/ai/interview"
 import { START_TYPE, getCategory, getComponentColor, getComponentLabel } from "@/lib/atendimento/catalog"
 import { downloadJson, downloadText } from "@/lib/atendimento/download"
 import { exportFileName, exportFlow, importFlow, isObject, stampExport, validateFlow } from "@/lib/atendimento/format"
 import type { AtendimentoFlow, AtendimentoNode, FlowIssue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
+import { InterviewPanel, useInterview, type BuildAction, type InterviewHandle, type InterviewRunSummary, type InterviewTurnResult } from "./ai-interview"
 import { FlowSelect, type FlowSelectOption } from "./flow-select"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
@@ -76,6 +80,7 @@ type View = "form" | "result"
 type Tone = "success" | "warning" | "danger"
 type LiveCounts = { nodes: number; edges: number }
 type PreviewKind = "create" | "edit"
+type Mode = GenerationMode | "chat"
 type ChangeMark = "added" | "changed"
 
 interface ReferenceImage {
@@ -117,6 +122,8 @@ interface FlowDiff {
 }
 
 type Outcome = { ok: true; received: Received } | { ok: false; rejection: Rejection }
+
+type JobOutcome = { ok: true; received: Received; diff?: FlowDiff } | { ok: false; rejection: Rejection }
 
 type Listed = { ok: true; models: ModelInfo[] } | { ok: false; error: string; details?: string }
 
@@ -192,6 +199,8 @@ interface Engine {
   diffFlows: EditModule["diffFlows"]
 }
 
+type InterviewModule = Pick<typeof import("@/lib/atendimento/ai/interview"), "interviewTurn">
+
 interface PreviewFeed {
   push: (ri: unknown) => void
   stop: () => void
@@ -246,11 +255,28 @@ const SIZE_OPTIONS: ReadonlyArray<{ value: GenerationSize; label: string; hint: 
   { value: "custom", label: "Personalizado", hint: "A IA gera a quantidade de componentes informada." },
 ]
 
-const MODE_OPTIONS: ReadonlyArray<{ value: GenerationMode; label: string; hint: string; Icon: LucideIcon }> = [
+const MODE_OPTIONS: ReadonlyArray<{ value: Mode; label: string; hint: string; Icon: LucideIcon }> = [
   { value: "create", label: "Criar fluxo novo", hint: "A IA monta um fluxo do zero a partir do pedido.", Icon: FilePlus2 },
   { value: "edit", label: "Editar o fluxo aberto", hint: "A IA muda só o que o pedido citar e mantém o resto como está.", Icon: FilePenLine },
+  { value: "chat", label: "Conversar com a IA", hint: "A IA pergunta o que faltar, monta o fluxo no editor e segue com os ajustes que você pedir.", Icon: MessagesSquare },
 ]
 const EDIT_BLOCKED = "Disponível quando o fluxo aberto tem componentes além do Início."
+const CHAT_FIELDS: readonly Field[] = ["provider", "apiKey", "model", "effort", "fill"]
+const CHAT_STARTERS_EDIT = [
+  "Acrescente uma pesquisa de satisfação no fim.",
+  "Quero mudar a mensagem de boas-vindas.",
+  "Adicione um horário de atendimento.",
+]
+const CHAT_INTRO_EDIT =
+  "Conte o que você quer mudar no fluxo aberto. A IA pergunta o que faltar e aplica as mudanças no canvas. Desfazer (Ctrl+Z) volta ao fluxo anterior."
+const CHAT_INTRO_CREATE =
+  "Conte o que o seu atendimento precisa fazer. A IA pergunta o que faltar, como as opções do menu e as mensagens, e monta o fluxo no editor quando tudo estiver decidido."
+const TURN_UNAVAILABLE: GenerateFailure = {
+  success: false,
+  code: "unknown",
+  error: "Não foi possível carregar a conversa com a IA.",
+  details: "Recarregue a página e tente de novo.",
+}
 
 const FILL_HINTS = {
   on: "Nomes, IDs e URLs saem sempre preenchidos. Os valores provisórios aparecem em Dados da plataforma para você conferir.",
@@ -645,6 +671,36 @@ async function generateFlow(
   return readOutcome(response, 200)
 }
 
+async function loadInterview(): Promise<InterviewModule | null> {
+  try {
+    const loaded = await import("@/lib/atendimento/ai/interview")
+    return { interviewTurn: loaded.interviewTurn }
+  } catch {
+    return null
+  }
+}
+
+async function requestTurn(input: InterviewInput, signal: AbortSignal, engine?: InterviewModule | null): Promise<InterviewTurnResult> {
+  const loaded = engine === undefined ? await loadInterview() : engine
+  if (!loaded) return { ok: false, failure: TURN_UNAVAILABLE }
+  return loaded.interviewTurn(
+    {
+      provider: input.provider,
+      model: input.model,
+      apiKey: input.apiKey,
+      effort: input.effort,
+      fill: input.fill,
+      history: input.history,
+      flow: input.flow ?? null,
+    },
+    { transport: "browser", signal },
+  )
+}
+
+function failureField(code: string, field?: Field): Field | undefined {
+  return field ?? (code === "invalid_key" ? "apiKey" : code === "model_not_found" ? "model" : undefined)
+}
+
 function previewFeed(
   build: (ri: unknown) => AtendimentoFlow | null,
   send: (flow: AtendimentoFlow) => void,
@@ -916,7 +972,7 @@ export default function AIWorkflowDialog({
   const [count, setCount] = useState("10")
   const [name, setName] = useState("")
   const [effortChoice, setEffortChoice] = useState<Effort | null>(null)
-  const [mode, setMode] = useState<GenerationMode>("create")
+  const [mode, setMode] = useState<Mode>("create")
   const [fill, setFill] = useState(true)
   const [canEdit, setCanEdit] = useState(() => {
     try {
@@ -953,6 +1009,8 @@ export default function AIWorkflowDialog({
   const detailsRef = useRef<HTMLButtonElement>(null)
   const collapsedRef = useRef(false)
   const liveRef = useRef(false)
+  const chatJobRef = useRef(false)
+  const cancelChatRef = useRef<() => void>(() => undefined)
   const feedRef = useRef<PreviewFeed | null>(null)
   const previewShownRef = useRef(false)
   const livePreviewRef = useRef(onLivePreview)
@@ -977,8 +1035,10 @@ export default function AIWorkflowDialog({
   const effortOptions = effortChoices(provider, model)
   const canWatch = typeof onLivePreview === "function"
   const editAvailable = typeof getCurrentFlow === "function" && typeof onWorkflowEdited === "function"
-  const activeMode: GenerationMode = editAvailable && canEdit ? mode : "create"
+  const activeMode: Mode = mode === "edit" && !(editAvailable && canEdit) ? "create" : mode
   const editing = activeMode === "edit"
+  const chatting = activeMode === "chat"
+  const modeOptions = MODE_OPTIONS.filter((entry) => entry.value !== "edit" || editAvailable)
   const summary = useMemo(() => (result ? summarize(result) : null), [result])
   const showingResult = view === "result" && result !== null && summary !== null
 
@@ -1046,6 +1106,7 @@ export default function AIWorkflowDialog({
       return
     }
     if (collapsedRef.current) return
+    if (chatJobRef.current) cancelChatRef.current()
     abortRef.current?.abort()
     listAbortRef.current?.abort()
     stopPreviewRef.current()
@@ -1116,8 +1177,9 @@ export default function AIWorkflowDialog({
     clearFieldError("effort")
   }
 
-  const changeMode = (value: GenerationMode) => {
+  const changeMode = (value: Mode) => {
     setMode(value)
+    setFailure(null)
     clearFieldError("mode", "size", "count", "name")
   }
 
@@ -1246,7 +1308,7 @@ export default function AIWorkflowDialog({
   }
 
   const onPaste = (event: ClipboardEvent<HTMLFormElement>) => {
-    if (generating || imageBusy) return
+    if (generating || imageBusy || chatting) return
     const file = Array.from(event.clipboardData.files).find((entry) => entry.type.startsWith("image/"))
     if (!file || event.clipboardData.getData("text/plain")) return
     event.preventDefault()
@@ -1293,9 +1355,7 @@ export default function AIWorkflowDialog({
   }
 
   const rejectGeneration = (rejection: Rejection, origin: View) => {
-    const field =
-      rejection.field ??
-      (rejection.code === "invalid_key" ? "apiKey" : rejection.code === "model_not_found" ? "model" : undefined)
+    const field = failureField(rejection.code, rejection.field)
     if (field) {
       const message = [rejection.failure.title, rejection.failure.details].filter(Boolean).join(" ")
       setFieldErrors((current) => ({ ...current, [field]: message }))
@@ -1320,6 +1380,72 @@ export default function AIWorkflowDialog({
     collapsedRef.current = false
     setCollapsed(false)
     onOpenChange(true)
+  }
+
+  const beginJob = (kind: PreviewKind, live: boolean, chat: boolean): AbortController => {
+    const controller = new AbortController()
+    abortRef.current = controller
+    liveRef.current = live
+    chatJobRef.current = chat
+    stopPreview()
+    setRunningKind(kind)
+    setGenerating(true)
+    setProgress(null)
+    setElapsed(0)
+    setFailure(null)
+    setNotice("")
+    if (live) collapse()
+    return controller
+  }
+
+  const endJob = (controller: AbortController) => {
+    if (abortRef.current !== controller) return
+    abortRef.current = null
+    liveRef.current = false
+    chatJobRef.current = false
+    setGenerating(false)
+    setProgress(null)
+    if (collapsedRef.current) {
+      collapsedRef.current = false
+      setCollapsed(false)
+    }
+  }
+
+  const runJob = async (
+    controller: AbortController,
+    request: GenerateRequest,
+    editBase: AtendimentoFlow | null,
+    live: boolean,
+  ): Promise<JobOutcome | null> => {
+    const kind: PreviewKind = editBase ? "edit" : "create"
+    const current = () => abortRef.current === controller && !controller.signal.aborted
+    if (live && editBase) showPreview(editBase, false, kind)
+    const engine = await loadEngine()
+    if (!current()) return null
+    const build = editBase && engine ? (ri: unknown) => engine.previewEdit(editBase, ri) : engine?.previewFlow
+    const feed = live && build ? previewFeed(build, (flow) => current() && showPreview(flow, false, kind)) : null
+    feedRef.current = feed
+    const outcome = await generateFlow(
+      request,
+      controller.signal,
+      (next) => {
+        if (abortRef.current === controller) setProgress(next)
+      },
+      feed ? (ri) => current() && feed.push(ri) : undefined,
+      engine,
+    )
+    feed?.stop()
+    if (!current()) return null
+    if (!outcome.ok) return outcome
+    let diff: FlowDiff | undefined
+    if (editBase && engine) {
+      try {
+        diff = engine.diffFlows(editBase, outcome.received.flow)
+      } catch {
+        diff = undefined
+      }
+    }
+    return { ok: true, received: outcome.received, diff }
   }
 
   const generate = async () => {
@@ -1368,19 +1494,9 @@ export default function AIWorkflowDialog({
       base: editBase,
     }
 
-    const controller = new AbortController()
     const live = watch && canWatch
-    abortRef.current = controller
-    liveRef.current = live
-    stopPreview()
-    setRunningKind(kind)
-    setGenerating(true)
-    setProgress(null)
-    setElapsed(0)
-    setFailure(null)
-    setNotice("")
-    if (live) collapse()
-    else afterRender(() => cancelRef.current?.focus())
+    const controller = beginJob(kind, live, false)
+    if (!live) afterRender(() => cancelRef.current?.focus())
 
     const current = () => abortRef.current === controller && !controller.signal.aborted
     const reopen = () => {
@@ -1388,23 +1504,8 @@ export default function AIWorkflowDialog({
     }
 
     try {
-      if (live && editBase) showPreview(editBase, false, kind)
-      const engine = await loadEngine()
-      if (!current()) return
-      const build = editBase && engine ? (ri: unknown) => engine.previewEdit(editBase, ri) : engine?.previewFlow
-      const feed = live && build ? previewFeed(build, (flow) => current() && showPreview(flow, false, kind)) : null
-      feedRef.current = feed
-      const outcome = await generateFlow(
-        request,
-        controller.signal,
-        (next) => {
-          if (abortRef.current === controller) setProgress(next)
-        },
-        feed ? (ri) => current() && feed.push(ri) : undefined,
-        engine,
-      )
-      feed?.stop()
-      if (!current()) return
+      const outcome = await runJob(controller, request, editBase, live)
+      if (!outcome || !current()) return
       if (!outcome.ok) {
         stopPreview()
         reopen()
@@ -1413,19 +1514,11 @@ export default function AIWorkflowDialog({
       }
       if (live) showPreview(outcome.received.flow, true, kind)
       reopen()
-      let diff: FlowDiff | undefined
-      if (editBase && engine) {
-        try {
-          diff = engine.diffFlows(editBase, outcome.received.flow)
-        } catch {
-          diff = undefined
-        }
-      }
       setResult({
         ...outcome.received,
         ...context,
         mode: kind,
-        diff,
+        diff: outcome.diff,
         model: outcome.received.model || model,
         generatedAt: new Date().toISOString(),
       })
@@ -1441,22 +1534,170 @@ export default function AIWorkflowDialog({
       setFailure({ title: "Não foi possível contatar o servidor.", details: "Verifique a conexão e tente novamente.", items: [] })
       focusMainAction(origin)
     } finally {
-      if (abortRef.current === controller) {
-        abortRef.current = null
-        liveRef.current = false
-        setGenerating(false)
-        setProgress(null)
-        if (collapsedRef.current) {
-          collapsedRef.current = false
-          setCollapsed(false)
-        }
+      endJob(controller)
+    }
+  }
+
+  const chatInput = () => document.getElementById(idFor("chat"))?.querySelector<HTMLTextAreaElement>("textarea") ?? null
+
+  const credentialErrors = (): FieldErrors => {
+    const errors: FieldErrors = {}
+    const invalidKey = keyError(apiKey.trim())
+    if (invalidKey) errors.apiKey = invalidKey
+    if (!isModelId(model)) errors.model = "Escolha um modelo válido."
+    return errors
+  }
+
+  const checkCredentials = (): boolean => {
+    const errors = credentialErrors()
+    const invalid = FIELD_ORDER.find((field) => errors[field])
+    if (!invalid) return true
+    setFieldErrors((current) => ({ ...current, ...errors }))
+    focusField(invalid)
+    return false
+  }
+
+  const markChatField = (field: Field | undefined, message: string) => {
+    if (!field || !CHAT_FIELDS.includes(field)) return
+    setFieldErrors((current) => ({ ...current, [field]: message }))
+  }
+
+  const chatTurn = async (
+    history: InterviewInput["history"],
+    flow: AtendimentoFlow | null,
+    signal: AbortSignal,
+  ): Promise<InterviewTurnResult> => {
+    const errors = credentialErrors()
+    if (errors.apiKey || errors.model) {
+      checkCredentials()
+      return {
+        ok: false,
+        failure: {
+          success: false,
+          code: "invalid_request",
+          error: errors.apiKey || errors.model || "Confira a chave da API e o modelo.",
+          field: errors.apiKey ? "apiKey" : "model",
+        },
       }
     }
+    const result = await requestTurn({ provider, model, apiKey: apiKey.trim(), effort, fill, history, flow }, signal)
+    if (!result.ok && !signal.aborted) {
+      const field = failureField(result.failure.code, requestField(result.failure.field))
+      markChatField(field, [result.failure.error, result.failure.details].filter(Boolean).join(" "))
+    }
+    return result
+  }
+
+  const finishChatJob = (controller: AbortController) => {
+    if (abortRef.current !== controller) return
+    controller.abort()
+    stopPreview()
+    const reopen = collapsedRef.current
+    endJob(controller)
+    if (reopen) onOpenChange(true)
+  }
+
+  const applyChat = (outcome: Extract<JobOutcome, { ok: true }>, editBase: AtendimentoFlow | null): InterviewRunSummary => {
+    let flow: AtendimentoFlow
+    try {
+      flow = importFlow(outcome.received.flow)
+    } catch (error) {
+      stopPreview()
+      return { ok: false, error: "O fluxo recebido não está no formato de Atendimento.", details: messageLines(error).join(" ") || undefined }
+    }
+    if (editBase) {
+      const opened = readCurrentFlow()
+      if (!opened || documentKey(opened) !== documentKey(editBase)) {
+        stopPreview()
+        return { ok: false, error: "O fluxo aberto mudou durante a edição.", details: "Tente de novo para editar a versão atual do fluxo." }
+      }
+      if (!onWorkflowEdited?.(flow)) {
+        stopPreview()
+        return { ok: false, error: "O editor não aceitou a edição.", details: "Confira o aviso exibido no editor e tente novamente." }
+      }
+      stopPreview()
+      const diff = outcome.diff
+      const changes = outcome.received.changes ?? (diff ? { added: diff.added.length, changed: diff.changed.length, removed: diff.removed.length } : undefined)
+      return changes ? { ok: true, changes } : { ok: true }
+    }
+    if (!onWorkflowGenerated(flow)) {
+      stopPreview()
+      return { ok: false, error: "O editor não aceitou o fluxo.", details: "Confira o aviso exibido no editor e tente novamente." }
+    }
+    stopPreview()
+    return { ok: true, components: flow.nodes.filter((node) => node.data.type !== START_TYPE).length }
+  }
+
+  const chatRun = async (action: BuildAction, plan: string, signal: AbortSignal): Promise<InterviewRunSummary> => {
+    if (signal.aborted) return { ok: false }
+    if (abortRef.current) return { ok: false, error: "Aguarde a geração em andamento terminar." }
+    if (!checkCredentials()) return { ok: false, error: "Confira a chave da API e o modelo antes de montar o fluxo." }
+    const opened = action === "edit" && editAvailable ? readCurrentFlow() : null
+    const editBase = hasComponents(opened) ? opened : null
+    const request: GenerateRequest = {
+      provider,
+      model,
+      apiKey: apiKey.trim(),
+      prompt: plan.trim(),
+      image: null,
+      size: "auto",
+      effort,
+      fill,
+      ...(editBase ? { mode: "edit" as const, base: editBase } : {}),
+    }
+    const live = watch && canWatch
+    const controller = beginJob(editBase ? "edit" : "create", live, true)
+    const stop = () => finishChatJob(controller)
+    signal.addEventListener("abort", stop, { once: true })
+    const current = () => abortRef.current === controller && !controller.signal.aborted
+    try {
+      const outcome = await runJob(controller, request, editBase, live)
+      if (!outcome || !current()) return { ok: false }
+      if (!outcome.ok) {
+        stopPreview()
+        const shown = outcome.rejection.failure
+        markChatField(failureField(outcome.rejection.code, outcome.rejection.field), [shown.title, shown.details].filter(Boolean).join(" "))
+        return { ok: false, error: shown.title, details: [shown.details, ...shown.items].filter(Boolean).join(" ") || undefined }
+      }
+      return applyChat(outcome, editBase)
+    } catch {
+      if (!current()) return { ok: false }
+      stopPreview()
+      return { ok: false, error: "Não foi possível contatar o servidor.", details: "Verifique a conexão e tente novamente." }
+    } finally {
+      signal.removeEventListener("abort", stop)
+      if (editAvailable) setCanEdit(hasComponents(readCurrentFlow()))
+      if (abortRef.current === controller) {
+        const reopen = collapsedRef.current
+        endJob(controller)
+        if (reopen) onOpenChange(true)
+      }
+    }
+  }
+
+  const openedFlow = (): AtendimentoFlow | null => {
+    const flow = readCurrentFlow()
+    return hasComponents(flow) ? flow : null
+  }
+
+  const interview = useInterview({ turn: chatTurn, run: chatRun, getFlow: openedFlow })
+  cancelChatRef.current = interview.cancel
+
+  const chat: InterviewHandle = {
+    ...interview,
+    send: (value) => (!value.trim() || interview.busy || checkCredentials() ? interview.send(value) : false),
+    buildNow: () => (!interview.canBuild || checkCredentials() ? interview.buildNow() : false),
+    retry: () => (interview.status !== "error" || checkCredentials() ? interview.retry() : false),
   }
 
   const cancelGeneration = () => {
     const controller = abortRef.current
     if (!controller) return
+    if (chatJobRef.current) {
+      interview.cancel()
+      finishChatJob(controller)
+      return
+    }
     abortRef.current = null
     liveRef.current = false
     controller.abort()
@@ -1476,6 +1717,10 @@ export default function AIWorkflowDialog({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (chatting) {
+      chatInput()?.focus()
+      return
+    }
     void generate()
   }
 
@@ -1589,7 +1834,9 @@ export default function AIWorkflowDialog({
           ? (showingResult ? regenerateRef : submitRef).current
           : showingResult
             ? importRef.current
-            : document.getElementById(idFor(apiKey.trim() ? "description" : "apiKey"))
+            : chatting && apiKey.trim()
+              ? chatInput()
+              : document.getElementById(idFor(apiKey.trim() ? "description" : "apiKey"))
     if (!target) return
     event.preventDefault()
     target.focus()
@@ -1670,6 +1917,70 @@ export default function AIWorkflowDialog({
           : "Fluxo gerado sem pendências"
   const ToneIcon = summary ? TONES[summary.tone].Icon : CheckCircle2
 
+  const requestOptions = (
+    <>
+      {canWatch ? (
+        <label
+          className={cn(
+            "flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
+            watch ? "border-flow-accent/50 bg-flow-accent/10" : "border-flow-border bg-flow-soft hover:border-flow-accent/60",
+          )}
+        >
+          <input
+            id={idFor("watch")}
+            type="checkbox"
+            checked={watch}
+            onChange={(event) => setWatch(event.target.checked)}
+            aria-describedby={idFor("watch-hint")}
+            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-flow-accent disabled:cursor-not-allowed"
+          />
+          <span className="min-w-0">
+            <span className="block text-xs font-semibold text-flow-fg">Acompanhar no canvas</span>
+            <span id={idFor("watch-hint")} className="block text-[11px] leading-4 text-flow-muted">
+              {chatting
+                ? "Durante a montagem, esta janela vira um painel pequeno e o fluxo aparece no editor conforme é criado. Ao terminar, o fluxo fica no editor e a conversa continua aqui."
+                : editing
+                  ? "Durante a edição, esta janela vira um painel pequeno e as mudanças aparecem no fluxo aberto conforme chegam. Ao terminar, o resultado abre aqui para você revisar e aplicar."
+                  : "Durante a geração, esta janela vira um painel pequeno e o fluxo aparece no editor conforme é criado. Ao terminar, o resultado abre aqui para você revisar e importar."}
+            </span>
+          </span>
+        </label>
+      ) : null}
+
+      <div>
+        <label
+          className={cn(
+            "flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
+            fill ? "border-flow-accent/50 bg-flow-accent/10" : "border-flow-border bg-flow-soft hover:border-flow-accent/60",
+          )}
+        >
+          <input
+            id={idFor("fill")}
+            type="checkbox"
+            checked={fill}
+            onChange={(event) => {
+              setFill(event.target.checked)
+              clearFieldError("fill")
+            }}
+            aria-describedby={describedBy(idFor("fill-hint"), fieldErrors.fill && idFor("fill-error"))}
+            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-flow-accent disabled:cursor-not-allowed"
+          />
+          <span className="min-w-0">
+            <span className="block text-xs font-semibold text-flow-fg">Preencher todos os campos</span>
+            <span id={idFor("fill-hint")} className="block text-[11px] leading-4 text-flow-muted">
+              {fill ? FILL_HINTS.on : FILL_HINTS.off}
+            </span>
+          </span>
+        </label>
+        {fieldErrors.fill ? (
+          <p id={idFor("fill-error")} className={ui.error}>
+            {fieldErrors.fill}
+          </p>
+        ) : null}
+      </div>
+    </>
+  )
+
   const panel =
     collapsed && generating && typeof document !== "undefined"
       ? createPortal(
@@ -1745,8 +2056,9 @@ export default function AIWorkflowDialog({
                 Gerar fluxo com IA
               </DialogTitle>
               <DialogDescription className="mt-0.5 text-xs leading-5 text-flow-muted">
-                Escolha a IA, descreva o atendimento e revise o resultado antes de importar. O fluxo segue o formato JSON
-                de Atendimento e pode usar qualquer componente do editor.
+                {chatting
+                  ? "Escolha a IA e converse com ela. A IA pergunta o que faltar e monta o fluxo no editor com as suas respostas, no formato JSON de Atendimento."
+                  : "Escolha a IA, descreva o atendimento e revise o resultado antes de importar. O fluxo segue o formato JSON de Atendimento e pode usar qualquer componente do editor."}
               </DialogDescription>
             </div>
           </DialogHeader>
@@ -2168,72 +2480,70 @@ export default function AIWorkflowDialog({
                     Pedido
                   </h3>
 
-                  {editAvailable ? (
-                    <div>
-                      <p id={idFor("mode-label")} className={ui.label}>
-                        O que fazer
-                      </p>
-                      <div
-                        role="radiogroup"
-                        aria-labelledby={idFor("mode-label")}
-                        aria-describedby={fieldErrors.mode ? idFor("mode-error") : undefined}
-                        className="grid gap-2 sm:grid-cols-2"
-                      >
-                        {MODE_OPTIONS.map((entry) => {
-                          const checked = entry.value === activeMode
-                          const blocked = entry.value === "edit" && !canEdit
-                          const Icon = entry.Icon
-                          return (
-                            <label
-                              key={entry.value}
-                              title={blocked ? EDIT_BLOCKED : undefined}
+                  <div>
+                    <p id={idFor("mode-label")} className={ui.label}>
+                      O que fazer
+                    </p>
+                    <div
+                      role="radiogroup"
+                      aria-labelledby={idFor("mode-label")}
+                      aria-describedby={fieldErrors.mode ? idFor("mode-error") : undefined}
+                      className={cn("grid gap-2", modeOptions.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2")}
+                    >
+                      {modeOptions.map((entry) => {
+                        const checked = entry.value === activeMode
+                        const blocked = entry.value === "edit" && !canEdit
+                        const Icon = entry.Icon
+                        return (
+                          <label
+                            key={entry.value}
+                            title={blocked ? EDIT_BLOCKED : undefined}
+                            className={cn(
+                              "flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
+                              checked
+                                ? "border-flow-accent bg-flow-accent/10"
+                                : "border-flow-border bg-flow-surface hover:border-flow-accent/60",
+                            )}
+                          >
+                            <input
+                              id={checked ? idFor("mode") : undefined}
+                              type="radio"
+                              name={idFor("mode-choice")}
+                              value={entry.value}
+                              checked={checked}
+                              disabled={blocked}
+                              onChange={() => changeMode(entry.value)}
+                              aria-label={entry.label}
+                              aria-describedby={idFor(`mode-${entry.value}-hint`)}
+                              className="sr-only"
+                            />
+                            <span
+                              aria-hidden="true"
                               className={cn(
-                                "flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
-                                checked
-                                  ? "border-flow-accent bg-flow-accent/10"
-                                  : "border-flow-border bg-flow-surface hover:border-flow-accent/60",
+                                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition",
+                                checked ? "bg-flow-accent text-white" : "bg-flow-soft text-flow-muted-strong",
                               )}
                             >
-                              <input
-                                id={checked ? idFor("mode") : undefined}
-                                type="radio"
-                                name={idFor("mode-choice")}
-                                value={entry.value}
-                                checked={checked}
-                                disabled={blocked}
-                                onChange={() => changeMode(entry.value)}
-                                aria-label={entry.label}
-                                aria-describedby={idFor(`mode-${entry.value}-hint`)}
-                                className="sr-only"
-                              />
-                              <span
-                                aria-hidden="true"
-                                className={cn(
-                                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition",
-                                  checked ? "bg-flow-accent text-white" : "bg-flow-soft text-flow-muted-strong",
-                                )}
-                              >
-                                <Icon className="h-4 w-4" />
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-semibold text-flow-fg">{entry.label}</span>
+                              <span id={idFor(`mode-${entry.value}-hint`)} className="block text-[11px] leading-4 text-flow-muted">
+                                {blocked ? EDIT_BLOCKED : entry.hint}
                               </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block text-xs font-semibold text-flow-fg">{entry.label}</span>
-                                <span id={idFor(`mode-${entry.value}-hint`)} className="block text-[11px] leading-4 text-flow-muted">
-                                  {blocked ? EDIT_BLOCKED : entry.hint}
-                                </span>
-                              </span>
-                            </label>
-                          )
-                        })}
-                      </div>
-                      {fieldErrors.mode ? (
-                        <p id={idFor("mode-error")} className={ui.error}>
-                          {fieldErrors.mode}
-                        </p>
-                      ) : null}
+                            </span>
+                          </label>
+                        )
+                      })}
                     </div>
-                  ) : null}
+                    {fieldErrors.mode ? (
+                      <p id={idFor("mode-error")} className={ui.error}>
+                        {fieldErrors.mode}
+                      </p>
+                    ) : null}
+                  </div>
 
-                  <div>
+                  <div hidden={chatting}>
                     <div className="mb-1 flex items-baseline justify-between gap-2">
                       <label htmlFor={idFor("description")} className={cn(ui.label, "mb-0")}>
                         {editing ? "O que mudar no fluxo aberto" : "Descrição do atendimento"}
@@ -2277,7 +2587,7 @@ export default function AIWorkflowDialog({
                     ) : null}
                   </div>
 
-                  <div>
+                  <div hidden={chatting}>
                     <p className={ui.label}>
                       Imagem de referência <span className="font-normal text-flow-muted">(opcional)</span>
                     </p>
@@ -2385,7 +2695,7 @@ export default function AIWorkflowDialog({
                     ) : null}
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div hidden={chatting} className={cn("gap-4 sm:grid-cols-2", chatting ? "hidden" : "grid")}>
                     <div hidden={editing}>
                       <label htmlFor={idFor("size")} className={ui.label}>
                         Tamanho do fluxo
@@ -2469,66 +2779,26 @@ export default function AIWorkflowDialog({
                     </div>
                   </div>
 
-                  {canWatch ? (
-                    <label
-                      className={cn(
-                        "flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
-                        watch ? "border-flow-accent/50 bg-flow-accent/10" : "border-flow-border bg-flow-soft hover:border-flow-accent/60",
-                      )}
-                    >
-                      <input
-                        id={idFor("watch")}
-                        type="checkbox"
-                        checked={watch}
-                        onChange={(event) => setWatch(event.target.checked)}
-                        aria-describedby={idFor("watch-hint")}
-                        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-flow-accent disabled:cursor-not-allowed"
-                      />
-                      <span className="min-w-0">
-                        <span className="block text-xs font-semibold text-flow-fg">Acompanhar no canvas</span>
-                        <span id={idFor("watch-hint")} className="block text-[11px] leading-4 text-flow-muted">
-                          {editing
-                            ? "Durante a edição, esta janela vira um painel pequeno e as mudanças aparecem no fluxo aberto conforme chegam. Ao terminar, o resultado abre aqui para você revisar e aplicar."
-                            : "Durante a geração, esta janela vira um painel pequeno e o fluxo aparece no editor conforme é criado. Ao terminar, o resultado abre aqui para você revisar e importar."}
-                        </span>
-                      </span>
-                    </label>
-                  ) : null}
-
-                  <div>
-                    <label
-                      className={cn(
-                        "flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
-                        fill ? "border-flow-accent/50 bg-flow-accent/10" : "border-flow-border bg-flow-soft hover:border-flow-accent/60",
-                      )}
-                    >
-                      <input
-                        id={idFor("fill")}
-                        type="checkbox"
-                        checked={fill}
-                        onChange={(event) => {
-                          setFill(event.target.checked)
-                          clearFieldError("fill")
-                        }}
-                        aria-describedby={describedBy(idFor("fill-hint"), fieldErrors.fill && idFor("fill-error"))}
-                        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-flow-accent disabled:cursor-not-allowed"
-                      />
-                      <span className="min-w-0">
-                        <span className="block text-xs font-semibold text-flow-fg">Preencher todos os campos</span>
-                        <span id={idFor("fill-hint")} className="block text-[11px] leading-4 text-flow-muted">
-                          {fill ? FILL_HINTS.on : FILL_HINTS.off}
-                        </span>
-                      </span>
-                    </label>
-                    {fieldErrors.fill ? (
-                      <p id={idFor("fill-error")} className={ui.error}>
-                        {fieldErrors.fill}
-                      </p>
-                    ) : null}
-                  </div>
+                  {chatting ? null : requestOptions}
                 </fieldset>
               </form>
             )}
+
+            {chatting && !showingResult ? (
+              <>
+                <div id={idFor("chat")}>
+                  <InterviewPanel
+                    interview={chat}
+                    starters={canEdit && editAvailable ? CHAT_STARTERS_EDIT : undefined}
+                    intro={canEdit && editAvailable ? CHAT_INTRO_EDIT : CHAT_INTRO_CREATE}
+                    className="h-[30rem] max-h-[70dvh]"
+                  />
+                </div>
+                <fieldset disabled={generating} aria-label="Opções da conversa" className="min-w-0 space-y-4">
+                  {requestOptions}
+                </fieldset>
+              </>
+            ) : null}
 
             {failure ? (
               <div
@@ -2647,29 +2917,31 @@ export default function AIWorkflowDialog({
                     Acompanhar no canvas
                   </button>
                 ) : null}
-                {result && !generating ? (
+                {result && !generating && !chatting ? (
                   <button type="button" onClick={showResult} className={ui.button}>
                     <Eye className="h-4 w-4" aria-hidden="true" />
                     Ver resultado
                   </button>
                 ) : null}
                 <button ref={cancelRef} type="button" onClick={generating ? cancelGeneration : close} className={ui.button}>
-                  {generating ? "Cancelar geração" : "Cancelar"}
+                  {generating ? "Cancelar geração" : chatting ? "Voltar ao editor" : "Cancelar"}
                 </button>
-                <button
-                  ref={submitRef}
-                  type="submit"
-                  form={idFor("form")}
-                  disabled={generating}
-                  className={ui.primaryButton}
-                >
-                  {generating ? (
-                    <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                  ) : (
-                    <Sparkles className="h-4 w-4" aria-hidden="true" />
-                  )}
-                  {editing ? "Editar fluxo" : "Gerar fluxo"}
-                </button>
+                {chatting ? null : (
+                  <button
+                    ref={submitRef}
+                    type="submit"
+                    form={idFor("form")}
+                    disabled={generating}
+                    className={ui.primaryButton}
+                  >
+                    {generating ? (
+                      <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    {editing ? "Editar fluxo" : "Gerar fluxo"}
+                  </button>
+                )}
               </div>
             )}
           </div>

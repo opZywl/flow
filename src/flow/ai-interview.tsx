@@ -12,6 +12,7 @@ import {
 import { AlertTriangle, CheckCircle2, ListChecks, Loader2, MessageSquareText, RotateCcw, SendHorizontal, Square, Wand2, XCircle } from "lucide-react"
 import type { GenerateFailure } from "@/lib/atendimento/ai/contracts"
 import type { InterviewAction, InterviewMessage, InterviewTurn } from "@/lib/atendimento/ai/interview"
+import { NOTE_TYPE, START_TYPE } from "@/lib/atendimento/catalog"
 import type { AtendimentoFlow } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
 import { ui } from "./ui"
@@ -104,7 +105,7 @@ function plural(count: number, one: string, many: string): string {
 }
 
 export function hasNodes(flow: AtendimentoFlow | null | undefined): flow is AtendimentoFlow {
-  return Boolean(flow && Array.isArray(flow.nodes) && flow.nodes.length > 0)
+  return Boolean(flow && Array.isArray(flow.nodes) && flow.nodes.some((node) => node?.data?.type !== START_TYPE && node?.data?.type !== NOTE_TYPE))
 }
 
 export function resultNote(action: BuildAction, summary: InterviewRunSummary): string {

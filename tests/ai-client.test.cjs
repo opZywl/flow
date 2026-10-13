@@ -10,6 +10,7 @@ const STUBS = {
   '@/components/ui/dialog': { Dialog: () => null, DialogContent: () => null, DialogDescription: () => null, DialogHeader: () => null, DialogTitle: () => null },
   '@/hooks/use-toast': { toast: () => undefined },
   './flow-select': { FlowSelect: () => null },
+  './ai-interview': { InterviewPanel: () => null, useInterview: () => ({}) },
   './nodes/atendimento-node': { categoryTint: (value) => value, componentIcon: () => () => null, nodeSummary: () => '' },
   'lucide-react': new Proxy({}, { get: () => () => null }),
 }
@@ -56,7 +57,7 @@ afterEach(() => {
   calls.length = 0
 })
 
-const CLIENT_NAMES = ['readEvents', 'readOutcome', 'readProgress', 'requestGeneration', 'requestModels', 'readModels', 'keyWarning', 'progressText', 'stageText', 'generateFlow', 'loadEngine', 'previewFeed', 'modelChoices', 'pickEffort', 'effortChoices']
+const CLIENT_NAMES = ['readEvents', 'readOutcome', 'readProgress', 'requestGeneration', 'requestModels', 'readModels', 'keyWarning', 'progressText', 'stageText', 'generateFlow', 'loadEngine', 'previewFeed', 'modelChoices', 'pickEffort', 'effortChoices', 'requestTurn']
 
 function loadClient() {
   const moved = path.join(ROOT, 'src/flow/ai/generation-client.ts')
@@ -793,4 +794,111 @@ test('as mudanças lidas da resposta ignoram valores fora do contrato', () => {
   assert.equal(client.stageText({ stage: 'validando', round: 1, maxRounds: 3 }, true), 'Validando os locais e as conexões.')
   assert.equal(client.progressText({ stage: 'gerando', round: 1, maxRounds: 3, nodes: 4, edges: 3 }, { nodes: 9, edges: 9 }, true), 'Editando o fluxo, rodada 1 de 3.')
   for (const stage of ['preparando', 'gerando', 'montando', 'validando', 'corrigindo']) assert.match(client.stageText({ stage, round: 1, maxRounds: 3 }, true), PT_TEXT)
+})
+
+const HISTORY = [
+  { role: 'user', text: 'Crie um fluxo de envio de boleto.' },
+  { role: 'assistant', text: 'Pensei em um menu com Segunda via do boleto e Falar com o financeiro. Fica assim?' },
+  { role: 'user', text: 'Pode ser assim, e peça o CPF antes.' },
+]
+const TURN = {
+  message: 'Combinado. Quer validar o CPF em uma API?',
+  suggestions: ['Sim, tenho a URL', 'Não precisa', 'Pode montar o fluxo'],
+  action: 'ask',
+  plan: 'Envio de boleto com menu de Segunda via do boleto e Falar com o financeiro, pedindo o CPF antes.',
+}
+const TURN_INPUT = { provider: 'openai', model: BASE.model, apiKey: KEY, effort: 'high', fill: false, history: HISTORY, flow: EDIT_BASE }
+
+function captureTurn(reply) {
+  const engine = {
+    inputs: [],
+    hooks: [],
+    interviewTurn: async (input, hooks) => {
+      engine.inputs.push(input)
+      engine.hooks.push(hooks)
+      return reply
+    },
+  }
+  return engine
+}
+
+test('o turno da conversa leva provedor, modelo, chave, esforço, fill, histórico e fluxo ao motor do navegador', async () => {
+  for (const fill of [true, false]) {
+    for (const flow of [EDIT_BASE, null]) {
+      const engine = captureTurn({ ok: true, turn: TURN })
+      const controller = new AbortController()
+      const out = await client.requestTurn({ ...TURN_INPUT, fill, flow }, controller.signal, engine)
+      assert.deepEqual(out, { ok: true, turn: TURN })
+      assert.equal(engine.inputs.length, 1)
+      const [input] = engine.inputs
+      assert.deepEqual(Object.keys(input).sort(), ['apiKey', 'effort', 'fill', 'flow', 'history', 'model', 'provider'])
+      assert.equal(input.provider, 'openai')
+      assert.equal(input.model, BASE.model)
+      assert.equal(input.apiKey, KEY)
+      assert.equal(input.effort, 'high')
+      assert.equal(input.fill, fill)
+      assert.equal(input.history, HISTORY)
+      assert.equal(input.flow, flow)
+      assert.equal(engine.hooks[0].transport, 'browser')
+      assert.equal(engine.hooks[0].signal, controller.signal)
+    }
+  }
+  const engine = captureTurn({ ok: true, turn: TURN })
+  const { flow, ...withoutFlow } = TURN_INPUT
+  await client.requestTurn(withoutFlow, signal(), engine)
+  assert.equal(engine.inputs[0].flow, null)
+  assert.equal(calls.length, 0)
+})
+
+test('sem o motor da conversa o turno falha com texto em PT-BR, sem chamar rota nem provedor', async () => {
+  const out = await client.requestTurn(TURN_INPUT, signal(), null)
+  assert.equal(out.ok, false)
+  assert.equal(out.failure.success, false)
+  assert.ok(FAILURE_CODES.includes(out.failure.code))
+  assert.match(out.failure.error, PT_TEXT)
+  assert.match(out.failure.details, PT_TEXT)
+  assert.equal(calls.length, 0)
+})
+
+test('o turno roda no navegador com o provedor simulado e envia chave, modelo, esforço, fill, histórico e o fluxo aberto', async () => {
+  for (const fill of [false, true]) {
+    model(TURN)
+    const seen = watchProvider()
+    const out = await client.requestTurn({ ...TURN_INPUT, fill }, signal())
+    assert.equal(out.ok, true, JSON.stringify(out.ok ? '' : out.failure))
+    assert.equal(out.turn.action, 'ask')
+    assert.equal(out.turn.plan, TURN.plan)
+    assert.deepEqual(out.turn.suggestions, TURN.suggestions)
+    assert.equal(calls.length, 0)
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0].url, 'https://api.openai.com/v1/responses')
+    assert.equal(seen[0].headers.authorization, `Bearer ${KEY}`)
+    assert.equal(seen[0].body.model, BASE.model)
+    assert.equal(seen[0].body.reasoning?.effort, 'high')
+    const body = JSON.stringify(seen[0].body)
+    for (const message of HISTORY) assert.ok(body.includes(JSON.stringify(message.text).slice(1, -1)), message.text)
+    assert.ok(body.includes(`Nome: ${EDIT_BASE.name}`))
+    assert.ok(body.includes(fill ? 'Preenchimento ligado' : 'Preenchimento desligado'))
+    assert.ok(!body.includes(fill ? 'Preenchimento desligado' : 'Preenchimento ligado'))
+    assert.equal(body.includes(KEY), false)
+    assert.equal(JSON.stringify(out).includes(KEY), false)
+    provider = null
+  }
+  model(TURN)
+  const seen = watchProvider()
+  const out = await client.requestTurn({ ...TURN_INPUT, flow: null }, signal())
+  assert.equal(out.ok, true)
+  const body = JSON.stringify(seen[0].body)
+  assert.ok(!body.includes(`Nome: ${EDIT_BASE.name}`))
+  assert.ok(body.includes('Não há fluxo aberto no editor'))
+})
+
+test('a chave recusada no turno volta com o código do campo da chave e sem a chave no texto', async () => {
+  provider = () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401, headers: { 'content-type': 'application/json' } })
+  const out = await client.requestTurn(TURN_INPUT, signal())
+  assert.equal(out.ok, false)
+  assert.equal(out.failure.code, 'invalid_key')
+  assert.match(out.failure.error, PT_TEXT)
+  assert.equal(JSON.stringify(out).includes(KEY), false)
+  assert.equal(calls.length, 0)
 })
