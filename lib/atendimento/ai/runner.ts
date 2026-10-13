@@ -77,13 +77,13 @@ export type RequestCheck = { ok: true; request: ParsedRequest } | { ok: false; f
 type ResolvedInput = ParsedRequest["input"]
 type ProviderOptions = NonNullable<SystemModelMessage["providerOptions"]>
 
-interface StreamWatch {
+export interface StreamWatch {
   events: boolean
   refusal: boolean
   failed: boolean
 }
 
-interface ModelSetup {
+export interface ModelSetup {
   model: LanguageModel
   providerOptions: ProviderOptions
   systemOptions?: ProviderOptions
@@ -92,7 +92,7 @@ interface ModelSetup {
   effortKey?: string
 }
 
-interface Abort {
+export interface Abort {
   client: AbortSignal
   deadline?: AbortSignal
 }
@@ -369,7 +369,7 @@ function observe(watch: StreamWatch, base: typeof fetch, browser: boolean): type
   }
 }
 
-function createSetup(input: ResolvedInput, hooks: RunHooks): ModelSetup {
+export function createSetup(input: ResolvedInput, hooks: RunHooks): ModelSetup {
   const { provider, model, apiKey } = input
   const browser = hooks.transport === "browser"
   const watch: StreamWatch = { events: provider === "openai" || provider === "xai", refusal: false, failed: false }
@@ -494,7 +494,7 @@ function failure(code: FailureCode, provider: ProviderId, detail?: string, wait?
   return { success: false, code, error, ...(details ? { details } : {}) }
 }
 
-function describeFailure(error: unknown, provider: ProviderId, apiKey: string, abort: Abort): GenerateFailure {
+export function describeFailure(error: unknown, provider: ProviderId, apiKey: string, abort: Abort): GenerateFailure {
   if (abort.client.aborted) return failure("aborted", provider)
   if (abort.deadline?.aborted) return failure("timeout", provider)
   const cause = unwrap(error)
@@ -522,7 +522,7 @@ function describeFailure(error: unknown, provider: ProviderId, apiKey: string, a
   return failure("unknown", provider)
 }
 
-function isFormatFailure(error: unknown): error is NoObjectGeneratedError {
+export function isFormatFailure(error: unknown): error is NoObjectGeneratedError {
   return NoObjectGeneratedError.isInstance(error) && error.finishReason !== "length" && error.finishReason !== "content-filter" && error.finishReason !== "error"
 }
 
@@ -539,7 +539,7 @@ function isInterruption(error: unknown): boolean {
   return true
 }
 
-function stopped(finishReason: "content-filter" | "error" | "unknown", source?: unknown): NoObjectGeneratedError {
+export function stopped(finishReason: "content-filter" | "error" | "unknown", source?: unknown): NoObjectGeneratedError {
   const known = NoObjectGeneratedError.isInstance(source) ? source : undefined
   return new NoObjectGeneratedError({
     cause: source instanceof Error ? source : undefined,
@@ -550,7 +550,7 @@ function stopped(finishReason: "content-filter" | "error" | "unknown", source?: 
   })
 }
 
-function unfinished(): Promise<never> {
+export function unfinished(): Promise<never> {
   return new Promise((_, reject) => setTimeout(() => reject(stopped("unknown")), 0))
 }
 
@@ -569,7 +569,7 @@ async function settle(object: PromiseLike<RiFlow>, watch: StreamWatch, signal: A
   return ri
 }
 
-function relax(setup: ModelSetup, error: unknown): boolean {
+export function relax(setup: ModelSetup, error: unknown): boolean {
   const cause = unwrap(error)
   if (!APICallError.isInstance(cause) || cause.statusCode !== 400) return false
   const text = `${cause.message} ${(cause.responseBody ?? "").slice(0, 2000)}`
@@ -689,7 +689,7 @@ async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: Ab
   }
 }
 
-function notify<T>(listener: ((value: T) => void) | undefined, value: T): void {
+export function notify<T>(listener: ((value: T) => void) | undefined, value: T): void {
   if (!listener) return
   try {
     listener(value)
