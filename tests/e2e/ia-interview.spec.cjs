@@ -48,12 +48,12 @@ const ASK_MORE = {
 const EDIT_REQUEST = 'adicione uma opção de falar com atendente'
 const DEPARTMENT = 'Para o departamento Suporte'
 const NEW_OPTION = 'Falar com atendente'
-const EDIT_PLAN = 'No menu Como podemos ajudar, acrescente a opção Falar com atendente, que transfere para o departamento Suporte.'
+const EDIT_PLAN = 'No menu Como podemos ajudar com o seu boleto, acrescente a opção Falar com atendente, que transfere para o departamento Suporte.'
 const ASK_DEPARTMENT = {
-  message: 'Vou colocar a opção Falar com atendente no menu Como podemos ajudar. Para qual departamento ela transfere?',
+  message: 'Vou colocar a opção Falar com atendente no menu Como podemos ajudar com o seu boleto. Para qual departamento ela transfere?',
   suggestions: ['Suporte', 'Financeiro', 'Pode escolher por mim'],
   action: 'ask',
-  plan: 'No menu Como podemos ajudar, acrescente a opção Falar com atendente, que transfere para um departamento.',
+  plan: 'No menu Como podemos ajudar com o seu boleto, acrescente a opção Falar com atendente, que transfere para um departamento.',
 }
 const EDIT = { message: 'Vou acrescentar a opção Falar com atendente, que transfere para o Suporte.', suggestions: [], action: 'edit', plan: EDIT_PLAN }
 const ASK_AFTER_EDIT = {
@@ -106,23 +106,25 @@ const SOURCE = {
   ],
 }
 const BASE_FLOW = importFlow(JSON.parse(JSON.stringify(finalizeFlow(assembleFlow(SOURCE, { now: new Date('2026-01-15T12:00:00.000Z') })).flow)))
-const BASE_RI = flowToRi(BASE_FLOW)
-const MENU = BASE_RI.nodes.find((node) => node.type === 'envio_mensagem')
-const DELTA = {
-  name: '',
-  description: '',
-  nodes: [
-    {
-      id: MENU.id,
-      type: 'envio_mensagem',
-      config: MENU.config.map((entry) => (entry.key === 'options' ? { key: 'options', value: JSON.stringify([{ text: 'Agendar consulta' }, { text: 'Encerrar' }, { text: NEW_OPTION }]) } : entry)),
-    },
-    { id: 'atendente', type: 'departamentos', config: [{ key: 'name', value: 'Suporte' }, { key: 'departamento', value: 'suporte' }] },
-  ],
-  edges: [...BASE_RI.edges.filter((edge) => edge.from === MENU.id), { from: MENU.id, output: NEW_OPTION, to: 'atendente' }],
-}
-const DELTA_TEXT = JSON.stringify(DELTA)
 const BASE_STATE = { name: BASE_FLOW.name, nodes: BASE_FLOW.nodes.map((node) => node.id) }
+
+function editDelta(base) {
+  const ri = flowToRi(base)
+  const menu = ri.nodes.find((node) => node.type === 'envio_mensagem')
+  return JSON.stringify({
+    name: '',
+    description: '',
+    nodes: [
+      {
+        id: menu.id,
+        type: 'envio_mensagem',
+        config: menu.config.map((entry) => (entry.key === 'options' ? { key: 'options', value: JSON.stringify([...JSON.parse(entry.value), { text: NEW_OPTION }]) } : entry)),
+      },
+      { id: 'atendente', type: 'departamentos', config: [{ key: 'name', value: 'Suporte' }, { key: 'departamento', value: 'suporte' }] },
+    ],
+    edges: [...ri.edges.filter((edge) => edge.from === menu.id), { from: menu.id, output: NEW_OPTION, to: 'atendente' }],
+  })
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const event = (payload) => `data: ${JSON.stringify(payload)}\n\n`
@@ -179,7 +181,7 @@ function reference(name, request, text) {
   return references[name]
 }
 const createdFlow = () => reference('boleto', { prompt: PLAN_FINAL }, BOLETO_TEXT)
-const editedFlow = () => reference('edicao', { prompt: EDIT_PLAN, mode: 'edit', base: BASE_FLOW }, DELTA_TEXT)
+const editedFlow = (base, delta) => reference('edicao', { prompt: EDIT_PLAN, mode: 'edit', base }, delta)
 
 function certificate() {
   const length = (size) => {
@@ -481,41 +483,78 @@ test('crie um fluxo de envio de boleto: the AI asks with suggestions, builds the
   await expect(page.getByLabel('Nome do fluxo', { exact: true })).toBeEnabled()
 })
 
-test('adicione uma opção de falar com atendente: the AI asks the department, applies the edit on the open flow, Desfazer goes back and the AI asks again', async ({ page, ai }) => {
-  const result = await editedFlow()
-  const final = result.workflow
-  expect(result.changes).toEqual({ added: 1, changed: 1, removed: 0 })
+test('adicione uma opção de falar com atendente: the chat builds its own flow first, the AI asks the department, applies the edit on the built flow, Desfazer goes back and the AI asks again', async ({ page, ai }) => {
+  const built = (await createdFlow()).workflow
+  const builtState = { name: built.name, nodes: built.nodes.map((node) => node.id) }
   const applying = ai.hold()
+  ai.say(ASK_MENU)
+  ai.say(ASK_WELCOME)
+  ai.say(GENERATE)
+  ai.builds.push({ steps: [BOLETO_TEXT] })
+  ai.say(ASK_MORE)
   ai.say(ASK_DEPARTMENT)
   ai.say(EDIT)
-  ai.builds.push({ steps: [applying, DELTA_TEXT] })
   ai.say(ASK_AFTER_EDIT)
 
   await openBase(page)
   const { dialog, chat } = await startChat(page)
-  await expect(dialog.getByLabel('O que mudar no fluxo aberto')).toBeHidden()
+  await expect(dialog.getByRole('radio', { name: 'Editar o fluxo aberto', exact: true })).toHaveCount(0)
+  await expect(dialog.getByLabel('O que mudar no fluxo aberto')).toHaveCount(0)
+  await expect(chat.getByText(/^Conte o que o seu atendimento precisa fazer\./)).toBeVisible()
+  await expect(chips(chat).first()).toHaveText(STARTER)
+
+  await type(chat, REQUEST)
+  await expect(entries(chat)).toHaveText([user(REQUEST), assistant(ASK_MENU)])
+  const opening = inputOf(ai.turnCalls()[0])
+  expect(opening).toContain('Não há fluxo aberto no editor.')
+  expect(opening).not.toContain('# Resumo do fluxo aberto')
+  expect(opening).not.toContain('Agendar consulta')
+  await chips(chat).filter({ hasText: 'Pode ser assim' }).click()
+  await expect(entries(chat)).toHaveText([user(REQUEST), assistant(ASK_MENU), user('Pode ser assim'), assistant(ASK_WELCOME)])
+  expect(inputOf(ai.turnCalls()[1])).not.toContain('# Resumo do fluxo aberto')
+  await type(chat, WELCOME)
+  const creation = [user(REQUEST), assistant(ASK_MENU), user('Pode ser assim'), assistant(ASK_WELCOME), user(WELCOME), assistant(GENERATE), builtNote(built), assistant(ASK_MORE)]
+  await expect(entries(chat)).toHaveText(creation, { timeout: 15000 })
+  expect(JSON.stringify(ai.buildCalls()[0].body)).toContain(PLAN_FINAL)
+  expect(JSON.stringify(ai.buildCalls()[0].body)).not.toContain('# Modo de edição')
+  await expect(page.getByLabel('Nome do fluxo', { exact: true })).toHaveValue(built.name)
+  await expect.poll(() => saved(page)).toEqual(builtState)
+  await expect.poll(() => library(page)).toEqual([BASE_STATE])
+  expect(inputOf(ai.turnCalls()[3])).toContain('# Resumo do fluxo aberto')
+  expect(inputOf(ai.turnCalls()[3])).toContain('Como podemos ajudar com o seu boleto?')
+
+  const before = await stored(page)
+  const delta = editDelta(importFlow(before))
+  const result = await editedFlow(importFlow(before), delta)
+  const final = result.workflow
+  expect(result.changes).toEqual({ added: 1, changed: 1, removed: 0 })
+  ai.builds.push({ steps: [applying, delta] })
+
   await type(chat, EDIT_REQUEST)
-  await expect(entries(chat)).toHaveText([user(EDIT_REQUEST), assistant(ASK_DEPARTMENT)])
+  await expect(entries(chat)).toHaveText([...creation, user(EDIT_REQUEST), assistant(ASK_DEPARTMENT)])
   await expect(chips(chat)).toHaveText(ASK_DEPARTMENT.suggestions)
-  const first = inputOf(ai.turnCalls()[0])
-  expect(first).toContain(EDIT_REQUEST)
-  expect(first).toContain('# Resumo do fluxo aberto')
-  expect(first).toContain('Como podemos ajudar?')
-  expect(first).toContain('Agendar consulta')
+  const asked = inputOf(ai.turnCalls()[4])
+  expect(asked).toContain(EDIT_REQUEST)
+  expect(asked).toContain('# Resumo do fluxo aberto')
+  expect(asked).toContain('Como podemos ajudar com o seu boleto?')
+  expect(asked).not.toContain('Agendar consulta')
 
   await type(chat, DEPARTMENT)
   await applying.reached
   await expect(waiting(chat)).toHaveText('Aplicando as alterações no canvas.')
   await expect(page.getByRole('dialog')).toBeVisible()
   await expect(chat.getByRole('button', { name: 'Montar o fluxo agora' })).toBeDisabled()
-  const build = ai.buildCalls()[0]
-  expect(JSON.stringify(build.body)).toContain('# Modo de edição')
-  expect(JSON.stringify(build.body)).toContain('# Fluxo atual')
-  expect(JSON.stringify(build.body)).toContain(EDIT_PLAN)
-  expect(await saved(page)).toEqual(BASE_STATE)
+  expect(ai.buildCalls()).toHaveLength(2)
+  const build = JSON.stringify(ai.buildCalls()[1].body)
+  expect(build).toContain('# Modo de edição')
+  expect(build).toContain('# Fluxo atual')
+  expect(build).toContain(EDIT_PLAN)
+  expect(build).toContain('Como podemos ajudar com o seu boleto?')
+  expect(await saved(page)).toEqual(builtState)
   applying.open()
 
   await expect(entries(chat)).toHaveText([
+    ...creation,
     user(EDIT_REQUEST),
     assistant(ASK_DEPARTMENT),
     user(DEPARTMENT),
@@ -527,16 +566,17 @@ test('adicione uma opção de falar com atendente: the AI asks the department, a
   const nodes = page.locator('.react-flow__node')
   await expect(nodes).toHaveCount(final.nodes.length)
   await expect(page.locator('.react-flow')).toContainText(NEW_OPTION)
-  await expect(page.getByLabel('Nome do fluxo', { exact: true })).toHaveValue(BASE_FLOW.name)
-  await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: final.nodes.map((node) => node.id) })
-  expect(ai.buildCalls()).toHaveLength(1)
-  expect(ai.turnCalls()).toHaveLength(3)
-  const after = inputOf(ai.turnCalls()[2])
-  expect(historyOf(ai.turnCalls()[2])).toContain(editNote(result.changes))
+  await expect(page.getByLabel('Nome do fluxo', { exact: true })).toHaveValue(built.name)
+  await expect.poll(() => saved(page)).toEqual({ name: built.name, nodes: final.nodes.map((node) => node.id) })
+  expect(await library(page)).toEqual([BASE_STATE])
+  expect(ai.buildCalls()).toHaveLength(2)
+  expect(ai.turnCalls()).toHaveLength(7)
+  const after = inputOf(ai.turnCalls()[6])
+  expect(historyOf(ai.turnCalls()[6])).toContain(editNote(result.changes))
   expect(after).toContain(NEW_OPTION)
 
   const edited = await stored(page)
-  for (const node of BASE_FLOW.nodes) {
+  for (const node of before.nodes) {
     const kept = edited.nodes.find((entry) => entry.id === node.id)
     expect(kept, node.id).toBeTruthy()
     expect(kept.position, node.id).toEqual(node.position)
@@ -544,12 +584,21 @@ test('adicione uma opção de falar com atendente: the AI asks the department, a
 
   await closeDialog(page)
   await page.getByRole('button', { name: 'Desfazer', exact: true }).click()
-  await expect(nodes).toHaveCount(BASE_FLOW.nodes.length)
+  await expect(nodes).toHaveCount(before.nodes.length)
   await expect(page.locator('.react-flow')).not.toContainText(NEW_OPTION)
-  await expect.poll(() => saved(page)).toEqual(BASE_STATE)
+  await expect.poll(() => saved(page)).toEqual(builtState)
   const undone = await stored(page)
-  expect(undone.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data }))).toEqual(BASE_FLOW.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data })))
-  expect(undone.edges).toEqual(BASE_FLOW.edges)
+  expect(undone.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data }))).toEqual(before.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data })))
+  expect(undone.edges).toEqual(before.edges)
+
+  ai.say(ASK_MENU)
+  const restarted = (await openDialog(page)).getByRole('region', { name: 'Conversa com a IA' })
+  await restarted.getByRole('button', { name: 'Encerrar conversa' }).click()
+  await restarted.getByRole('button', { name: 'Nova conversa' }).click()
+  await type(restarted, REQUEST)
+  await expect(entries(restarted)).toHaveText([user(REQUEST), assistant(ASK_MENU)])
+  expect(inputOf(ai.turnCalls()[7])).toContain('Não há fluxo aberto no editor.')
+  expect(inputOf(ai.turnCalls()[7])).not.toContain('# Resumo do fluxo aberto')
 })
 
 test('Montar o fluxo agora builds right away with the current plan, even when the AI would keep asking', async ({ page, ai }) => {
