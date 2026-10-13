@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
 import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, useReactFlow, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type Viewport, type XYPosition } from "reactflow"
 import "reactflow/dist/style.css"
-import { Check, Download, FilePlus2, Info, MapIcon, Maximize, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
+import { Check, Download, Eraser, FilePlus2, Info, MapIcon, Maximize, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -12,8 +12,10 @@ import { NOTE_TYPE, START_TYPE, getComponentColor, getComponentLabel } from "@/l
 import { downloadJson } from "@/lib/atendimento/download"
 import { behaviorSignature, createEdge, duplicateNode, exportFileName, exportFlow, importFlow, insertOutput, maxNumericId, newFlow, newNode, outputHandles, outputLabel, removeMenuOption, removeOutput, stampExport, validateFlow } from "@/lib/atendimento/format"
 import type { AtendimentoData, AtendimentoFlow, AtendimentoNode, FlowIssue, JsonObject } from "@/lib/atendimento/types"
+import { LIBRARY_KEY, clearedFlow, findSameSaved, isBlankFlow, newSavedId, readCurrentId, readLibrary, removeSaved, upsertSaved, writeCurrentId, writeLibrary, type SavedFlow } from "@/lib/atendimento/library"
 import NodeLibrary from "./node-library"
 import NodeConfigPanel from "./node-config-panel"
+import SavedFlows from "./saved-flows"
 import CustomEdge, { EdgeActionsContext } from "./custom-edge"
 import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, nodeSummary, noteColor } from "./nodes/atendimento-node"
 import { ui } from "./ui"
@@ -271,7 +273,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const [showLibrary, setShowLibrary] = useState(true)
   const [showMinimap, setShowMinimap] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [confirmReset, setConfirmReset] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [library, setLibrary] = useState<SavedFlow[]>([])
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [currentSavedId, setCurrentSavedId] = useState<string | null>(null)
   const [importError, setImportError] = useState("")
   const [, setHistoryVersion] = useState(0)
   const flowRef = useRef(flow)
@@ -280,6 +285,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const lastCommit = useRef<{ key: string; at: number } | null>(null)
   const idFloor = useRef(1)
   const executed = useRef<string | null>(null)
+  const savedId = useRef<string | null>(null)
   const dragOrigin = useRef<AtendimentoFlow | null>(null)
   const removalBatch = useRef(false)
   const pendingReveal = useRef<{ id: string; until: number } | null>(null)
@@ -290,6 +296,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const fileInput = useRef<HTMLInputElement>(null)
   const canvas = useRef<HTMLDivElement>(null)
   const settingsTrigger = useRef<HTMLButtonElement>(null)
+  const clearTrigger = useRef<HTMLButtonElement>(null)
   const issuesId = useId()
   const { setViewport, getViewport, screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
   const store = useStoreApi()
@@ -319,6 +326,13 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const pushHistory = useCallback((snapshot: AtendimentoFlow) => {
     past.current = [...past.current.slice(-(HISTORY_LIMIT - 1)), snapshot]
     future.current = []
+    setHistoryVersion((version) => version + 1)
+  }, [])
+
+  const resetHistory = useCallback(() => {
+    past.current = []
+    future.current = []
+    lastCommit.current = null
     setHistoryVersion((version) => version + 1)
   }, [])
 
@@ -442,6 +456,47 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setReady(true)
   }, [setDocument, setViewport])
 
+  const selectSaved = useCallback((id: string | null) => {
+    savedId.current = id
+    setCurrentSavedId(id)
+    try {
+      writeCurrentId(localStorage, id)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const entries = readLibrary(localStorage)
+      const id = readCurrentId(localStorage)
+      setLibrary(entries)
+      selectSaved(id && entries.some((entry) => entry.id === id) ? id : null)
+    } catch {}
+    const sync = (event: StorageEvent) => {
+      if (event.key !== LIBRARY_KEY) return
+      try {
+        setLibrary(readLibrary(localStorage))
+      } catch {}
+    }
+    window.addEventListener("storage", sync)
+    return () => window.removeEventListener("storage", sync)
+  }, [selectSaved])
+
+  const storeCurrent = useCallback((document: AtendimentoFlow): SavedFlow | null | false => {
+    if (isBlankFlow(document)) return null
+    try {
+      const entries = readLibrary(localStorage)
+      const entry: SavedFlow = { id: savedId.current ?? findSameSaved(entries, document)?.id ?? newSavedId(), savedAt: new Date().toISOString(), flow: document }
+      const next = upsertSaved(entries, entry)
+      writeLibrary(localStorage, next)
+      setLibrary(next)
+      selectSaved(entry.id)
+      return entry
+    } catch {
+      toast({ title: "Não foi possível guardar o fluxo atual", description: "O armazenamento do navegador está cheio ou bloqueado. Exporte o JSON antes de continuar.", variant: "destructive" })
+      return false
+    }
+  }, [selectSaved])
+
   useEffect(() => {
     if (!ready || recovery) return
     const timer = setTimeout(() => persist(flow), 500)
@@ -459,8 +514,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     if (!ensureApplied()) return false
     try {
       const imported = importFlow(input)
+      if (!recovery && storeCurrent({ ...flowRef.current, viewport: getViewport() }) === false) return false
       backupStored()
-      setDocument(imported, "history", { resetIds: true })
+      selectSaved(null)
+      setDocument(imported, "silent", { resetIds: true })
+      resetHistory()
       setRecovery("")
       setSizes({})
       clearSelection()
@@ -472,7 +530,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       setImportError(cause instanceof SyntaxError ? "O arquivo não é um JSON válido." : (cause as Error).message)
       return false
     }
-  }, [backupStored, clearSelection, ensureApplied, persist, setDocument, setViewport])
+  }, [backupStored, clearSelection, ensureApplied, getViewport, persist, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
 
   const reportIssues = useCallback((title: string) => {
     setShowIssues(true)
@@ -488,12 +546,13 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const document = { ...flowRef.current, viewport: getViewport() }
     setDocument(document, "silent")
     const saved = persist(document)
+    if (saved && savedId.current && !isBlankFlow(document)) storeCurrent(document)
     if (saved) {
       const pending = errorCount ? ` ${plural(errorCount, "pendência impede", "pendências impedem")} a exportação.` : ""
       toast({ title: "Fluxo salvo", description: `${plural(document.nodes.length, "componente", "componentes")} e ${plural(document.edges.length, "conexão", "conexões")} guardados neste navegador.${pending}` })
     }
     return saved
-  }, [ensureApplied, errorCount, getViewport, persist, recovery, setDocument])
+  }, [ensureApplied, errorCount, getViewport, persist, recovery, setDocument, storeCurrent])
 
   const download = useCallback(() => {
     if (!ensureApplied()) return false
@@ -558,14 +617,16 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const reset = useCallback(() => {
     if (!ensureApplied()) return
     backupStored()
+    selectSaved(null)
     const empty = newFlow()
-    setDocument(empty, "history", { resetIds: true })
+    setDocument(empty, "silent", { resetIds: true })
+    resetHistory()
     setRecovery("")
     setSizes({})
     clearSelection()
     void setViewport(empty.viewport)
     persist(empty)
-  }, [backupStored, clearSelection, ensureApplied, persist, setDocument, setViewport])
+  }, [backupStored, clearSelection, ensureApplied, persist, resetHistory, selectSaved, setDocument, setViewport])
 
   const focusNode = useCallback((node: AtendimentoNode) => {
     setPanelId(node.id)
@@ -1001,17 +1062,102 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const describeFlow = useCallback((description: string) => commit((current) => ({ ...current, description }), "description"), [commit])
   const setServiceType = useCallback((serviceType: string) => commit((current) => ({ ...current, service_type: serviceType }), "service_type"), [commit])
 
-  const requestNewFlow = useCallback(() => {
+  const startNewFlow = useCallback(() => {
     if (!ensureApplied()) return
     setSettingsOpen(false)
-    if (flowRef.current.nodes.length <= 1) reset()
-    else setConfirmReset(true)
-  }, [ensureApplied, reset])
-
-  const confirmNewFlow = useCallback(() => {
-    setConfirmReset(false)
+    if (recovery) {
+      reset()
+      return
+    }
+    const stored = storeCurrent({ ...flowRef.current, viewport: getViewport() })
+    if (stored === false) return
     reset()
-  }, [reset])
+    toast(stored
+      ? { title: "Novo fluxo criado", description: `“${stored.flow.name.trim() || "Sem nome"}” ficou guardado em Meus fluxos.` }
+      : { title: "Novo fluxo criado", description: "O fluxo anterior estava vazio e não foi guardado." })
+  }, [ensureApplied, getViewport, recovery, reset, storeCurrent])
+
+  const requestClear = useCallback(() => {
+    if (recovery) {
+      toast({ title: "Edição pausada", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
+      return
+    }
+    if (!ensureApplied()) return
+    if (isBlankFlow(flowRef.current)) {
+      toast({ title: "O fluxo já está vazio", description: "Só o componente de início está no canvas." })
+      return
+    }
+    setConfirmClear(true)
+  }, [ensureApplied, recovery])
+
+  const confirmClearFlow = useCallback(() => {
+    setConfirmClear(false)
+    if (!ensureApplied()) return
+    setDocument(clearedFlow(flowRef.current), "history")
+    clearSelection()
+    toast({ title: "Fluxo limpo", description: "Componentes e conexões removidos. Use Desfazer (Ctrl+Z) para recuperar." })
+  }, [clearSelection, ensureApplied, setDocument])
+
+  const openSaved = useCallback((id: string) => {
+    if (!ensureApplied()) return
+    let entries: SavedFlow[] = []
+    try {
+      entries = readLibrary(localStorage)
+    } catch {}
+    const entry = entries.find((item) => item.id === id)
+    if (!entry) {
+      setLibrary(entries)
+      toast({ title: "Fluxo salvo não encontrado", description: "Ele pode ter sido excluído em outra aba.", variant: "destructive" })
+      return
+    }
+    let restored: AtendimentoFlow
+    try {
+      restored = importFlow(entry.flow)
+    } catch (cause) {
+      toast({ title: "Não foi possível abrir o fluxo salvo", description: (cause as Error).message, variant: "destructive" })
+      return
+    }
+    if (!recovery && storeCurrent({ ...flowRef.current, viewport: getViewport() }) === false) return
+    backupStored()
+    selectSaved(entry.id)
+    setDocument(restored, "silent", { resetIds: true })
+    resetHistory()
+    setRecovery("")
+    setSizes({})
+    clearSelection()
+    setLibraryOpen(false)
+    void setViewport(restored.viewport)
+    persist(restored)
+    toast({ title: "Fluxo aberto", description: `“${restored.name.trim() || "Sem nome"}” com ${plural(restored.nodes.length, "componente", "componentes")}. O anterior ficou em Meus fluxos.` })
+  }, [backupStored, clearSelection, ensureApplied, getViewport, persist, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
+
+  const duplicateSaved = useCallback((id: string) => {
+    try {
+      const entries = readLibrary(localStorage)
+      const entry = entries.find((item) => item.id === id)
+      if (!entry) return
+      const source = id === savedId.current ? { ...flowRef.current, viewport: getViewport() } : entry.flow
+      const name = `Cópia de ${source.name.trim() || "Sem nome"}`
+      const next = upsertSaved(entries, { id: newSavedId(), savedAt: new Date().toISOString(), flow: { ...source, name } })
+      writeLibrary(localStorage, next)
+      setLibrary(next)
+      toast({ title: "Fluxo duplicado", description: `“${name}” está em Meus fluxos.` })
+    } catch {
+      toast({ title: "Não foi possível duplicar", description: "O armazenamento do navegador está cheio ou bloqueado. Exporte o JSON antes de continuar.", variant: "destructive" })
+    }
+  }, [getViewport])
+
+  const deleteSaved = useCallback((id: string) => {
+    try {
+      const next = removeSaved(readLibrary(localStorage), id)
+      writeLibrary(localStorage, next)
+      setLibrary(next)
+      if (savedId.current === id) selectSaved(null)
+      toast({ title: "Fluxo salvo excluído" })
+    } catch {
+      toast({ title: "Não foi possível excluir", description: "O navegador bloqueou o armazenamento local.", variant: "destructive" })
+    }
+  }, [selectSaved])
 
   const canvasNodes = useMemo<Node<AtendimentoData>[]>(() => {
     const selected = new Set(selectedNodes)
@@ -1071,6 +1217,12 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
         <ToolButton label="Desfazer" title="Desfazer (Ctrl+Z)" icon={Undo2} onClick={undo} disabled={!canUndo} />
         <ToolButton label="Refazer" title="Refazer (Ctrl+Y)" icon={Redo2} onClick={redo} disabled={!canRedo} />
         <span className={ui.divider} aria-hidden />
+        <ToolButton label="Novo fluxo" title="Novo fluxo: guarda o atual em Meus fluxos e começa um em branco" icon={FilePlus2} onClick={startNewFlow} />
+        <SavedFlows open={libraryOpen} onOpenChange={setLibraryOpen} entries={library} currentId={currentSavedId} onOpen={openSaved} onDuplicate={duplicateSaved} onDelete={deleteSaved} />
+        <button ref={clearTrigger} type="button" aria-label="Limpar fluxo" title="Limpar fluxo: remove todos os componentes e conexões" className={cn(ui.toolButton, "hover:border-flow-danger hover:text-flow-danger")} onClick={requestClear} disabled={Boolean(recovery)}>
+          <Eraser className="h-4 w-4" aria-hidden />
+        </button>
+        <span className={ui.divider} aria-hidden />
         <input
           aria-label="Nome do fluxo"
           value={flow.name}
@@ -1121,7 +1273,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             serviceType={flow.service_type}
             onDescriptionChange={describeFlow}
             onServiceTypeChange={setServiceType}
-            onCreateNew={requestNewFlow}
+            onCreateNew={startNewFlow}
           />
         </div>
       </div>
@@ -1234,21 +1386,21 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog open={confirmReset} onOpenChange={setConfirmReset}>
+      <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
         <DialogContent
           className={cn(ui.dialog, "max-w-md rounded-xl sm:rounded-xl")}
           onCloseAutoFocus={(event) => {
             event.preventDefault()
-            settingsTrigger.current?.focus()
+            clearTrigger.current?.focus()
           }}
         >
           <DialogHeader className="space-y-2">
-            <DialogTitle className="text-base font-semibold text-flow-fg">Criar novo fluxo</DialogTitle>
-            <DialogDescription className="text-sm text-flow-muted">O fluxo atual será substituído por um fluxo em branco. Para recuperá-lo, use Desfazer.</DialogDescription>
+            <DialogTitle className="text-base font-semibold text-flow-fg">Limpar fluxo</DialogTitle>
+            <DialogDescription className="text-sm text-flow-muted">Todos os componentes e conexões serão removidos. O nome, a descrição e o início ficam. Para recuperar, use Desfazer.</DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:space-x-0">
-            <button type="button" className={ui.button} onClick={() => setConfirmReset(false)}>Cancelar</button>
-            <button type="button" className={cn(ui.primaryButton, "bg-flow-danger text-flow-surface focus-visible:ring-flow-danger/40")} onClick={confirmNewFlow}>Criar novo fluxo</button>
+            <button type="button" className={ui.button} onClick={() => setConfirmClear(false)}>Cancelar</button>
+            <button type="button" className={cn(ui.primaryButton, "bg-flow-danger text-flow-surface focus-visible:ring-flow-danger/40")} onClick={confirmClearFlow}>Limpar fluxo</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
