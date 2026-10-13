@@ -43,7 +43,7 @@ Os 62 componentes têm exemplo real nos exports da plataforma. A biblioteca do e
 | Roteamento e transferência | Transferir para Agente | `transferir` | nenhuma |
 | Roteamento e transferência | Voltar ao Agente | `backToAgent` | nenhuma |
 | Agendamentos | Escolher Serviço | `apptService` | 2 |
-| Agendamentos | Identificar Cliente | `apptIdentify` | 2 |
+| Agendamentos | Identificar Cliente na Agenda | `apptIdentify` | 2 |
 | Agendamentos | Escolher Local | `apptLocation` | 2 |
 | Agendamentos | Escolher Profissional | `apptProvider` | 2 |
 | Agendamentos | Escolher Horário | `apptSlot` | 2 |
@@ -52,7 +52,7 @@ Os 62 componentes têm exemplo real nos exports da plataforma. A biblioteca do e
 | Tickets | Consultar Chamados | `ticketLookup` | 2 |
 | Tickets | Abrir Chamado | `ticketCreate` | 2 |
 | Tickets | Detalhe do Chamado | `ticketDetail` | 2 |
-| CRM | Identificar Cliente | `crmIdentify` | 2 |
+| CRM | Identificar Cliente no CRM | `crmIdentify` | 2 |
 | CRM | Criar/Atualizar Contato | `crmContact` | 2 |
 | CRM | Capturar Lead | `crmLead` | 2 |
 | CRM | Qualificar Lead | `crmLeadUpdate` | 2 |
@@ -70,8 +70,8 @@ Os 62 componentes têm exemplo real nos exports da plataforma. A biblioteca do e
 | Condições | Idioma | `languageRouter` | 4 |
 | Condições | Veio do anúncio? | `adCondition` | 2 |
 | Condições | Tempo de Espera | `waiting_time` | 1 |
-| Inteligência artificial (IA) | Agente de IA | `aiAgentBlock` | uma por saída do agente, mais Sem conclusão |
-| Inteligência artificial (IA) | Agentes de IA | `OpenAI` | nenhuma |
+| Inteligência artificial (IA) | Agente de IA com saídas | `aiAgentBlock` | uma por saída do agente, mais Sem conclusão |
+| Inteligência artificial (IA) | Inteligência | `OpenAI` | nenhuma |
 | APIs | Solicitar Dados | `solicitar_dados` | 2 |
 | APIs | Protocolo | `protocolo` | 1 |
 | APIs | Consulta API | `consulta_api` | 2 |
@@ -122,7 +122,7 @@ O sentido de cada saída vem das conexões dos exports da plataforma. Nos compon
 | Transferir para Ligação | Sucesso | Falha | |
 | Continuar no Chat | Sucesso | Falha | |
 | Escolher Serviço | Serviço escolhido | Nenhum disponível (lista vazia) | |
-| Identificar Cliente (Agendamentos) | Identificado | Não identificado | |
+| Identificar Cliente na Agenda | Identificado | Não identificado | |
 | Escolher Local | Local escolhido | Nenhum disponível (lista vazia) | |
 | Escolher Profissional | Profissional escolhido | Nenhum disponível (lista vazia) | |
 | Escolher Horário | Horário escolhido | Nenhum disponível (lista vazia) | |
@@ -131,7 +131,7 @@ O sentido de cada saída vem das conexões dos exports da plataforma. Nos compon
 | Consultar Chamados | Chamado escolhido | Nenhum chamado | |
 | Abrir Chamado | Chamado aberto | Não aberto | |
 | Detalhe do Chamado | Encontrado | Não encontrado | |
-| Identificar Cliente (CRM) | Identificado | Não identificado | |
+| Identificar Cliente no CRM | Identificado | Não identificado | |
 | Criar/Atualizar Contato | Sucesso | Falha | |
 | Capturar Lead | Sucesso | Falha | |
 | Qualificar Lead | Sucesso | Falha | |
@@ -195,7 +195,7 @@ A prévia simula o atendimento no navegador, sem chamar APIs, integrações nem 
 - **Condições de Tempo**, **Condicional** e **Múltipla Condição** indicam qual saída vale agora quando dá para calcular.
 - **Randomizador** mostra o peso de cada caminho, e **Idioma** grava `pt`, `en` ou `es`.
 - **Retornar ao Menu** volta ao menu de destino.
-- **Transferências, Encerrar Conversa e Agentes de IA** encerram a prévia com o aviso correspondente.
+- **Transferências, Encerrar Conversa e Inteligência** encerram a prévia com o aviso correspondente.
 - A **Nota** nunca participa do atendimento.
 
 Os textos aceitam `@@@campo`, `{{variavel}}`, `#NAME` e `{protocol}`. Ciclos sem interação do contato são interrompidos após 100 etapas automáticas. Mover o canvas ou mudar o zoom não reinicia a prévia; ela só recomeça quando componentes, dados ou conexões mudam.

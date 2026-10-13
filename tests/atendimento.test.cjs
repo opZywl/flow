@@ -1913,3 +1913,8 @@ for (const [index, file] of referenceFiles.entries()) {
     assert.equal(nodes.has(next), false)
   })
 }
+
+test('every component in the library has its own name', () => {
+  const labels = componentCatalog.map(definition => definition.label)
+  assert.deepEqual(labels.filter((label, index) => labels.indexOf(label) !== index), [])
+})

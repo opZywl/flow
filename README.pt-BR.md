@@ -92,7 +92,7 @@ os mais novos põem ali o positivo.
 | Menu de Opções | uma por opção, seguindo `text-1`, `text-2`… (até 10) |
 | Múltipla Condição | uma por condição, seguindo `var-1`, `var-2`… (até 20) |
 | Randomizador (teste A/B) | uma por caminho com peso, no mínimo 2 |
-| Agente de IA | uma por saída do agente, e depois Sem conclusão |
+| Agente de IA com saídas | uma por saída do agente, e depois Sem conclusão |
 | Idioma | Português, Inglês, Espanhol, Outro idioma |
 | Condições de Tempo | Fora do horário, Dentro do horário |
 | Solicitar Dados, Consulta API, API de Mensagem, DataStore Local, Enviar Boletos | Falha, Sucesso |
@@ -103,7 +103,7 @@ os mais novos põem ali o positivo.
 | Escolher Local | Local escolhido, Nenhum disponível |
 | Escolher Profissional | Profissional escolhido, Nenhum disponível |
 | Escolher Horário | Horário escolhido, Nenhum disponível |
-| Identificar Cliente (agendamentos e CRM) | Identificado, Não identificado |
+| Identificar Cliente na Agenda, Identificar Cliente no CRM | Identificado, Não identificado |
 | Dados do Cliente | Dados registrados, Dados não registrados |
 | Confirmar Agendamento | Agendado, Não agendado |
 | Consultar Chamados | Chamado escolhido, Nenhum chamado |

@@ -72,7 +72,7 @@ const DEFAULT_STEPS = {
   transferir: ends('Transferido para o agente. A prévia termina aqui.'),
   backToAgent: ends('Atendimento devolvido ao agente no departamento. A prévia termina aqui.'),
   apptService: asks('Escolher Serviço: a lista de serviços vem da agenda da plataforma e não é carregada na prévia. Escolha o resultado a testar.', ['Serviço escolhido', 'Nenhum disponível']),
-  apptIdentify: asks('Identificar Cliente: a identificação é feita pela agenda da plataforma e não é simulada. Escolha o resultado a testar.', ['Identificado', 'Não identificado']),
+  apptIdentify: asks('Identificar Cliente na Agenda: a identificação é feita pela agenda da plataforma e não é simulada. Escolha o resultado a testar.', ['Identificado', 'Não identificado']),
   apptLocation: asks('Escolher Local: a lista de locais vem da agenda da plataforma e não é carregada na prévia. Escolha o resultado a testar.', ['Local escolhido', 'Nenhum disponível']),
   apptProvider: asks('Escolher Profissional: a lista de profissionais vem da agenda da plataforma e não é carregada na prévia. Escolha o resultado a testar.', ['Profissional escolhido', 'Nenhum disponível']),
   apptSlot: asks('Escolher Horário: a lista de horários vem da agenda da plataforma e não é carregada na prévia. Escolha o resultado a testar.', ['Horário escolhido', 'Nenhum disponível']),
@@ -81,7 +81,7 @@ const DEFAULT_STEPS = {
   ticketLookup: asks('Consultar Chamados: os chamados não são carregados na prévia. Escolha o resultado a testar.', ['Chamado escolhido', 'Nenhum chamado']),
   ticketCreate: asks('Abrir Chamado: o chamado não é criado na prévia. Escolha o resultado a testar.', ['Chamado aberto', 'Não aberto']),
   ticketDetail: asks('Detalhe do Chamado: o chamado não é consultado na prévia. Escolha o resultado a testar.', ['Encontrado', 'Não encontrado']),
-  crmIdentify: asks('Identificar Cliente: a consulta ao CRM não é feita na prévia. Escolha o resultado a testar.', ['Identificado', 'Não identificado']),
+  crmIdentify: asks('Identificar Cliente no CRM: a consulta ao CRM não é feita na prévia. Escolha o resultado a testar.', ['Identificado', 'Não identificado']),
   crmContact: asks('Criar/Atualizar Contato: o CRM não é chamado na prévia. Escolha o resultado a testar.', SUCCESS_FIRST),
   crmLead: asks('Capturar Lead: o CRM não é chamado na prévia. Escolha o resultado a testar.', SUCCESS_FIRST),
   crmLeadUpdate: asks('Qualificar Lead: o CRM não é chamado na prévia. Escolha o resultado a testar.', SUCCESS_FIRST),
@@ -95,7 +95,7 @@ const DEFAULT_STEPS = {
   languageRouter: asks('Idioma: a identificação acontece na plataforma. Escolha o idioma a testar.', ['Português', 'Inglês', 'Espanhol', 'Outro idioma']),
   adCondition: asks('Veio do anúncio? A origem da conversa não é conhecida na prévia. Escolha o caminho a testar.', ['Sim', 'Não']),
   waiting_time: passes('Tempo de espera não definido. Na prévia a conversa segue sem esperar.'),
-  aiAgentBlock: asks('Agente de IA: a conversa com o agente não é simulada na prévia. Escolha a saída a testar.', ['Sem conclusão']),
+  aiAgentBlock: asks('Agente de IA com saídas: a conversa com o agente não é simulada na prévia. Escolha a saída a testar.', ['Sem conclusão']),
   OpenAI: ends('Atendimento encaminhado para a IA “IA Generativa”. A prévia termina aqui.'),
   googleSheetsAppend: asks('Google Planilhas: a linha não é gravada na prévia. Escolha o resultado a testar.', SUCCESS_FIRST),
   rdStationConversion: asks('RD Station: a conversão não é enviada na prévia. Escolha o resultado a testar.', SUCCESS_FIRST),
@@ -719,7 +719,7 @@ test('the list removal names the list or all the lists', () => {
 test('the AI agent lists its exits by name and the no-conclusion output last', () => {
   const flow = scenario('aiAgentBlock', { exits: [{ name: 'Compra', when: 'Quando quiser comprar', requireFields: false }, { name: '', when: '' }] })
   const state = startPreview(flow)
-  assert.deepEqual(state.messages, [listing('Agente de IA: a conversa com o agente não é simulada na prévia. Escolha a saída a testar.', 'Compra', 'Saída 2', 'Sem conclusão')])
+  assert.deepEqual(state.messages, [listing('Agente de IA com saídas: a conversa com o agente não é simulada na prévia. Escolha a saída a testar.', 'Compra', 'Saída 2', 'Sem conclusão')])
   assert.deepEqual(replyPreview(flow, state, '3').messages, arrive(3))
 })
 

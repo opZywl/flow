@@ -95,7 +95,7 @@ positive path there.
 | Menu de Opções | one per option, following `text-1`, `text-2`… (up to 10) |
 | Múltipla Condição | one per condition, following `var-1`, `var-2`… (up to 20) |
 | Randomizador (teste A/B) | one per weighted path, at least 2 |
-| Agente de IA | one per agent exit, then Sem conclusão |
+| Agente de IA com saídas | one per agent exit, then Sem conclusão |
 | Idioma | Português, Inglês, Espanhol, Outro idioma |
 | Condições de Tempo | Fora do horário, Dentro do horário |
 | Solicitar Dados, Consulta API, API de Mensagem, DataStore Local, Enviar Boletos | Falha, Sucesso |
@@ -106,7 +106,7 @@ positive path there.
 | Escolher Local | Local escolhido, Nenhum disponível |
 | Escolher Profissional | Profissional escolhido, Nenhum disponível |
 | Escolher Horário | Horário escolhido, Nenhum disponível |
-| Identificar Cliente (scheduling and CRM) | Identificado, Não identificado |
+| Identificar Cliente na Agenda, Identificar Cliente no CRM | Identificado, Não identificado |
 | Dados do Cliente | Dados registrados, Dados não registrados |
 | Confirmar Agendamento | Agendado, Não agendado |
 | Consultar Chamados | Chamado escolhido, Nenhum chamado |

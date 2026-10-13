@@ -1417,7 +1417,7 @@
     "id": "schedule-client",
     "nativeType": "apptIdentify",
     "nodeType": "custom",
-    "label": "Identificar Cliente",
+    "label": "Identificar Cliente na Agenda",
     "category": "schedule",
     "icon": "BookUser",
     "defaults": {
@@ -2018,7 +2018,7 @@
     "id": "crm-client",
     "nativeType": "crmIdentify",
     "nodeType": "custom",
-    "label": "Identificar Cliente",
+    "label": "Identificar Cliente no CRM",
     "category": "crm",
     "icon": "UserSearch",
     "defaults": {
@@ -2984,7 +2984,7 @@
     "id": "ai-agent",
     "nativeType": "aiAgentBlock",
     "nodeType": "custom",
-    "label": "Agente de IA",
+    "label": "Agente de IA com saídas",
     "category": "ai",
     "icon": "BotMessageSquare",
     "defaults": {
@@ -3108,7 +3108,7 @@
     "id": "ai-agents",
     "nativeType": "OpenAI",
     "nodeType": "custom",
-    "label": "Agentes de IA",
+    "label": "Inteligência",
     "category": "ai",
     "icon": "BrainCircuit",
     "defaults": {

@@ -236,7 +236,7 @@ export function EditorPreview() {
   return (
     <figure>
       <figcaption className="sr-only">
-        Prévia do editor: o Iniciar Fluxo leva a um Menu de Opções com as saídas Suporte, Financeiro e Falar com atendente, ligadas a um Agente de IA, a Transferir para
+        Prévia do editor: o Iniciar Fluxo leva a um Menu de Opções com as saídas Suporte, Financeiro e Falar com atendente, ligadas a um Agente de IA com saídas, a Transferir para
         Departamento e a Condições de Tempo.
       </figcaption>
       <div aria-hidden className={cn(inter.className, "select-none")}>

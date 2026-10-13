@@ -56,7 +56,7 @@ test('every catalog suggestion reaches the prompt line of its field', () => {
   assert.ok(checked >= 4, `${checked} campos`)
 })
 
-test('Agentes de IA without an agent becomes a platform data item, without a correction round', () => {
+test('Inteligência without an agent becomes a platform data item, without a correction round', () => {
   const ri = flowOf([node('ia', 'OpenAI')], [edge('inicio', '', 'ia')])
   const evaluation = evaluateRi(ri, { now: NOW })
   assert.deepEqual(summary(evaluation.issues), ['warning/plataforma: Selecione o agente de IA.'])

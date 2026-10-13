@@ -339,7 +339,7 @@ const CHOICES = new Map<string, Choice>([
   ["hubspotUpsertContact", integration("HubSpot: o contato não é enviado na prévia. Escolha o resultado a testar.")],
   ["apptService", scheduleList("Escolher Serviço: a lista de serviços vem da agenda da plataforma e não é carregada na prévia. Escolha o resultado a testar.", "[serviço escolhido]")],
   ["apptIdentify", {
-    intro: "Identificar Cliente: a identificação é feita pela agenda da plataforma e não é simulada. Escolha o resultado a testar.",
+    intro: "Identificar Cliente na Agenda: a identificação é feita pela agenda da plataforma e não é simulada. Escolha o resultado a testar.",
     outcome: stored("contactVar", "[cliente identificado]"),
   }],
   ["apptLocation", scheduleList("Escolher Local: a lista de locais vem da agenda da plataforma e não é carregada na prévia. Escolha o resultado a testar.", "[local escolhido]")],
@@ -366,7 +366,7 @@ const CHOICES = new Map<string, Choice>([
     outcome: ({ data, variables, index }) => index === 0 ? ticketActions(data, variables) : optional(data.notFoundMessage, variables),
   }],
   ["crmIdentify", {
-    intro: "Identificar Cliente: a consulta ao CRM não é feita na prévia. Escolha o resultado a testar.",
+    intro: "Identificar Cliente no CRM: a consulta ao CRM não é feita na prévia. Escolha o resultado a testar.",
     outcome: ({ data, variables, index }) => {
       if (index === 0) {
         remember(variables, data.contactVar, "[contato identificado]")
@@ -389,7 +389,7 @@ const CHOICES = new Map<string, Choice>([
   ["crmLeadUpdate", { intro: "Qualificar Lead: o CRM não é chamado na prévia. Escolha o resultado a testar.", outcome: concluded }],
   ["crmActivity", { intro: "Agendar Follow-up: a atividade não é criada na prévia. Escolha o resultado a testar.", outcome: concluded }],
   ["sequenceEnroll", { intro: "Inscrever em Lista: a inscrição não é feita na prévia. Escolha o resultado a testar." }],
-  ["aiAgentBlock", { intro: "Agente de IA: a conversa com o agente não é simulada na prévia. Escolha a saída a testar." }],
+  ["aiAgentBlock", { intro: "Agente de IA com saídas: a conversa com o agente não é simulada na prévia. Escolha a saída a testar." }],
 ])
 
 function listOptions(options: PreviewOption[]): string {
