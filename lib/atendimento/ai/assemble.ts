@@ -1,12 +1,12 @@
-import { MENU_TYPE, NOTE_TYPE, START_ID, START_TYPE, TIME_TYPE, getComponentLabel, getDefinition } from "../catalog"
+import { MENU_TYPE, NOTE_TYPE, START_ID, START_TYPE, TIME_TYPE, getComponentLabel, getDefinition, mirrorKeys } from "../catalog"
 import { createEdge, duplicateNode, isObject, newFlow, newNode, nextNodeId, optionIndices, outputHandles, outputLabel, validateFlow } from "../format"
-import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode, JsonObject } from "../types"
+import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode, FieldSpec, JsonObject } from "../types"
 import { LIMITS, RI_LIMITS, type IssueScope } from "./contracts"
 import { guideOf } from "./guide"
 import { layoutFlow } from "./layout"
 import { canonicalType, coerceRi, type RiFlow } from "./ri"
 import { compactKey, foldText, listQuoted, quote, shorten } from "./text"
-import { acceptedKeys, configureNode, settleData, type NoteLevel } from "./values"
+import { acceptedKeys, configureNode, settleData, slugOf, type NoteLevel } from "./values"
 
 export interface AssemblyNote {
   level: NoteLevel
@@ -21,6 +21,8 @@ export interface AssembleOptions {
   name?: string
   description?: string
   prompt?: string
+  known?: string
+  fill?: boolean
   now?: Date
 }
 
@@ -29,6 +31,7 @@ export interface AssembledFlow {
   platformIds: ReadonlyMap<string, string>
   riIds: ReadonlyMap<string, string>
   notes: AssemblyNote[]
+  fill?: boolean
 }
 
 const RETURN_TYPE = "voltar"
@@ -43,6 +46,7 @@ const MENU_TITLE_LIMIT = 1024
 const MENU_PLACEHOLDER = "Escolha uma opção."
 const UNCHECKED_KINDS = new Set(["menuOptions", "conditionPairs", "menuNode"])
 
+const blank = (value: unknown) => typeof value !== "string" || value.trim() === ""
 const labelKey = (value: string) => foldText(value).replace(/^["'“”‘’]+|["'“”‘’.]+$/g, "").trim()
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
@@ -189,12 +193,12 @@ function returnNote(menu: AtendimentoNode, back: AtendimentoNode, origin: string
 const isEmptyValue = (value: unknown) =>
   value === undefined || value === null || (typeof value === "string" && value.trim() === "") || (Array.isArray(value) && value.length === 0) || (isObject(value) && Object.keys(value).length === 0)
 
-function requireKeys(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, notes: AssemblyNote[]): void {
+function requireKeys(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, notes: AssemblyNote[], fill: boolean): void {
   const flagged = new Set<string>()
   for (const issue of validateFlow(flow)) for (const field of issue.fields ?? []) flagged.add(JSON.stringify([issue.nodeId ?? "", field.split(".")[0]]))
   for (const node of flow.nodes) {
     const type = node.data.type
-    const required = guideOf(type)?.required
+    const required = guideOf(type, fill)?.required
     if (!required?.length) continue
     const accepted = acceptedKeys(type)
     const fields = getDefinition(type)?.fields ?? []
@@ -240,6 +244,38 @@ function linkStart(flow: AtendimentoFlow, riIds: ReadonlyMap<string, string>, no
   })
 }
 
+function provisionalFields(type: string): FieldSpec[] {
+  const platform = guideOf(type)?.platform ?? []
+  return (getDefinition(type)?.fields ?? []).filter((field) => platform.includes(field.key) && (field.kind === "url" || /^ID\b/.test(field.label) || /\bID\b/.test(field.placeholder ?? "")))
+}
+
+export function provisionalMessage(label: string): string {
+  return `Confira: ${label} ${/^(URL|Planilha)\b/.test(label) ? "provisória" : "provisório"}, troque pelo valor cadastrado na plataforma.`
+}
+
+const comparable = (value: string) => foldText(value).replace(/^https?:\/\//, "").replace(/\/+$/, "")
+
+function mentioned(value: string, request: string): boolean {
+  const key = comparable(value)
+  if (!key) return true
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`).test(request)
+}
+
+export function requestText(prompt?: string, known?: string): string {
+  return prompt?.trim() ? foldText([prompt, known ?? ""].join("\n")) : ""
+}
+
+export function provisionalLabels(type: string, data: JsonObject, request: string): string[] {
+  return provisionalFields(type)
+    .filter((field) => {
+      if (type === PROTOCOL_TYPE && field.key === "url_api" && data.opt !== "URL") return false
+      const value = data[field.key]
+      return typeof value === "string" && value.trim() !== "" && !mentioned(value, request)
+    })
+    .map((field) => field.label)
+}
+
 function resolveOutput(node: AtendimentoNode, handles: readonly string[], output: string, busy: ReadonlySet<string>): string | undefined {
   const text = output.trim()
   if (!text) return handles.length === 1 ? handles[0] : undefined
@@ -257,6 +293,8 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
   const now = options.now ?? new Date()
   const ri = coerceRi(input) ?? { name: "", description: "", nodes: [], edges: [] }
   const notes: AssemblyNote[] = []
+  const fill = options.fill !== false
+  const request = fill ? requestText(options.prompt, options.known) : ""
   const flow = newFlow(now)
   flow.name = flowName(options.name, ri.name, options.prompt)
   flow.description = shorten(options.description || ri.description || options.prompt || "", LIMITS.description)
@@ -321,6 +359,9 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
         nodeId: node.id,
         type,
       })
+    }
+    if (request) {
+      for (const label of provisionalLabels(type, node.data.data, request)) notes.push({ level: "warning", scope: "plataforma", message: provisionalMessage(label), riId, nodeId: node.id, type })
     }
     if (type === RETURN_TYPE) returns.push({ node, target: outcome.menuTarget ?? "", riId })
   })
@@ -463,16 +504,14 @@ export function assembleFlow(input: RiFlow, options: AssembleOptions = {}): Asse
   }
 
   linkStart(flow, riIds, notes)
-  requireKeys(flow, riIds, notes)
+  requireKeys(flow, riIds, notes, fill)
   routeMenuReturns(flow, riIds, notes)
   cloneSharedTails(flow, riIds)
   settleReturns(flow)
   numberTimeRules(flow, now)
   layoutFlow(flow)
-  return { flow, platformIds, riIds, notes }
+  return { flow, platformIds, riIds, notes, ...(fill ? {} : { fill: false }) }
 }
-
-const blank = (value: unknown) => typeof value !== "string" || value.trim() === ""
 
 function fillRequired(node: AtendimentoNode): string[] {
   const data = node.data.data
@@ -506,6 +545,42 @@ function fillRequired(node: AtendimentoNode): string[] {
     })
   }
   return filled
+}
+
+function lowerLabel(label: string): string {
+  return /^[A-ZÀ-Ý][a-zà-ÿ]/.test(label) ? `${label[0].toLocaleLowerCase("pt-BR")}${label.slice(1)}` : label
+}
+
+function fillReferences(node: AtendimentoNode): { filled: string[]; ids: string[] } {
+  const filled: string[] = []
+  const ids: string[] = []
+  const references = guideOf(node.data.type)?.references
+  const definition = getDefinition(node.data.type)
+  if (!references?.length || !definition) return { filled, ids }
+  const fieldOf = (key: string) => definition.fields?.find((field) => field.key === key)
+  const set = (key: string, value: string) => {
+    if (definition.configured && !Object.prototype.hasOwnProperty.call(node.data.data, key)) node.data.data = { ...definition.configured(), ...node.data.data }
+    node.data.data[key] = value
+    const field = fieldOf(key)
+    if (field) for (const mirror of mirrorKeys(field)) node.data.data[mirror] = value
+  }
+  for (const reference of references) {
+    const skip = reference.unless ? node.data.data[reference.unless] : undefined
+    if (skip === true || !blank(skip)) continue
+    if (reference.name && blank(node.data.data[reference.name])) {
+      set(reference.name, reference.fallback)
+      filled.push(`${lowerLabel(fieldOf(reference.name)?.label ?? reference.name)} ${quote(reference.fallback)}`)
+    }
+    if (reference.id && blank(node.data.data[reference.id])) {
+      const name = reference.name ? node.data.data[reference.name] : undefined
+      const id = (typeof name === "string" ? slugOf(name) : "") || slugOf(reference.fallback)
+      set(reference.id, id)
+      const label = fieldOf(reference.id)?.label ?? reference.id
+      filled.push(`${lowerLabel(label)} ${quote(id)}`)
+      ids.push(label)
+    }
+  }
+  return { filled, ids }
 }
 
 function titleCut(title: string): number {
@@ -564,14 +639,26 @@ function detachUnreachable(flow: AtendimentoFlow, riIds: ReadonlyMap<string, str
   }
 }
 
+export function provisionalReferences(node: AtendimentoNode, riId?: string): AssemblyNote[] {
+  const provisional = fillReferences(node)
+  if (!provisional.filled.length) return []
+  const base = { nodeId: node.id, ...(riId ? { riId } : {}), type: node.data.type }
+  return [
+    { level: "warning", scope: "ajuste", message: `Preenchido com valor provisório: ${provisional.filled.join(", ")}. Revise.`, ...base },
+    ...provisional.ids.map((label): AssemblyNote => ({ level: "warning", scope: "plataforma", message: provisionalMessage(label), ...base })),
+  ]
+}
+
 export function finalizeFlow(assembled: AssembledFlow): AssembledFlow {
   const flow = copy(assembled.flow)
   const riIds = new Map(assembled.riIds)
   const notes = [...assembled.notes]
+  const fill = assembled.fill !== false
   for (const node of flow.nodes) {
+    const origin = riIds.get(node.id)
+    if (fill) notes.push(...provisionalReferences(node, origin))
     const filled = fillRequired(node)
     if (!filled.length) continue
-    const origin = riIds.get(node.id)
     notes.push({
       level: "warning",
       scope: "ajuste",
@@ -605,5 +692,5 @@ export function finalizeFlow(assembled: AssembledFlow): AssembledFlow {
     }
   }
   layoutFlow(flow)
-  return { flow, platformIds: new Map(assembled.platformIds), riIds, notes }
+  return { flow, platformIds: new Map(assembled.platformIds), riIds, notes, ...(assembled.fill === false ? { fill: false } : {}) }
 }

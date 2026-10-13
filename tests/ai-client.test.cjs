@@ -82,7 +82,7 @@ function loadClient() {
 const client = loadClient()
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
 const BASE = { provider: 'openai', model: 'gpt-6.1-sol', apiKey: KEY, prompt: 'Atendimento da Clínica Exemplo', size: 'auto', image: null }
-const DIALOG_FIELDS = ['provider', 'apiKey', 'model', 'effort', 'description', 'image', 'size', 'count', 'name']
+const DIALOG_FIELDS = ['provider', 'apiKey', 'model', 'effort', 'mode', 'description', 'image', 'size', 'count', 'name', 'fill']
 const FAILURE_CODES = ['invalid_request', 'unsupported_media', 'payload_too_large', 'invalid_key', 'forbidden', 'billing', 'model_not_found', 'rate_limit', 'provider_error', 'provider_unavailable', 'network', 'timeout', 'invalid_output', 'output_too_long', 'content_filter', 'aborted', 'unknown']
 const PT_TEXT = /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ][^!—–]*\.$/
 
@@ -210,7 +210,7 @@ test('falhas da rota chegam com código e campo do diálogo, em NDJSON e em JSON
   let out = await client.requestGeneration(BASE, signal(), () => {})
   assert.equal(out.rejection.code, 'invalid_key')
   assert.equal(out.rejection.failure.details, 'Confira a chave.')
-  const fields = { provider: 'provider', model: 'model', apiKey: 'apiKey', prompt: 'description', image: 'image', size: 'size', count: 'count', name: 'name', effort: 'effort' }
+  const fields = { provider: 'provider', model: 'model', apiKey: 'apiKey', prompt: 'description', image: 'image', size: 'size', count: 'count', name: 'name', effort: 'effort', mode: 'mode', base: 'mode', fill: 'fill' }
   for (const [sent, shown] of Object.entries(fields)) {
     serve(JSON.stringify({ success: false, code: 'invalid_request', error: 'Campo inválido.', field: sent }), { status: 400, headers: { 'content-type': 'application/json' } })
     out = await client.requestGeneration(BASE, signal(), () => {})
@@ -700,4 +700,97 @@ test('o seletor de esforço usa as opções do modelo e se ajusta ao trocar de m
   assert.equal(client.pickEffort('max', 'openai', 'gpt-6-luna'), 'max')
   assert.equal(client.pickEffort('low', 'google', 'gemini-3.1-pro-preview'), 'low')
   assert.equal(client.pickEffort('max', 'anthropic', 'modelo-da-conta'), 'max')
+})
+
+const EDIT_BASE = importFlow(SUCCESS.workflow)
+const EDITED = EDIT_BASE.nodes.find((node) => node.data.type === 'envio_pergunta')
+const EDITED_TEXT = 'Olá, #NAME. Esta é a nova mensagem de boas-vindas.'
+const EDIT_DELTA = { name: '', description: '', nodes: [{ id: EDITED.id, type: 'envio_pergunta', config: [{ key: 'template', value: EDITED_TEXT }] }], edges: [] }
+const EDIT_REQUEST = { ...BASE, prompt: 'Troque a mensagem de boas-vindas.', effort: 'medium', fill: false, mode: 'edit', base: EDIT_BASE }
+
+function captureEngine(reply) {
+  const engine = {
+    inputs: [],
+    runGeneration: async (input) => {
+      engine.inputs.push(input)
+      return reply
+    },
+    previewFlow: () => null,
+    previewEdit: () => null,
+    diffFlows: () => ({ added: [], changed: [], removed: [] }),
+  }
+  return engine
+}
+
+test('o pedido de edição leva mode, base e fill ao motor do navegador, e o pedido novo leva só fill', async () => {
+  for (const fill of [true, false]) {
+    const engine = captureEngine({ ...SUCCESS, mode: 'edit', changes: { added: 1, changed: 2, removed: 3 } })
+    const out = await client.generateFlow({ ...EDIT_REQUEST, fill }, signal(), () => {}, undefined, engine)
+    assert.equal(out.ok, true)
+    assert.equal(engine.inputs.length, 1)
+    assert.equal(engine.inputs[0].mode, 'edit')
+    assert.equal(engine.inputs[0].base, EDIT_BASE)
+    assert.equal(engine.inputs[0].fill, fill)
+    assert.equal(out.received.mode, 'edit')
+    assert.deepEqual(out.received.changes, { added: 1, changed: 2, removed: 3 })
+  }
+  for (const fill of [true, false]) {
+    const engine = captureEngine(SUCCESS)
+    const out = await client.generateFlow({ ...BASE, fill }, signal(), () => {}, undefined, engine)
+    assert.equal(out.ok, true)
+    assert.equal(engine.inputs[0].fill, fill)
+    assert.equal('mode' in engine.inputs[0], false)
+    assert.equal('base' in engine.inputs[0], false)
+    assert.equal(out.received.mode, 'create')
+    assert.equal(out.received.changes, undefined)
+  }
+})
+
+test('a edição roda no navegador com o provedor simulado e devolve o fluxo aberto com a mudança', async () => {
+  model(EDIT_DELTA)
+  const seen = watchProvider()
+  const out = await client.generateFlow(EDIT_REQUEST, signal(), () => {})
+  assert.equal(out.ok, true, JSON.stringify(out.ok ? '' : out.rejection))
+  assert.equal(calls.length, 0)
+  assert.ok(seen.length >= 1)
+  assert.match(JSON.stringify(seen[0].body), /Modo de edição/)
+  assert.equal(out.received.mode, 'edit')
+  assert.deepEqual(out.received.changes, { added: 0, changed: 1, removed: 0 })
+  const edited = out.received.flow.nodes.find((node) => node.id === EDITED.id)
+  assert.equal(edited.data.data.template, EDITED_TEXT)
+  assert.deepEqual(edited.position, EDITED.position)
+  for (const node of EDIT_BASE.nodes) {
+    if (node.id === EDITED.id) continue
+    assert.equal(JSON.stringify(out.received.flow.nodes.find((entry) => entry.id === node.id)), JSON.stringify(node), node.id)
+  }
+  assert.deepEqual(out.received.flow.edges, EDIT_BASE.edges)
+  assert.equal(JSON.stringify(out).includes(KEY), false)
+})
+
+test('a rota de reserva recebe mode, base e fill no corpo do pedido de edição', async () => {
+  let direct = 0
+  provider = () => {
+    if (direct++ === 0) throw new TypeError('Failed to fetch')
+    return openaiReply(JSON.stringify(EDIT_DELTA))
+  }
+  const out = await client.generateFlow(EDIT_REQUEST, signal(), () => {})
+  assert.equal(out.ok, true, JSON.stringify(out.ok ? '' : out.rejection))
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/api/generate-workflow')
+  assert.deepEqual(calls[0].body, { ...JSON.parse(JSON.stringify(EDIT_REQUEST)), stream: true })
+  assert.equal(calls[0].body.mode, 'edit')
+  assert.equal(calls[0].body.fill, false)
+  assert.deepEqual(calls[0].body.base, JSON.parse(JSON.stringify(EDIT_BASE)))
+  assert.equal(out.received.mode, 'edit')
+  assert.deepEqual(out.received.changes, { added: 0, changed: 1, removed: 0 })
+  assert.equal(JSON.stringify(out).includes(KEY), false)
+})
+
+test('as mudanças lidas da resposta ignoram valores fora do contrato', () => {
+  assert.deepEqual(client.readOutcome({ ...SUCCESS, mode: 'edit', changes: { added: 2, changed: -1, removed: 'x' } }, 200).received.changes, { added: 2, changed: 0, removed: 0 })
+  assert.equal(client.readOutcome({ ...SUCCESS, mode: 'edit', changes: 'x' }, 200).received.changes, undefined)
+  assert.equal(client.readOutcome({ ...SUCCESS, mode: 'outro' }, 200).received.mode, 'create')
+  assert.equal(client.stageText({ stage: 'validando', round: 1, maxRounds: 3 }, true), 'Validando os locais e as conexões.')
+  assert.equal(client.progressText({ stage: 'gerando', round: 1, maxRounds: 3, nodes: 4, edges: 3 }, { nodes: 9, edges: 9 }, true), 'Editando o fluxo, rodada 1 de 3.')
+  for (const stage of ['preparando', 'gerando', 'montando', 'validando', 'corrigindo']) assert.match(client.stageText({ stage, round: 1, maxRounds: 3 }, true), PT_TEXT)
 })

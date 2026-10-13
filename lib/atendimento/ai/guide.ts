@@ -1,7 +1,16 @@
+export interface ReferenceGuide {
+  name?: string
+  id?: string
+  fallback: string
+  unless?: string
+}
+
 export interface ComponentGuide {
   does: string
   required?: readonly string[]
   platform?: readonly string[]
+  references?: readonly ReferenceGuide[]
+  unfilled?: readonly string[]
   outputs?: readonly string[]
   dynamic?: string
   rules?: readonly string[]
@@ -27,17 +36,24 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   departamentos: {
     does: "Transfere a conversa para a fila de um departamento e encerra o caminho do robô.",
-    platform: ["departamento", "name"],
+    required: ["name"],
+    platform: ["departamento"],
+    references: [{ name: "name", id: "departamento", fallback: "Atendimento" }],
     rules: ["Para avisar o contato da transferência, coloque antes um Enviar Mensagem."],
   },
   tags: {
     does: "Aplica uma tag ao contato e segue. Pode enviar uma mensagem.",
-    platform: ["selectedTag", "tags"],
+    required: ["tags"],
+    platform: ["selectedTag"],
+    references: [{ name: "tags", id: "selectedTag", fallback: "Atendimento" }],
     outputs: NEXT,
   },
   flow: {
     does: "Envia o contato para outro fluxo cadastrado e encerra este.",
-    platform: ["targetFlow", "flowName", "flowDescription"],
+    required: ["flowName"],
+    platform: ["targetFlow"],
+    references: [{ name: "flowName", id: "targetFlow", fallback: "Fluxo de atendimento" }],
+    unfilled: ["flowDescription"],
   },
   finalizar: {
     does: "Encerra a conversa. Não envia mensagem; para se despedir, use antes Enviar Mensagem.",
@@ -60,7 +76,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     required: ["text"],
     platform: ["url_api"],
     outputs: NEXT,
-    rules: ["{protocol} no texto é trocado pelo número.", "Use opt \"URL\" só quando o pedido informar a URL da API em url_api; sem ela, use \"Automático\"."],
+    rules: ["{protocol} no texto é trocado pelo número.", "Use opt \"URL\" só quando o pedido informar a URL da API em url_api; sem ela, use \"Automático\", que dispensa url_api."],
   },
   consulta_api: {
     does: "Chama uma API com dados do atendimento e guarda campos da resposta em variáveis.",
@@ -87,23 +103,31 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   templateMessage: {
     does: "Envia um template aprovado do WhatsApp.",
-    platform: ["templateMessage", "templateName", "templateParams"],
+    required: ["templateName"],
+    platform: ["templateMessage", "templateParams"],
+    references: [{ name: "templateName", id: "templateMessage", fallback: "Template de atendimento" }],
     outputs: NEXT,
   },
   templateInteractive: {
     does: "Envia um template aprovado com botões.",
-    platform: ["templateMessage", "templateName", "templateParams"],
+    required: ["templateName"],
+    platform: ["templateMessage", "templateParams"],
+    references: [{ name: "templateName", id: "templateMessage", fallback: "Template de atendimento" }],
     outputs: NEXT,
   },
   whatsappFlow: {
     does: "Envia um formulário do WhatsApp (WhatsApp Flow) e aguarda a resposta.",
-    required: ["body", "cta", "outputVar"],
-    platform: ["formId", "formName", "metaFlowId", "firstScreen", "formFields", "crmMap", "templateName"],
+    required: ["body", "cta", "outputVar", "formName"],
+    platform: ["formId", "metaFlowId", "firstScreen", "formFields", "crmMap"],
+    references: [{ name: "formName", id: "formId", fallback: "Formulário de atendimento", unless: "metaFlowId" }],
+    unfilled: ["templateName"],
     outputs: ["formulário respondido", "sem resposta após os lembretes"],
   },
   pixCharge: {
     does: "Envia uma cobrança PIX por um template aprovado.",
-    platform: ["templateMessage", "templateName", "templateParams"],
+    required: ["templateName"],
+    platform: ["templateMessage", "templateParams"],
+    references: [{ name: "templateName", id: "templateMessage", fallback: "Cobrança PIX" }],
     outputs: NEXT,
   },
   whatsappCall: {
@@ -114,11 +138,15 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   transferir: {
     does: "Transfere a conversa para um agente específico e encerra o caminho do robô.",
-    platform: ["agente", "agenteName"],
+    required: ["agenteName"],
+    platform: ["agente"],
+    references: [{ name: "agenteName", id: "agente", fallback: "Atendente" }],
   },
   backToAgent: {
     does: "Devolve a conversa ao agente que já atendia o contato, no departamento informado, e encerra o caminho do robô.",
-    platform: ["department", "departmentName"],
+    required: ["departmentName"],
+    platform: ["department"],
+    references: [{ name: "departmentName", id: "department", fallback: "Atendimento" }],
   },
   apptService: {
     does: "Lista os serviços da agenda para o contato escolher.",
@@ -202,12 +230,15 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   sequenceEnroll: {
     does: "Inscreve o contato em uma lista de envio.",
-    platform: ["sequenceId", "sequenceName"],
+    required: ["sequenceName"],
+    platform: ["sequenceId"],
+    references: [{ name: "sequenceName", id: "sequenceId", fallback: "Lista de envio" }],
     outputs: ["contato inscrito", "falha na inscrição"],
   },
   sequenceUnenroll: {
     does: "Remove o contato de uma lista de envio ou de todas.",
-    platform: ["sequenceId", "sequenceName"],
+    platform: ["sequenceId"],
+    references: [{ name: "sequenceName", id: "sequenceId", fallback: "Lista de envio", unless: "allSequences" }],
     outputs: NEXT,
     rules: ["Use allSequences \"true\" só quando o pedido mandar remover de todas as listas."],
   },
@@ -215,6 +246,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     does: "Gera um link para continuar a conversa no chat do site.",
     required: ["message"],
     platform: ["widgetId"],
+    references: [{ id: "widgetId", fallback: "Chat do site" }],
     outputs: ["link enviado", "erro ao gerar o link"],
     rules: ["Inclua {{link}} em message."],
   },
@@ -247,8 +279,9 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   aiAgentBlock: {
     does: "Conversa com o contato usando um agente de IA cadastrado até cumprir um objetivo.",
-    required: ["exits"],
-    platform: ["generative_ai", "generativeAiName", "fields"],
+    required: ["exits", "generativeAiName"],
+    platform: ["generative_ai", "fields"],
+    references: [{ name: "generativeAiName", id: "generative_ai", fallback: "Agente de atendimento" }],
     dynamic: "uma por item de exits, na ordem, pelo name; a última é \"Sem conclusão\".",
     rules: ["Em exits, when descreve a situação de cada saída."],
   },
@@ -258,8 +291,9 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   googleSheetsAppend: {
     does: "Adiciona uma linha em uma planilha do Google.",
-    required: ["columns"],
-    platform: ["spreadsheet", "sheetName"],
+    required: ["columns", "sheetName"],
+    platform: ["spreadsheet"],
+    references: [{ name: "sheetName", fallback: "Página1" }, { id: "spreadsheet", fallback: "Planilha de atendimento" }],
     outputs: ["linha adicionada", "falha ao gravar"],
     rules: ["Em columns, use {{variavel}} nos valores."],
   },
@@ -338,11 +372,29 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   },
   tabulation: {
     does: "Registra a tabulação do atendimento.",
-    platform: ["tabulacao", "tabulacaoName"],
+    required: ["tabulacaoName"],
+    platform: ["tabulacao"],
+    references: [{ name: "tabulacaoName", id: "tabulacao", fallback: "Atendimento concluído" }],
     outputs: NEXT,
   },
 }
 
-export function guideOf(type: string): ComponentGuide | undefined {
-  return Object.prototype.hasOwnProperty.call(COMPONENT_GUIDE, type) ? COMPONENT_GUIDE[type] : undefined
+const unfilledGuides = new Map<string, ComponentGuide>()
+
+function withoutFill(type: string, guide: ComponentGuide): ComponentGuide {
+  const known = unfilledGuides.get(type)
+  if (known) return known
+  const names = (guide.references ?? []).flatMap((reference) => (reference.name ? [reference.name] : []))
+  const platform = [...(guide.platform ?? [])]
+  for (const key of [...names, ...(guide.unfilled ?? [])]) if (!platform.includes(key)) platform.push(key)
+  const required = (guide.required ?? []).filter((key) => !names.includes(key))
+  const result: ComponentGuide = { ...guide, required, platform }
+  unfilledGuides.set(type, result)
+  return result
+}
+
+export function guideOf(type: string, fill = true): ComponentGuide | undefined {
+  const guide = Object.prototype.hasOwnProperty.call(COMPONENT_GUIDE, type) ? COMPONENT_GUIDE[type] : undefined
+  if (!guide || fill || (!guide.references?.length && !guide.unfilled?.length)) return guide
+  return withoutFill(type, guide)
 }

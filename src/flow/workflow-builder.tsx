@@ -32,9 +32,13 @@ export interface WorkflowActions {
   removeNode: (id: string) => void
   reset: () => void
   download: () => boolean
-  previewWorkflow: (flow: AtendimentoFlow | null, done?: boolean) => void
+  previewWorkflow: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => void
   captureImage: () => Promise<Blob | null>
+  getFlow: () => AtendimentoFlow
+  applyWorkflowEdit: (flow: AtendimentoFlow) => boolean
 }
+
+export type PreviewKind = "create" | "edit"
 
 interface WorkflowBuilderProps {
   onActionsReady: (actions: WorkflowActions) => void
@@ -194,13 +198,18 @@ const CanvasStatus = memo(function CanvasStatus({ container, count, start }: { c
   )
 })
 
-function PreviewBanner({ nodes, edges, done }: { nodes: number; edges: number; done: boolean }) {
+const PREVIEW_TEXT: Record<PreviewKind, { live: string; done: string }> = {
+  create: { live: "Gerando com IA. O fluxo aparece aqui conforme é criado.", done: "Fluxo gerado. Importe ou descarte na janela da IA." },
+  edit: { live: "Editando com IA. As mudanças aparecem aqui conforme chegam.", done: "Edição pronta. Aplique ou descarte na janela da IA." },
+}
+
+function PreviewBanner({ nodes, edges, done, kind }: { nodes: number; edges: number; done: boolean; kind: PreviewKind }) {
   return (
     <div data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 items-center gap-2.5 border-flow-accent/40 px-3 py-2")}>
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-flow-accent/15 text-flow-accent">
         {done ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden />}
       </span>
-      <p role="status" className="min-w-0 text-xs font-semibold leading-5 text-flow-fg">{done ? "Fluxo gerado. Importe ou descarte na janela da IA." : "Gerando com IA. O fluxo aparece aqui conforme é criado."}</p>
+      <p role="status" className="min-w-0 text-xs font-semibold leading-5 text-flow-fg">{done ? PREVIEW_TEXT[kind].done : PREVIEW_TEXT[kind].live}</p>
       <span className="h-4 w-px shrink-0 bg-flow-border" aria-hidden />
       <span className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[11px] font-medium text-flow-muted">
         <span><span className="text-flow-muted-strong">{nodes}</span> {nodes === 1 ? "componente" : "componentes"}</span>
@@ -341,6 +350,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const [importError, setImportError] = useState("")
   const [preview, setPreview] = useState<AtendimentoFlow | null>(null)
   const [previewDone, setPreviewDone] = useState(false)
+  const [previewKind, setPreviewKind] = useState<PreviewKind>("create")
   const [previewSizes, setPreviewSizes] = useState<Record<string, Size>>({})
   const [, setHistoryVersion] = useState(0)
   const flowRef = useRef(flow)
@@ -514,12 +524,13 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     return view
   }, [cancelFit, releaseView, setViewport])
 
-  const previewWorkflow = useCallback((next: AtendimentoFlow | null, done = false) => {
+  const previewWorkflow = useCallback((next: AtendimentoFlow | null, done = false, kind: PreviewKind = "create") => {
     if (!isPreviewFlow(next)) {
       endPreview()
       return
     }
     setPreviewDone(done)
+    setPreviewKind(kind)
     const current = previewRef.current
     if (!current) {
       if (performance.now() < previewCooldown.current) return
@@ -716,6 +727,31 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       return false
     }
   }, [backupStored, clearSelection, endPreview, ensureApplied, getViewport, persist, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
+
+  const getFlow = useCallback((): AtendimentoFlow => ({ ...flowRef.current, viewport: previewView.current ?? settledView() }), [settledView])
+
+  const applyWorkflowEdit = useCallback((input: AtendimentoFlow) => {
+    const view = endPreview()
+    previewCooldown.current = performance.now() + PREVIEW_COOLDOWN
+    if (recovery) {
+      toast({ title: "Edição pausada", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
+      return false
+    }
+    if (!ensureApplied()) return false
+    let edited: AtendimentoFlow
+    try {
+      edited = importFlow(input)
+    } catch (cause) {
+      toast({ title: "Não foi possível aplicar a edição", description: (cause as Error).message, variant: "destructive" })
+      return false
+    }
+    const viewport = view ?? settledView()
+    setDocument({ ...edited, viewport }, "history")
+    clearSelection()
+    void setViewport(viewport)
+    toast({ title: "Alterações aplicadas", description: "O fluxo aberto foi atualizado. Use Desfazer (Ctrl+Z) para voltar ao anterior." })
+    return true
+  }, [clearSelection, endPreview, ensureApplied, recovery, setDocument, setViewport, settledView])
 
   const reportIssues = useCallback((title: string) => {
     setShowIssues(true)
@@ -923,7 +959,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [getNodes])
 
   useLayoutEffect(() => {
-    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, previewWorkflow, captureImage, undo, redo }
+    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, previewWorkflow, captureImage, getFlow, applyWorkflowEdit, undo, redo }
   })
 
   const actions = useMemo<WorkflowActions>(() => ({
@@ -938,8 +974,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     removeNode: (id) => handlers.current?.removeNode(id),
     reset: () => handlers.current?.reset(),
     download: () => handlers.current?.download() ?? false,
-    previewWorkflow: (flow, done) => handlers.current?.previewWorkflow(flow, done),
+    previewWorkflow: (flow, done, kind) => handlers.current?.previewWorkflow(flow, done, kind),
     captureImage: () => handlers.current?.captureImage() ?? Promise.resolve(null),
+    getFlow: () => handlers.current?.getFlow() ?? newFlow(),
+    applyWorkflowEdit: (flow) => handlers.current?.applyWorkflowEdit(flow) ?? false,
   }), [])
 
   useEffect(() => {
@@ -1634,7 +1672,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             </button>
           )}
           {showIssues && !previewing && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
-          {preview && <PreviewBanner nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} />}
+          {preview && <PreviewBanner nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} />}
           <CanvasStatus container={canvas} count={display.nodes.length} start={startNode?.position} />
         </div>
         {panelNode && (

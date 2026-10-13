@@ -163,6 +163,10 @@ export function toText(raw: string): string {
   return text.replace(/[ \t]+\n/g, "\n").trim()
 }
 
+export function slugOf(text: string, limit = 60): string {
+  return foldText(text).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, limit).replace(/-+$/, "")
+}
+
 export function booleanOf(raw: string): boolean | undefined {
   const key = foldText(toText(raw))
   if (TRUE_WORDS.has(key)) return true

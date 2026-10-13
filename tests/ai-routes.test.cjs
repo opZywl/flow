@@ -736,6 +736,8 @@ const INPUT_ERRORS = [
   ['quantidade alta', { size: 'custom', count: 61 }, 'count', 'Informe de 2 a 60 componentes.'],
   ['quantidade fracionada', { size: 'custom', count: 2.5 }, 'count', 'Informe de 2 a 60 componentes.'],
   ['nome longo', { name: 'n'.repeat(81) }, 'name', 'O nome do fluxo pode ter até 80 caracteres.'],
+  ['preenchimento em texto', { fill: 'false' }, 'fill', 'Escolha se a IA preenche os nomes, IDs e URLs que o pedido não traz.'],
+  ['preenchimento numérico', { fill: 0 }, 'fill', 'Escolha se a IA preenche os nomes, IDs e URLs que o pedido não traz.'],
 ]
 
 for (const [label, change, field, error] of INPUT_ERRORS) {
@@ -968,4 +970,98 @@ test('as predefinições de cada provedor passam na validação de modelo da rot
       assert.equal(data.model.id, preset.id)
     }
   }
+})
+
+const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
+
+const OPEN_FLOW = finalizeFlow(assembleFlow(RI, { now: new Date('2026-10-13T12:00:00.000Z') })).flow
+const OPEN_MENU = OPEN_FLOW.nodes.find((node) => node.data.type === 'envio_mensagem')
+const OPEN_AGENDA = OPEN_FLOW.nodes.find((node) => node.data.type === 'departamentos')
+const OPEN_BYE = OPEN_FLOW.nodes.find((node) => node.data.data.template === RI.nodes[3].config[0].value)
+const EDIT_DELTA = {
+  name: '',
+  description: '',
+  nodes: [
+    { id: OPEN_MENU.id, type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify([{ text: 'Agendar consulta' }, { text: 'Financeiro' }, { text: 'Encerrar' }]) }] },
+    { id: 'fin', type: 'departamentos', config: [{ key: 'departamento', value: '30' }, { key: 'name', value: 'Financeiro' }] },
+  ],
+  edges: [
+    { from: OPEN_MENU.id, output: 'Agendar consulta', to: OPEN_AGENDA.id },
+    { from: OPEN_MENU.id, output: 'Financeiro', to: 'fin' },
+    { from: OPEN_MENU.id, output: 'Encerrar', to: OPEN_BYE.id },
+  ],
+}
+
+test('a rota edita o fluxo aberto com mode edit e base, em JSON e em NDJSON', async () => {
+  responder = () => reply.openai(JSON.stringify(EDIT_DELTA))
+  const { response, data, text } = await run(payload('openai', { mode: 'edit', base: OPEN_FLOW, prompt: 'Adicione a opção Financeiro.' }))
+  assert.equal(response.status, 200)
+  assert.equal(data.success, true)
+  assert.equal(data.mode, 'edit')
+  assert.deepEqual(data.changes, { added: 1, changed: 1, removed: 0 })
+  assert.equal(data.workflow.nodes.length, OPEN_FLOW.nodes.length + 1)
+  for (const node of OPEN_FLOW.nodes.filter((entry) => entry.id !== OPEN_MENU.id)) assert.equal(JSON.stringify(data.workflow.nodes.find((entry) => entry.id === node.id)), JSON.stringify(node))
+  assert.deepEqual(validateFlow(data.workflow).filter((issue) => issue.severity === 'error'), [])
+  assert.match(userText(calls[0]), /Modo de edição/)
+  assertNoKey(text, KEYS.openai)
+
+  calls.length = 0
+  responder = () => reply.anthropic(JSON.stringify(EDIT_DELTA))
+  const streamed = await run(payload('anthropic', { mode: 'edit', base: OPEN_FLOW, prompt: 'Adicione a opção Financeiro.', stream: true }))
+  const lines = events(streamed.data)
+  const result = lines.at(-1)
+  assert.equal(result.type, 'result')
+  assert.equal(result.result.mode, 'edit')
+  assert.deepEqual(result.result.changes, { added: 1, changed: 1, removed: 0 })
+  assert.ok(lines.some((line) => line.type === 'progress'))
+  assertNoKey(streamed.text, KEYS.anthropic)
+})
+
+test('a rota valida mode desconhecido e base ausente ou inválida no campo certo, sem chamar o provedor', async () => {
+  responder = () => reply.openai(JSON.stringify(EDIT_DELTA))
+  let result = await run(payload('openai', { mode: 'remix' }))
+  assert.equal(result.response.status, 400)
+  assert.deepEqual(result.data, { success: false, code: 'invalid_request', error: 'Escolha criar um fluxo novo ou editar o fluxo aberto.', field: 'mode' })
+  result = await run(payload('openai', { mode: 'edit' }))
+  assert.equal(result.response.status, 400)
+  assert.deepEqual(result.data, { success: false, code: 'invalid_request', error: 'Abra um fluxo para editar.', field: 'base' })
+  for (const base of [{ nodes: 'x' }, 'não é json', { ...OPEN_FLOW, edges: [{ id: 'e', type: 'deletable', source: 'inicio', sourceHandle: 'output-0', target: 'fantasma' }] }]) {
+    result = await run(payload('openai', { mode: 'edit', base }))
+    assert.equal(result.response.status, 400)
+    assert.equal(result.data.field, 'base')
+    assert.equal(result.data.error, 'Não foi possível ler o fluxo aberto. Confira o fluxo e tente de novo.')
+  }
+  assert.equal(calls.length, 0)
+  responder = () => reply.openai(JSON.stringify(RI))
+  result = await run(payload('openai', { mode: 'create', base: { qualquer: true } }))
+  assert.equal(result.response.status, 200)
+  assert.equal(result.data.success, true)
+  assert.equal(result.data.mode, undefined)
+})
+
+test('a rota repassa fill: com preenchimento o ID recebe valor provisório e sem preenchimento fica em branco como dado da plataforma', async () => {
+  responder = () => reply.openai(JSON.stringify(RI))
+  const filled = await run(payload('openai'))
+  assert.equal(filled.response.status, 200)
+  const department = (data) => data.workflow.nodes.find((node) => node.data.type === 'departamentos').data.data
+  assert.equal(department(filled.data).departamento, 'agendamento')
+  assert.ok(filled.data.issues.some((issue) => issue.message === 'Confira: ID do departamento provisório, troque pelo valor cadastrado na plataforma.'))
+  assert.match(userText(calls[0]), /Preencha todos os campos de todos os componentes/)
+
+  calls.length = 0
+  const plain = await run(payload('openai', { fill: false }))
+  assert.equal(plain.response.status, 200)
+  assert.equal(department(plain.data).departamento ?? '', '')
+  assert.ok(plain.data.issues.some((issue) => issue.scope === 'plataforma' && issue.message === 'Informe o ID do departamento.'))
+  assert.equal(plain.data.issues.some((issue) => issue.message.startsWith('Confira:')), false)
+  assert.match(userText(calls[0]), /use só o que o pedido informar/)
+  assert.doesNotMatch(userText(calls[0]), /Preencha todos os campos de todos os componentes/)
+  assertNoKey(plain.text, KEYS.openai)
+
+  calls.length = 0
+  responder = () => reply.openai(JSON.stringify(EDIT_DELTA))
+  const edited = await run(payload('openai', { mode: 'edit', base: OPEN_FLOW, prompt: 'Adicione a opção Financeiro.', fill: false }))
+  assert.equal(edited.response.status, 200)
+  assert.equal(edited.data.mode, 'edit')
+  assert.match(userText(calls[0]), /use só o que o pedido informar/)
 })

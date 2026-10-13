@@ -789,13 +789,7 @@ test('review scopes: errors and fixable warnings go to the AI, platform data sta
     'Informe o ID do formulário ou o ID do Flow na Meta.',
     'Informe o ID do template.',
     'Informe o ID do widget do chat.',
-    'Informe o nome da tabulação.',
     'Selecione o agente de IA.',
-    'Informe o nome da tag.',
-    'Informe o nome do agente.',
-    'Informe o nome do departamento.',
-    'Informe o nome do fluxo de destino.',
-    'Informe o nome do template.',
   ]
   const platform = new Set()
   const fixable = new Set()
@@ -811,6 +805,8 @@ test('review scopes: errors and fixable warnings go to the AI, platform data sta
   assert.deepEqual([...platform].sort(), [...expected].sort())
   assert.ok(fixable.has('Preencha a mensagem.'))
   assert.ok(fixable.has('Selecione o menu de destino.'))
+  for (const message of ['Informe o nome da tabulação.', 'Informe o nome da tag.', 'Informe o nome do agente.', 'Informe o nome do departamento.', 'Informe o nome do fluxo de destino.', 'Informe o nome do template.']) assert.ok(fixable.has(message), message)
+  for (const message of ['Informe o nome do departamento.', 'Informe o nome da tag.', 'Informe o nome da lista.', 'Informe o nome do agente de IA.']) assert.equal(platformScope(message), 'ia', message)
   assert.equal(platformScope('API não validada: valide na plataforma depois de importar.'), 'plataforma')
   assert.equal(platformScope('Informe o nome do evento.'), 'ia')
   assert.equal(platformScope('Informe a variável de saída.'), 'ia')
@@ -846,6 +842,7 @@ test('correction messages cite the RI id, the component and the pending item, an
     '# Como corrigir',
     '- Mude só o necessário para resolver cada pendência. Tudo o que já está certo continua igual: mesmos ids, tipos, textos, opções, chaves e conexões.',
     '- Não remova, não resuma e não junte componentes, a menos que a pendência peça.',
+    '- Nome pendente recebe o nome que o pedido traz ou um nome coerente com o contexto. ID e URL recebem o valor do pedido ou um provisório coerente, como manda a regra 6.',
     '- Saída sem destino vai para um componente novo que faça sentido para aquele resultado, como mensagem e Encerrar Conversa, Retornar ao Menu ou transferência. Nunca ligue a um componente que já recebe conexão.',
     '- Mantenha a ordem do caminho da conversa em nodes e edges, com os componentes novos no ponto do caminho em que entram.',
   ].join('\n'))
@@ -867,13 +864,23 @@ test('correction messages cite the RI id, the component and the pending item, an
   assert.equal(pickBetter(second, tie), tie)
 
   const outcome = concludeGeneration(first)
-  assert.deepEqual(issueMessages(outcome.issues, 'ajuste'), ['Preenchido com texto provisório: a mensagem. Revise.', 'A saída “Suporte” estava sem destino e foi ligada a um novo Encerrar Conversa. Revise.'])
+  assert.deepEqual(issueMessages(outcome.issues, 'ajuste'), [
+    'Preenchido com texto provisório: a mensagem. Revise.',
+    'Preenchido com valor provisório: ID do departamento “vendas”. Revise.',
+    'A saída “Suporte” estava sem destino e foi ligada a um novo Encerrar Conversa. Revise.',
+  ])
+  assert.deepEqual(issueMessages(outcome.issues, 'plataforma'), ['Confira: ID do departamento provisório, troque pelo valor cadastrado na plataforma.'])
   assert.ok(!issueMessages(outcome.issues).some(message => message.startsWith('Conecte a saída')))
   assert.deepEqual(errorsOf(outcome.workflow).map(issue => issue.message), [])
   assert.equal(byRi({ ...first.assembled, flow: outcome.workflow }, 'boas_vindas').data.data.template, 'Mensagem a definir.')
   const done = concludeGeneration(second)
   assert.equal(exportFlow(done.workflow).length > 0, true)
-  assert.deepEqual(done.issues.map(issue => issue.scope), ['plataforma', 'plataforma'])
+  assert.deepEqual(done.issues.map(issue => [issue.scope, issue.riId, issue.message]), [
+    ['ajuste', 'vendas', 'Preenchido com valor provisório: ID do departamento “vendas”. Revise.'],
+    ['ajuste', 'suporte', 'Preenchido com valor provisório: ID do departamento “suporte”. Revise.'],
+    ['plataforma', 'vendas', 'Confira: ID do departamento provisório, troque pelo valor cadastrado na plataforma.'],
+    ['plataforma', 'suporte', 'Confira: ID do departamento provisório, troque pelo valor cadastrado na plataforma.'],
+  ])
 
   const open = finalizeFlow(assemble(flowOf([node('api', 'consulta_api', { url_api: 'https://example.com/api' }), node('solto', 'envio_pergunta', { template: 'Sem ligação.' })], [edge('inicio', '', 'api')])))
   assert.deepEqual(open.flow.nodes.map(entry => entry.data.type), [START_TYPE, 'consulta_api', 'envio_pergunta', 'finalizar', 'finalizar'])
@@ -1027,7 +1034,7 @@ test('a menu message above 1024 characters is split into a message before the me
   const notice = Array.from({ length: 16 }, (_, index) => `Item ${index + 1}: seus dados são tratados conforme a LGPD e usados só para este atendimento.`).join(' ')
   const title = `${notice}\n\nEscolha uma opção:`
   assert.ok(title.length > 1024)
-  const ri = flowOf([node('menu', 'envio_mensagem', { title, options: '["Vendas","Suporte"]' }), node('vendas', 'departamentos', { name: 'Vendas' }), node('suporte', 'departamentos', { name: 'Suporte' })], [edge('inicio', '', 'menu'), edge('menu', 'Vendas', 'vendas'), edge('menu', 'Suporte', 'suporte')])
+  const ri = flowOf([node('menu', 'envio_mensagem', { title, options: '["Vendas","Suporte"]' }), node('vendas', 'departamentos', { departamento: 'vendas', name: 'Vendas' }), node('suporte', 'departamentos', { departamento: 'suporte', name: 'Suporte' })], [edge('inicio', '', 'menu'), edge('menu', 'Vendas', 'vendas'), edge('menu', 'Suporte', 'suporte')])
   const assembled = assemble(ri)
   assert.ok(errorsOf(assembled.flow).some(issue => issue.message.endsWith('o limite é 1024.')))
   const final = finalizeFlow(assembled)
@@ -1240,7 +1247,10 @@ test('a simulated model streams the RI through streamObject, the repair and the 
   assert.equal(call.prompt[0].content, systemPrompt())
   const evaluation = evaluateRi(object, { now: NOW, prompt: 'Clínica com agendamento' })
   assert.deepEqual(evaluation.pending, [])
-  assert.deepEqual(evaluation.score, [0, 0, 1])
+  assert.deepEqual(evaluation.score, [0, 0, 0])
+  const unnamed = evaluateRi(object, { now: NOW, prompt: 'Clínica odontológica' })
+  assert.deepEqual(unnamed.pending, [])
+  assert.deepEqual(issueMessages(unnamed.issues), ['Confira: ID do departamento provisório, troque pelo valor cadastrado na plataforma.'])
 
   const plain = new MockLanguageModelV2({
     doStream: async () => ({
@@ -1283,7 +1293,11 @@ test('the system prompt is generated from the catalog: every type, every accepte
     'Ligue todas as saídas de todos os componentes.',
     'Nada se liga ao início',
     'Menu de Opções: de 1 a 10 opções. buttons "true" só com até 3 opções.',
-    'Nunca invente IDs, URLs ou planilhas.',
+    'Preencha todos os campos de todos os componentes.',
+    'recebem o nome que o pedido traz ou, sem ele, um nome claro e coerente com o contexto',
+    'ID em letras minúsculas com hífen, feito a partir do nome, por exemplo suporte-tecnico',
+    'https://api.lucas-lima.xyz/v1/boletos',
+    'https://api.lucas-lima.xyz/',
     '@@@variavel',
     '#NAME',
     'use Enviar Mensagem e depois Encerrar Conversa',
@@ -1293,7 +1307,7 @@ test('the system prompt is generated from the catalog: every type, every accepte
     'Todo submenu tem uma opção para voltar, ligada a Retornar ao Menu',
     'O menu principal tem uma opção de encerramento',
     'Dados coletados são reaproveitados',
-    'Sem a informação, omita a chave',
+    'Escreva cada chave com o seu valor preenchido.',
     'Escreva os nodes na ordem do caminho da conversa',
     'Escreva as edges na mesma ordem dos nodes',
     'Nas correções, mantenha os mesmos ids e a mesma ordem.',

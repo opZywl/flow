@@ -22,6 +22,8 @@ import {
   Eye,
   EyeOff,
   FileJson,
+  FilePenLine,
+  FilePlus2,
   FileText,
   KeyRound,
   Loader2,
@@ -46,7 +48,9 @@ import {
   SIZE_RANGES,
   type Effort,
   type GenerateRequest,
+  type GenerationChanges,
   type GenerationIssue,
+  type GenerationMode,
   type GenerationProgress,
   type GenerationSize,
   type GenerationStage,
@@ -66,11 +70,13 @@ import { FlowSelect, type FlowSelectOption } from "./flow-select"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
-type Field = "provider" | "apiKey" | "model" | "effort" | "description" | "image" | "size" | "count" | "name"
+type Field = "provider" | "apiKey" | "model" | "effort" | "mode" | "description" | "image" | "size" | "count" | "name" | "fill"
 type FieldErrors = Partial<Record<Field, string>>
 type View = "form" | "result"
 type Tone = "success" | "warning" | "danger"
 type LiveCounts = { nodes: number; edges: number }
+type PreviewKind = "create" | "edit"
+type ChangeMark = "added" | "changed"
 
 interface ReferenceImage {
   name: string
@@ -100,6 +106,14 @@ interface Received {
   transcript: string
   model: string
   partial: boolean
+  mode: GenerationMode
+  changes?: GenerationChanges
+}
+
+interface FlowDiff {
+  added: string[]
+  changed: string[]
+  removed: string[]
 }
 
 type Outcome = { ok: true; received: Received } | { ok: false; rejection: Rejection }
@@ -122,6 +136,9 @@ interface Generated extends Received {
   size: string
   name: string
   effort: Effort
+  fill: boolean
+  base: AtendimentoFlow | null
+  diff?: FlowDiff
   generatedAt: string
 }
 
@@ -149,21 +166,30 @@ interface Summary {
   byId: ReadonlyMap<string, AtendimentoNode>
   byNode: ReadonlyMap<string, GenerationIssue[]>
   types: TypeUsage[]
+  editing: boolean
+  changes: GenerationChanges
+  marks: ReadonlyMap<string, ChangeMark>
+  removed: AtendimentoNode[]
 }
 
 interface AIWorkflowDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onWorkflowGenerated: (workflow: AtendimentoFlow) => boolean
-  onLivePreview?: (flow: AtendimentoFlow | null, done?: boolean) => void
+  onLivePreview?: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => void
+  getCurrentFlow?: () => AtendimentoFlow | null
+  onWorkflowEdited?: (workflow: AtendimentoFlow) => boolean
 }
 
 type RunnerModule = typeof import("@/lib/atendimento/ai/runner")
 type PreviewModule = typeof import("@/lib/atendimento/ai/preview")
+type EditModule = typeof import("@/lib/atendimento/ai/edit")
 
 interface Engine {
   runGeneration: RunnerModule["runGeneration"]
   previewFlow: PreviewModule["previewFlow"]
+  previewEdit: PreviewModule["previewEdit"]
+  diffFlows: EditModule["diffFlows"]
 }
 
 interface PreviewFeed {
@@ -173,7 +199,7 @@ interface PreviewFeed {
 
 const GENERATE_URL = "/api/generate-workflow"
 const MODELS_URL = "/api/ai-models"
-const FIELD_ORDER: readonly Field[] = ["provider", "apiKey", "model", "effort", "description", "image", "size", "count", "name"]
+const FIELD_ORDER: readonly Field[] = ["provider", "apiKey", "model", "effort", "mode", "description", "image", "size", "count", "name", "fill"]
 const REQUEST_FIELDS: Readonly<Record<RequestField, Field>> = {
   provider: "provider",
   apiKey: "apiKey",
@@ -184,6 +210,9 @@ const REQUEST_FIELDS: Readonly<Record<RequestField, Field>> = {
   size: "size",
   count: "count",
   name: "name",
+  mode: "mode",
+  base: "mode",
+  fill: "fill",
 }
 const STAGES: readonly GenerationStage[] = ["preparando", "gerando", "montando", "validando", "corrigindo"]
 const SCOPES: readonly IssueScope[] = ["ia", "plataforma", "ajuste"]
@@ -217,15 +246,32 @@ const SIZE_OPTIONS: ReadonlyArray<{ value: GenerationSize; label: string; hint: 
   { value: "custom", label: "Personalizado", hint: "A IA gera a quantidade de componentes informada." },
 ]
 
+const MODE_OPTIONS: ReadonlyArray<{ value: GenerationMode; label: string; hint: string; Icon: LucideIcon }> = [
+  { value: "create", label: "Criar fluxo novo", hint: "A IA monta um fluxo do zero a partir do pedido.", Icon: FilePlus2 },
+  { value: "edit", label: "Editar o fluxo aberto", hint: "A IA muda só o que o pedido citar e mantém o resto como está.", Icon: FilePenLine },
+]
+const EDIT_BLOCKED = "Disponível quando o fluxo aberto tem componentes além do Início."
+
+const FILL_HINTS = {
+  on: "Nomes, IDs e URLs saem sempre preenchidos. Os valores provisórios aparecem em Dados da plataforma para você conferir.",
+  off: "Dados cadastrados na plataforma, como nomes, IDs e URLs, ficam em branco para você completar no editor.",
+} as const
+
+const PLATFORM_HINTS = {
+  on: "Valores provisórios de nomes, IDs e URLs. Troque cada um pelo valor cadastrado na plataforma.",
+  off: "Dados cadastrados na plataforma, como IDs, nomes e URLs, que o pedido não informou. Complete no editor.",
+} as const
+
 const ISSUE_GROUPS: ReadonlyArray<Omit<IssueGroup, "items">> = [
   { scope: "ia", title: "Revise", hint: "Pontos que a IA não resolveu nas rodadas de correção." },
-  {
-    scope: "plataforma",
-    title: "Complete no editor",
-    hint: "Dados cadastrados na plataforma, como IDs, nomes e URLs, que a descrição não informou.",
-  },
+  { scope: "plataforma", title: "Dados da plataforma", hint: PLATFORM_HINTS.off },
   { scope: "ajuste", title: "Ajustes automáticos", hint: "Mudanças feitas na montagem para manter o fluxo válido. Confira cada uma." },
 ]
+
+const MARKS: Record<ChangeMark, { label: string; className: string }> = {
+  added: { label: "Novo", className: "bg-flow-success/15 text-flow-success" },
+  changed: { label: "Alterado", className: "bg-flow-accent/15 text-flow-accent" },
+}
 
 const TONES: Record<Tone, { box: string; badge: string; Icon: LucideIcon }> = {
   success: { box: "border-flow-success/40 bg-flow-success/10", badge: "bg-flow-success/15 text-flow-success", Icon: CheckCircle2 },
@@ -260,6 +306,23 @@ const formatNumber = (value: number) => value.toLocaleString("pt-BR")
 const plural = (count: number, one: string, many: string) => `${formatNumber(count)} ${count === 1 ? one : many}`
 const isModelId = (value: string) => MODEL_ID.test(value) && !value.includes("..")
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+const NO_CHANGES: GenerationChanges = { added: 0, changed: 0, removed: 0 }
+
+function hasComponents(flow: AtendimentoFlow | null | undefined): flow is AtendimentoFlow {
+  return Boolean(flow && Array.isArray(flow.nodes) && flow.nodes.some((node) => node.data.type !== START_TYPE))
+}
+
+function documentKey(flow: AtendimentoFlow): string {
+  return JSON.stringify({ ...flow, viewport: null })
+}
+
+function changeLabels(changes: GenerationChanges): [string, string, string] {
+  return [
+    plural(changes.added, "componente novo", "componentes novos"),
+    plural(changes.changed, "alterado", "alterados"),
+    plural(changes.removed, "removido", "removidos"),
+  ]
+}
 
 function readCount(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
@@ -340,20 +403,21 @@ function keyWarning(info: ProviderInfo, value: string): string {
   return ""
 }
 
-function stageText(progress: GenerationProgress | null): string {
+function stageText(progress: GenerationProgress | null, editing = false): string {
   if (!progress) return "Enviando a solicitação."
   const round = `rodada ${progress.round} de ${progress.maxRounds}`
-  if (progress.stage === "preparando") return "Preparando a geração."
-  if (progress.stage === "gerando") return `Gerando o fluxo, ${round}.`
-  if (progress.stage === "montando") return "Montando o fluxo no formato de Atendimento."
-  if (progress.stage === "validando") return "Validando o fluxo."
+  if (progress.stage === "preparando") return editing ? "Preparando a edição." : "Preparando a geração."
+  if (progress.stage === "gerando") return editing ? `Editando o fluxo, ${round}.` : `Gerando o fluxo, ${round}.`
+  if (progress.stage === "montando") return editing ? "Aplicando as mudanças no fluxo aberto." : "Montando o fluxo no formato de Atendimento."
+  if (progress.stage === "validando") return editing ? "Validando os locais e as conexões." : "Validando o fluxo."
   if (progress.resumed) return `Retomando a geração interrompida, ${round}.`
   return progress.pending
     ? `Corrigindo ${plural(progress.pending, "pendência", "pendências")}, ${round}.`
     : `Corrigindo as pendências, ${round}.`
 }
 
-function progressText(progress: GenerationProgress | null, live?: LiveCounts | null): string {
+function progressText(progress: GenerationProgress | null, live?: LiveCounts | null, editing = false): string {
+  if (editing) return stageText(progress, true)
   if (progress?.stage !== "gerando" || (!live && progress.nodes === undefined && progress.edges === undefined)) return stageText(progress)
   const nodes = plural(live?.nodes ?? progress.nodes ?? 0, "componente", "componentes")
   const edges = plural(live?.edges ?? progress.edges ?? 0, "conexão", "conexões")
@@ -394,6 +458,15 @@ function readIssues(value: unknown): GenerationIssue[] {
   })
 }
 
+function readChanges(value: unknown): GenerationChanges | undefined {
+  if (!isObject(value)) return undefined
+  const added = readCount(value.added)
+  const changed = readCount(value.changed)
+  const removed = readCount(value.removed)
+  if (added === undefined && changed === undefined && removed === undefined) return undefined
+  return { added: added ?? 0, changed: changed ?? 0, removed: removed ?? 0 }
+}
+
 function readUsage(value: unknown): GenerationUsage | undefined {
   if (!isObject(value)) return undefined
   const inputTokens = readCount(value.inputTokens) ?? 0
@@ -419,6 +492,8 @@ function readOutcome(value: unknown, status: number): Outcome {
           transcript: text(value.transcript),
           model: isObject(value.model) ? text(value.model.id) : "",
           partial: value.partial === true,
+          mode: value.mode === "edit" ? "edit" : "create",
+          changes: readChanges(value.changes),
         },
       }
     } catch (error) {
@@ -517,8 +592,12 @@ async function requestGeneration(
 
 async function loadEngine(): Promise<Engine | null> {
   try {
-    const [runner, preview] = await Promise.all([import("@/lib/atendimento/ai/runner"), import("@/lib/atendimento/ai/preview")])
-    return { runGeneration: runner.runGeneration, previewFlow: preview.previewFlow }
+    const [runner, preview, edit] = await Promise.all([
+      import("@/lib/atendimento/ai/runner"),
+      import("@/lib/atendimento/ai/preview"),
+      import("@/lib/atendimento/ai/edit"),
+    ])
+    return { runGeneration: runner.runGeneration, previewFlow: preview.previewFlow, previewEdit: preview.previewEdit, diffFlows: edit.diffFlows }
   } catch {
     return null
   }
@@ -550,6 +629,9 @@ async function generateFlow(
       count: request.count,
       name: request.name,
       effort: request.effort ?? DEFAULT_EFFORT,
+      ...(request.fill !== undefined ? { fill: request.fill } : {}),
+      ...(request.mode ? { mode: request.mode } : {}),
+      ...(request.base !== undefined ? { base: request.base } : {}),
     },
     { transport: "browser", signal, fetch: direct, onProgress, onPartial },
   )
@@ -716,18 +798,35 @@ function summarize(result: Generated): Summary {
   for (const issue of issues) {
     if (issue.nodeId) byNode.set(issue.nodeId, [...(byNode.get(issue.nodeId) ?? []), issue])
   }
+  const editing = result.mode === "edit"
+  const diff = editing ? result.diff : undefined
+  const marks = new Map<string, ChangeMark>()
+  for (const id of diff?.added ?? []) marks.set(id, "added")
+  for (const id of diff?.changed ?? []) marks.set(id, "changed")
+  const before = new Map((result.base?.nodes ?? []).map((node) => [node.id, node]))
+  const removed = (diff?.removed ?? []).flatMap((id) => {
+    const node = before.get(id)
+    return node ? [node] : []
+  })
+  const changes = result.changes ?? (diff ? { added: diff.added.length, changed: diff.changed.length, removed: diff.removed.length } : NO_CHANGES)
   return {
     components: result.flow.nodes.filter((node) => node.data.type !== START_TYPE).length,
     blocking: blocking.length,
     tone: blocking.length ? "danger" : issues.length || result.partial ? "warning" : "success",
     issues,
-    groups: ISSUE_GROUPS.map((group) => ({ ...group, items: issues.filter((issue) => issue.scope === group.scope) })).filter(
-      (group) => group.items.length > 0,
-    ),
+    groups: ISSUE_GROUPS.map((group) => ({
+      ...group,
+      hint: group.scope === "plataforma" ? PLATFORM_HINTS[result.fill ? "on" : "off"] : group.hint,
+      items: issues.filter((issue) => issue.scope === group.scope),
+    })).filter((group) => group.items.length > 0),
     nodes: orderedNodes(result.flow),
     byId: new Map(result.flow.nodes.map((node) => [node.id, node])),
     byNode,
     types: usedTypes(result.flow),
+    editing,
+    changes: editing ? changes : NO_CHANGES,
+    marks,
+    removed,
   }
 }
 
@@ -747,13 +846,15 @@ function promptDocument(result: Generated, summary: Summary): string {
   const fence = codeFence(result.transcript)
   const usage = result.usage
   return [
-    "# Prompt de geração do fluxo",
+    summary.editing ? "# Prompt de edição do fluxo" : "# Prompt de geração do fluxo",
     "",
     `- Fluxo: ${result.flow.name || "Sem nome"}`,
+    `- Modo: ${summary.editing ? "Edição do fluxo aberto" : "Fluxo novo"}`,
     `- Provedor: ${provider ? `${provider.name} (${provider.vendor})` : result.provider}`,
     `- Modelo: ${result.modelName === result.model ? result.model : `${result.modelName} (${result.model})`}`,
-    `- Tamanho: ${result.size}`,
+    ...(summary.editing ? [`- Mudanças: ${changeLabels(summary.changes).join(", ")}`] : [`- Tamanho: ${result.size}`]),
     `- Esforço: ${EFFORT_OPTIONS[result.effort].label}`,
+    `- Preencher todos os campos: ${result.fill ? "sim" : "não"}`,
     `- Componentes: ${formatNumber(summary.components)}, sem contar o início`,
     `- Conexões: ${formatNumber(result.flow.edges.length)}`,
     `- Rodadas: ${result.rounds}`,
@@ -764,7 +865,7 @@ function promptDocument(result: Generated, summary: Summary): string {
         ]
       : []),
     `- Pendências: ${formatNumber(summary.issues.length)}`,
-    `- Gerado em: ${result.generatedAt}`,
+    `- ${summary.editing ? "Editado" : "Gerado"} em: ${result.generatedAt}`,
     "",
     "## Solicitação",
     "",
@@ -792,7 +893,14 @@ function SeverityIcon({ severity }: { severity: GenerationIssue["severity"] }) {
   )
 }
 
-export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerated, onLivePreview }: AIWorkflowDialogProps) {
+export default function AIWorkflowDialog({
+  open,
+  onOpenChange,
+  onWorkflowGenerated,
+  onLivePreview,
+  getCurrentFlow,
+  onWorkflowEdited,
+}: AIWorkflowDialogProps) {
   const baseId = useId()
   const [provider, setProvider] = useState<ProviderId>(PROVIDERS[0].id)
   const [keys, setKeys] = useState<Partial<Record<ProviderId, string>>>({})
@@ -808,6 +916,16 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
   const [count, setCount] = useState("10")
   const [name, setName] = useState("")
   const [effortChoice, setEffortChoice] = useState<Effort | null>(null)
+  const [mode, setMode] = useState<GenerationMode>("create")
+  const [fill, setFill] = useState(true)
+  const [canEdit, setCanEdit] = useState(() => {
+    try {
+      return hasComponents(getCurrentFlow?.() ?? null)
+    } catch {
+      return false
+    }
+  })
+  const [runningKind, setRunningKind] = useState<PreviewKind>("create")
   const [watch, setWatch] = useState(true)
   const [collapsed, setCollapsed] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
@@ -839,6 +957,8 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
   const previewShownRef = useRef(false)
   const livePreviewRef = useRef(onLivePreview)
   livePreviewRef.current = onLivePreview
+  const currentFlowRef = useRef(getCurrentFlow)
+  currentFlowRef.current = getCurrentFlow
   const openRef = useRef(open)
   openRef.current = open
 
@@ -856,6 +976,9 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
   const effort = pickEffort(effortChoice, provider, model)
   const effortOptions = effortChoices(provider, model)
   const canWatch = typeof onLivePreview === "function"
+  const editAvailable = typeof getCurrentFlow === "function" && typeof onWorkflowEdited === "function"
+  const activeMode: GenerationMode = editAvailable && canEdit ? mode : "create"
+  const editing = activeMode === "edit"
   const summary = useMemo(() => (result ? summarize(result) : null), [result])
   const showingResult = view === "result" && result !== null && summary !== null
 
@@ -877,11 +1000,19 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     }
   }
 
-  const showPreview = (flow: AtendimentoFlow, done = false) => {
+  const readCurrentFlow = (): AtendimentoFlow | null => {
+    try {
+      return currentFlowRef.current?.() ?? null
+    } catch {
+      return null
+    }
+  }
+
+  const showPreview = (flow: AtendimentoFlow, done = false, kind: PreviewKind = "create") => {
     const send = livePreviewRef.current
     if (!send) return
     try {
-      send(flow, done)
+      send(flow, done, kind)
       previewShownRef.current = true
       setLiveCounts({ nodes: flow.nodes.filter((node) => node.data.type !== START_TYPE).length, edges: flow.edges.length })
     } catch {
@@ -903,6 +1034,11 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
 
   useEffect(() => {
     if (open) {
+      try {
+        setCanEdit(hasComponents(currentFlowRef.current?.() ?? null))
+      } catch {
+        setCanEdit(false)
+      }
       if (collapsedRef.current) {
         collapsedRef.current = false
         setCollapsed(false)
@@ -978,6 +1114,11 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     if (!next) return
     setEffortChoice(next)
     clearFieldError("effort")
+  }
+
+  const changeMode = (value: GenerationMode) => {
+    setMode(value)
+    clearFieldError("mode", "size", "count", "name")
   }
 
   const changeSize = (value: string) => {
@@ -1133,11 +1274,15 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     if (!isModelId(model)) errors.model = "Escolha um modelo válido."
     else if (image && imageBlocked) errors.model = blockedImageMessage(true)
     if (imageBusy) errors.image = "Aguarde o preparo da imagem."
-    if (!prompt.trim() && !image) errors.description = "Descreva o atendimento ou envie uma imagem de referência."
+    if (!prompt.trim() && !image) {
+      errors.description = editing
+        ? "Descreva o que mudar no fluxo aberto ou envie uma imagem de referência."
+        : "Descreva o atendimento ou envie uma imagem de referência."
+    }
     else if (prompt.trim().length > LIMITS.prompt) {
       errors.description = `A descrição pode ter até ${formatNumber(LIMITS.prompt)} caracteres.`
     }
-    if (size === "custom") {
+    if (!editing && size === "custom") {
       const value = Number(count.trim())
       if (!/^\d+$/.test(count.trim()) || value < COUNT_LIMITS.min || value > COUNT_LIMITS.max) {
         errors.count = `Informe de ${COUNT_LIMITS.min} a ${COUNT_LIMITS.max} componentes.`
@@ -1181,6 +1326,11 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     if (abortRef.current) return
     const origin: View = showingResult ? "result" : "form"
     const errors = validate()
+    const base = editing ? readCurrentFlow() : null
+    if (editing && !hasComponents(base)) {
+      errors.mode = "O fluxo aberto não tem componentes para editar. Escolha Criar fluxo novo."
+      setCanEdit(false)
+    }
     setFieldErrors(errors)
     const invalid = FIELD_ORDER.find((field) => errors[field])
     if (invalid) {
@@ -1191,16 +1341,20 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     }
 
     const trimmedName = name.trim()
+    const editBase = editing && hasComponents(base) ? base : null
+    const kind: PreviewKind = editBase ? "edit" : "create"
     const request: GenerateRequest = {
       provider,
       model,
       apiKey: apiKey.trim(),
       prompt: prompt.trim(),
       image: image?.dataUrl ?? null,
-      size,
-      ...(size === "custom" ? { count: Number(count.trim()) } : {}),
+      size: editBase ? "auto" : size,
+      ...(!editBase && size === "custom" ? { count: Number(count.trim()) } : {}),
       ...(trimmedName ? { name: trimmedName } : {}),
       effort,
+      fill,
+      ...(editBase ? { mode: "edit" as const, base: editBase } : {}),
     }
     const context = {
       provider,
@@ -1210,6 +1364,8 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
       size: size === "custom" ? `Personalizado (${plural(Number(count.trim()), "componente", "componentes")})` : sizeOption.label,
       name: trimmedName,
       effort,
+      fill,
+      base: editBase,
     }
 
     const controller = new AbortController()
@@ -1217,6 +1373,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     abortRef.current = controller
     liveRef.current = live
     stopPreview()
+    setRunningKind(kind)
     setGenerating(true)
     setProgress(null)
     setElapsed(0)
@@ -1231,9 +1388,11 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     }
 
     try {
+      if (live && editBase) showPreview(editBase, false, kind)
       const engine = await loadEngine()
       if (!current()) return
-      const feed = live && engine ? previewFeed(engine.previewFlow, (flow) => current() && showPreview(flow)) : null
+      const build = editBase && engine ? (ri: unknown) => engine.previewEdit(editBase, ri) : engine?.previewFlow
+      const feed = live && build ? previewFeed(build, (flow) => current() && showPreview(flow, false, kind)) : null
       feedRef.current = feed
       const outcome = await generateFlow(
         request,
@@ -1252,11 +1411,21 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
         rejectGeneration(outcome.rejection, origin)
         return
       }
-      if (live) showPreview(outcome.received.flow, true)
+      if (live) showPreview(outcome.received.flow, true, kind)
       reopen()
+      let diff: FlowDiff | undefined
+      if (editBase && engine) {
+        try {
+          diff = engine.diffFlows(editBase, outcome.received.flow)
+        } catch {
+          diff = undefined
+        }
+      }
       setResult({
         ...outcome.received,
         ...context,
+        mode: kind,
+        diff,
         model: outcome.received.model || model,
         generatedAt: new Date().toISOString(),
       })
@@ -1317,7 +1486,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     setResult(null)
     setView("form")
     setFailure(null)
-    setNotice("Fluxo descartado.")
+    setNotice(result?.mode === "edit" ? "Edição descartada. O fluxo aberto não mudou." : "Fluxo descartado.")
     focusField("description")
   }
 
@@ -1350,6 +1519,37 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     if (!onWorkflowGenerated(flow)) {
       setFailure({
         title: "O editor não aceitou o fluxo.",
+        details: "Confira o aviso exibido no editor e tente novamente.",
+        items: [],
+      })
+      return
+    }
+    stopPreview()
+    resetOnCloseRef.current = true
+    onOpenChange(false)
+  }
+
+  const applyResult = () => {
+    if (!result || result.mode !== "edit") return
+    let flow: AtendimentoFlow
+    try {
+      flow = importFlow(result.flow)
+    } catch (error) {
+      setFailure({ title: "Não foi possível aplicar a edição.", items: messageLines(error) })
+      return
+    }
+    const current = readCurrentFlow()
+    if (!current || !result.base || documentKey(current) !== documentKey(result.base)) {
+      setFailure({
+        title: "O fluxo aberto mudou depois desta edição.",
+        details: "Use Gerar novamente para editar a versão atual do fluxo.",
+        items: [],
+      })
+      return
+    }
+    if (!onWorkflowEdited?.(flow)) {
+      setFailure({
+        title: "O editor não aceitou a edição.",
         details: "Confira o aviso exibido no editor e tente novamente.",
         items: [],
       })
@@ -1454,13 +1654,20 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
   const modelHint = `ID ${model}.${vision === true ? " Analisa imagens." : vision === false ? " Não analisa imagens." : ""}`
   const effortHint = EFFORT_OPTIONS[effort].hint
   const liveGenerating = generating && liveRef.current
-  const resultTitle = summary
-    ? result?.partial
-      ? "Fluxo gerado em parte"
-      : summary.issues.length
-      ? `Fluxo gerado com ${plural(summary.issues.length, "pendência", "pendências")}`
-      : "Fluxo gerado sem pendências"
-    : ""
+  const runningEdit = runningKind === "edit"
+  const resultTitle = !summary
+    ? ""
+    : summary.editing
+      ? result?.partial
+        ? "Edição feita em parte"
+        : summary.issues.length
+          ? `Edição pronta com ${plural(summary.issues.length, "pendência", "pendências")}`
+          : "Edição pronta sem pendências"
+      : result?.partial
+        ? "Fluxo gerado em parte"
+        : summary.issues.length
+          ? `Fluxo gerado com ${plural(summary.issues.length, "pendência", "pendências")}`
+          : "Fluxo gerado sem pendências"
   const ToneIcon = summary ? TONES[summary.tone].Icon : CheckCircle2
 
   const panel =
@@ -1483,16 +1690,18 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
-                  <h2 className="truncate text-xs font-semibold text-flow-fg">Gerando fluxo com IA</h2>
+                  <h2 className="truncate text-xs font-semibold text-flow-fg">
+                    {runningEdit ? "Editando fluxo com IA" : "Gerando fluxo com IA"}
+                  </h2>
                   <span aria-hidden="true" className="shrink-0 text-[11px] tabular-nums text-flow-muted">
                     {clock(elapsed)}
                   </span>
                 </div>
                 <p aria-hidden="true" className="mt-0.5 text-[11px] leading-4 text-flow-muted">
-                  {progressText(progress, liveCounts)}
+                  {progressText(progress, liveCounts, runningEdit)}
                 </p>
                 <p role="status" className="sr-only">
-                  {stageText(progress)}
+                  {stageText(progress, runningEdit)}
                 </p>
               </div>
             </div>
@@ -1578,7 +1787,10 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                         no editor.
                       </p>
                     ) : null}
-                    <ul aria-label="Resumo do fluxo gerado" className="mt-2 flex flex-wrap gap-1.5">
+                    <ul
+                      aria-label={summary.editing ? "Resumo do fluxo editado" : "Resumo do fluxo gerado"}
+                      className="mt-2 flex flex-wrap gap-1.5"
+                    >
                       <li className={ui.chip}>{plural(summary.components, "componente", "componentes")}</li>
                       <li className={ui.chip}>{plural(result.flow.edges.length, "conexão", "conexões")}</li>
                       <li className={ui.chip}>{result.modelName}</li>
@@ -1595,6 +1807,34 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     </ul>
                   </div>
                 </div>
+
+                {summary.editing ? (
+                  <div>
+                    <h3 id={idFor("changes-title")} className={ui.sectionTitle}>
+                      Mudanças no fluxo aberto
+                    </h3>
+                    <ul aria-labelledby={idFor("changes-title")} className="mt-2 flex flex-wrap gap-1.5">
+                      {changeLabels(summary.changes).map((label, index) => (
+                        <li key={label} className={cn(ui.chip, "inline-flex items-center gap-1.5")}>
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "h-2 w-2 shrink-0 rounded-full",
+                              index === 0 ? "bg-flow-success" : index === 1 ? "bg-flow-accent" : "bg-flow-danger",
+                            )}
+                          />
+                          {label}
+                        </li>
+                      ))}
+                    </ul>
+                    {summary.removed.length > 0 ? (
+                      <p className={ui.hint}>
+                        Removidos por deixarem de ser alcançados a partir do início:{" "}
+                        {summary.removed.map((node) => `${getComponentLabel(node.data.type)} · ID ${node.id}`).join(", ")}.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {summary.types.length > 0 ? (
                   <div>
@@ -1666,6 +1906,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                       const Icon = componentIcon(type)
                       const detail = start ? "Início do atendimento" : nodeSummary(node.data)
                       const nodeIssues = summary.byNode.get(node.id) ?? []
+                      const mark = summary.marks.get(node.id)
                       return (
                         <li key={node.id} className="flex items-start gap-3 border-t border-flow-border px-3 py-2 first:border-t-0">
                           <span aria-hidden="true" className="mt-0.5 h-8 w-1 shrink-0 rounded-full" style={{ backgroundColor: color }} />
@@ -1693,6 +1934,13 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                               </ul>
                             ) : null}
                           </div>
+                          {mark ? (
+                            <span
+                              className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold", MARKS[mark].className)}
+                            >
+                              {MARKS[mark].label}
+                            </span>
+                          ) : null}
                           <span className="shrink-0 rounded-md bg-flow-soft px-1.5 py-0.5 font-mono text-[10px] font-medium text-flow-muted">
                             ID {node.id}
                           </span>
@@ -1703,7 +1951,9 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                 </div>
 
                 <p className={ui.hint}>
-                  Importar abre este fluxo no editor e guarda o fluxo que estava aberto em Meus fluxos.
+                  {summary.editing
+                    ? "Aplicar alterações atualiza o fluxo aberto no editor. Para voltar ao fluxo anterior, use Desfazer (Ctrl+Z)."
+                    : "Importar abre este fluxo no editor e guarda o fluxo que estava aberto em Meus fluxos."}
                 </p>
               </section>
             ) : (
@@ -1918,10 +2168,75 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     Pedido
                   </h3>
 
+                  {editAvailable ? (
+                    <div>
+                      <p id={idFor("mode-label")} className={ui.label}>
+                        O que fazer
+                      </p>
+                      <div
+                        role="radiogroup"
+                        aria-labelledby={idFor("mode-label")}
+                        aria-describedby={fieldErrors.mode ? idFor("mode-error") : undefined}
+                        className="grid gap-2 sm:grid-cols-2"
+                      >
+                        {MODE_OPTIONS.map((entry) => {
+                          const checked = entry.value === activeMode
+                          const blocked = entry.value === "edit" && !canEdit
+                          const Icon = entry.Icon
+                          return (
+                            <label
+                              key={entry.value}
+                              title={blocked ? EDIT_BLOCKED : undefined}
+                              className={cn(
+                                "flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
+                                checked
+                                  ? "border-flow-accent bg-flow-accent/10"
+                                  : "border-flow-border bg-flow-surface hover:border-flow-accent/60",
+                              )}
+                            >
+                              <input
+                                id={checked ? idFor("mode") : undefined}
+                                type="radio"
+                                name={idFor("mode-choice")}
+                                value={entry.value}
+                                checked={checked}
+                                disabled={blocked}
+                                onChange={() => changeMode(entry.value)}
+                                aria-label={entry.label}
+                                aria-describedby={idFor(`mode-${entry.value}-hint`)}
+                                className="sr-only"
+                              />
+                              <span
+                                aria-hidden="true"
+                                className={cn(
+                                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition",
+                                  checked ? "bg-flow-accent text-white" : "bg-flow-soft text-flow-muted-strong",
+                                )}
+                              >
+                                <Icon className="h-4 w-4" />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-xs font-semibold text-flow-fg">{entry.label}</span>
+                                <span id={idFor(`mode-${entry.value}-hint`)} className="block text-[11px] leading-4 text-flow-muted">
+                                  {blocked ? EDIT_BLOCKED : entry.hint}
+                                </span>
+                              </span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                      {fieldErrors.mode ? (
+                        <p id={idFor("mode-error")} className={ui.error}>
+                          {fieldErrors.mode}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <div>
                     <div className="mb-1 flex items-baseline justify-between gap-2">
                       <label htmlFor={idFor("description")} className={cn(ui.label, "mb-0")}>
-                        Descrição do atendimento
+                        {editing ? "O que mudar no fluxo aberto" : "Descrição do atendimento"}
                       </label>
                       <span aria-hidden="true" className="text-[11px] tabular-nums text-flow-muted">
                         {formatNumber(prompt.length)}/{formatNumber(LIMITS.prompt)}
@@ -1937,7 +2252,11 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                       onKeyDown={onPromptKeyDown}
                       rows={6}
                       maxLength={LIMITS.prompt}
-                      placeholder="Ex.: Clínica médica. Boas-vindas com o nome do contato, atendimento de segunda a sexta das 8h às 18h e um menu para agendar consulta, falar com a recepção ou encerrar. Fora do horário, avisar e encerrar."
+                      placeholder={
+                        editing
+                          ? "Ex.: No menu principal, acrescente a opção Segunda via de boleto, que envia o link do boleto e volta ao menu. Troque a mensagem de boas-vindas para citar o horário das 8h às 18h."
+                          : "Ex.: Clínica médica. Boas-vindas com o nome do contato, atendimento de segunda a sexta das 8h às 18h e um menu para agendar consulta, falar com a recepção ou encerrar. Fora do horário, avisar e encerrar."
+                      }
                       aria-invalid={fieldErrors.description ? true : undefined}
                       aria-describedby={describedBy(
                         idFor("description-hint"),
@@ -1946,8 +2265,10 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                       className={cn(ui.textarea, "min-h-32 resize-y", fieldBase, fieldErrors.description && invalidField)}
                     />
                     <p id={idFor("description-hint")} className={ui.hint}>
-                      Informe o objetivo, as etapas, as opções do menu e os dados que o fluxo deve pedir. Até{" "}
-                      {formatNumber(LIMITS.prompt)} caracteres. Ctrl+Enter gera o fluxo.
+                      {editing
+                        ? "Diga o que acrescentar, trocar ou remover. O que o pedido não citar fica como está, com as mesmas posições e conexões."
+                        : "Informe o objetivo, as etapas, as opções do menu e os dados que o fluxo deve pedir."}{" "}
+                      Até {formatNumber(LIMITS.prompt)} caracteres. Ctrl+Enter {editing ? "edita o fluxo" : "gera o fluxo"}.
                     </p>
                     {fieldErrors.description ? (
                       <p id={idFor("description-error")} className={ui.error}>
@@ -2065,7 +2386,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
+                    <div hidden={editing}>
                       <label htmlFor={idFor("size")} className={ui.label}>
                         Tamanho do fluxo
                       </label>
@@ -2132,13 +2453,13 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                         }}
                         maxLength={LIMITS.name}
                         autoComplete="off"
-                        placeholder="Ex.: Atendimento Clínica Exemplo"
+                        placeholder={editing ? "Mantém o nome atual" : "Ex.: Atendimento Clínica Exemplo"}
                         aria-invalid={fieldErrors.name ? true : undefined}
                         aria-describedby={describedBy(idFor("name-hint"), fieldErrors.name && idFor("name-error"))}
                         className={cn(ui.input, fieldBase, fieldErrors.name && invalidField)}
                       />
                       <p id={idFor("name-hint")} className={ui.hint}>
-                        Sem nome, a IA sugere um a partir da descrição.
+                        {editing ? "Vazio mantém o nome atual do fluxo." : "Sem nome, a IA sugere um a partir da descrição."}
                       </p>
                       {fieldErrors.name ? (
                         <p id={idFor("name-error")} className={ui.error}>
@@ -2166,12 +2487,45 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                       <span className="min-w-0">
                         <span className="block text-xs font-semibold text-flow-fg">Acompanhar no canvas</span>
                         <span id={idFor("watch-hint")} className="block text-[11px] leading-4 text-flow-muted">
-                          Durante a geração, esta janela vira um painel pequeno e o fluxo aparece no editor conforme é
-                          criado. Ao terminar, o resultado abre aqui para você revisar e importar.
+                          {editing
+                            ? "Durante a edição, esta janela vira um painel pequeno e as mudanças aparecem no fluxo aberto conforme chegam. Ao terminar, o resultado abre aqui para você revisar e aplicar."
+                            : "Durante a geração, esta janela vira um painel pequeno e o fluxo aparece no editor conforme é criado. Ao terminar, o resultado abre aqui para você revisar e importar."}
                         </span>
                       </span>
                     </label>
                   ) : null}
+
+                  <div>
+                    <label
+                      className={cn(
+                        "flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
+                        fill ? "border-flow-accent/50 bg-flow-accent/10" : "border-flow-border bg-flow-soft hover:border-flow-accent/60",
+                      )}
+                    >
+                      <input
+                        id={idFor("fill")}
+                        type="checkbox"
+                        checked={fill}
+                        onChange={(event) => {
+                          setFill(event.target.checked)
+                          clearFieldError("fill")
+                        }}
+                        aria-describedby={describedBy(idFor("fill-hint"), fieldErrors.fill && idFor("fill-error"))}
+                        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-flow-accent disabled:cursor-not-allowed"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-xs font-semibold text-flow-fg">Preencher todos os campos</span>
+                        <span id={idFor("fill-hint")} className="block text-[11px] leading-4 text-flow-muted">
+                          {fill ? FILL_HINTS.on : FILL_HINTS.off}
+                        </span>
+                      </span>
+                    </label>
+                    {fieldErrors.fill ? (
+                      <p id={idFor("fill-error")} className={ui.error}>
+                        {fieldErrors.fill}
+                      </p>
+                    ) : null}
+                  </div>
                 </fieldset>
               </form>
             )}
@@ -2216,7 +2570,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     aria-hidden="true"
                   />
                   <span aria-hidden="true" className="min-w-0 flex-1 leading-4">
-                    {progressText(progress, liveCounts)}
+                    {progressText(progress, liveCounts, runningEdit)}
                   </span>
                   <span aria-hidden="true" className="shrink-0 tabular-nums">
                     {clock(elapsed)}
@@ -2224,7 +2578,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                 </>
               ) : null}
               <p role="status" className={generating ? "sr-only" : "min-w-0 leading-4"}>
-                {generating ? stageText(progress) : notice}
+                {generating ? stageText(progress, runningEdit) : notice}
               </p>
             </div>
 
@@ -2260,10 +2614,17 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     <Download className="h-4 w-4" aria-hidden="true" />
                     Baixar JSON
                   </button>
-                  <button ref={importRef} type="button" onClick={importResult} className={ui.primaryButton}>
-                    <FileJson className="h-4 w-4" aria-hidden="true" />
-                    Importar para o editor
-                  </button>
+                  {summary.editing ? (
+                    <button ref={importRef} type="button" onClick={applyResult} className={ui.primaryButton}>
+                      <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                      Aplicar alterações
+                    </button>
+                  ) : (
+                    <button ref={importRef} type="button" onClick={importResult} className={ui.primaryButton}>
+                      <FileJson className="h-4 w-4" aria-hidden="true" />
+                      Importar para o editor
+                    </button>
+                  )}
                 </div>
               </>
             ) : showingResult ? (
@@ -2307,7 +2668,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                   ) : (
                     <Sparkles className="h-4 w-4" aria-hidden="true" />
                   )}
-                  Gerar fluxo
+                  {editing ? "Editar fluxo" : "Gerar fluxo"}
                 </button>
               </div>
             )}

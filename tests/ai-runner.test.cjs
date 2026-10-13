@@ -491,3 +491,270 @@ test('previewFlow é rápido com 150 componentes', () => {
   assert.equal(flow.nodes.length, 151)
   assert.ok(average < 100, `${average.toFixed(1)} ms por prévia`)
 })
+
+const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
+const { flowToRi } = require('../lib/atendimento/ai/edit.ts')
+const { previewEdit } = require('../lib/atendimento/ai/preview.ts')
+
+const OPEN_FLOW = finalizeFlow(assembleFlow(RI, { now: new Date('2026-10-13T12:00:00.000Z') })).flow
+const nodeOf = (flow, match) => flow.nodes.find(match)
+const OPEN_MENU = nodeOf(OPEN_FLOW, (node) => node.data.type === 'envio_mensagem')
+const OPEN_WELCOME = nodeOf(OPEN_FLOW, (node) => node.data.data.template === RI.nodes[0].config[0].value)
+const OPEN_AGENDA = nodeOf(OPEN_FLOW, (node) => node.data.type === 'departamentos')
+const OPEN_BYE = nodeOf(OPEN_FLOW, (node) => node.data.data.template === RI.nodes[3].config[0].value)
+const MENU_EDIT = { id: OPEN_MENU.id, type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify([{ text: 'Agendar consulta' }, { text: 'Financeiro' }, { text: 'Encerrar' }]) }] }
+const WELCOME_EDIT = { id: OPEN_WELCOME.id, type: 'envio_pergunta', config: [{ key: 'template', value: 'Olá, #NAME. Bem-vindo à Clínica Exemplo.' }] }
+const FINANCE_EDIT = {
+  name: '',
+  description: '',
+  nodes: [
+    WELCOME_EDIT,
+    MENU_EDIT,
+    { id: 'aviso_fin', type: 'envio_pergunta', config: [{ key: 'template', value: 'Vou chamar a equipe financeira.' }] },
+    { id: 'fin', type: 'departamentos', config: [{ key: 'departamento', value: '30' }, { key: 'name', value: 'Financeiro' }] },
+  ],
+  edges: [
+    { from: OPEN_MENU.id, output: 'Agendar consulta', to: OPEN_AGENDA.id },
+    { from: OPEN_MENU.id, output: 'Financeiro', to: 'aviso_fin' },
+    { from: OPEN_MENU.id, output: 'Encerrar', to: OPEN_BYE.id },
+    { from: 'aviso_fin', output: '', to: 'fin' },
+  ],
+}
+
+function editInput(provider, extra = {}) {
+  return input(provider, { mode: 'edit', base: OPEN_FLOW, prompt: 'Adicione uma opção Financeiro no menu, com aviso e transferência, e mude a saudação.', ...extra })
+}
+
+function textOf(message) {
+  return typeof message.content === 'string' ? message.content : message.content.map((part) => part.text ?? '').join('')
+}
+
+function assertKept(result, cited) {
+  const nodes = new Map(result.workflow.nodes.map((node) => [node.id, node]))
+  for (const node of OPEN_FLOW.nodes) {
+    if (cited.includes(node.id)) continue
+    assert.equal(JSON.stringify(nodes.get(node.id)), JSON.stringify(node), node.id)
+  }
+}
+
+test('no modo edição o pedido leva a RI do fluxo aberto e a resposta traz o fluxo inteiro com as mudanças', async () => {
+  const result = await runGeneration(editInput('openai'), hooks(() => reply.openai(JSON.stringify(FINANCE_EDIT))))
+  assert.equal(result.success, true)
+  assert.equal(result.mode, 'edit')
+  assert.equal(result.rounds, 1)
+  assert.deepEqual(result.changes, { added: 2, changed: 2, removed: 0 })
+  assert.equal(result.workflow.name, OPEN_FLOW.name)
+  assert.equal(result.workflow.created_at, OPEN_FLOW.created_at)
+  assertKept(result, [OPEN_MENU.id, OPEN_WELCOME.id])
+  assert.equal(result.workflow.nodes.find((node) => node.id === OPEN_WELCOME.id).data.data.template, WELCOME_EDIT.config[0].value)
+  assert.equal(result.workflow.nodes.length, OPEN_FLOW.nodes.length + 2)
+  assert.deepEqual(validateFlow(result.workflow).filter((issue) => issue.severity === 'error'), [])
+  assertNoKey(result, KEYS.openai)
+  const [system, user] = calls[0].body.input
+  assert.match(textOf(system), /# Modo de edição/)
+  assert.ok(textOf(user).includes(JSON.stringify(flowToRi(OPEN_FLOW))))
+  assert.match(textOf(user), /Adicione uma opção Financeiro/)
+  assert.match(result.transcript, /# Fluxo atual/)
+})
+
+test('a correção do modo edição aplica sobre o estado já editado', async () => {
+  const first = { ...FINANCE_EDIT, nodes: FINANCE_EDIT.nodes.slice(0, 3), edges: FINANCE_EDIT.edges.slice(0, 3) }
+  const second = { name: '', description: '', nodes: [FINANCE_EDIT.nodes[3]], edges: [{ from: 'aviso_fin', output: '', to: 'fin' }] }
+  const result = await runGeneration(editInput('openai'), hooks((call, index) => reply.openai(JSON.stringify(index === 0 ? first : second))))
+  assert.equal(result.success, true)
+  assert.equal(result.rounds, 2)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(result.changes, { added: 2, changed: 2, removed: 0 })
+  assert.equal(result.workflow.nodes.find((node) => node.id === OPEN_WELCOME.id).data.data.template, WELCOME_EDIT.config[0].value)
+  const notice = result.workflow.nodes.find((node) => node.data.data.template === 'Vou chamar a equipe financeira.')
+  const link = result.workflow.edges.find((edge) => edge.source === notice.id)
+  assert.equal(result.workflow.nodes.find((node) => node.id === link.target).data.data.name, 'Financeiro')
+  assert.equal(result.workflow.nodes.filter((node) => node.data.type === 'finalizar').length, OPEN_FLOW.nodes.filter((node) => node.data.type === 'finalizar').length)
+  const messages = calls[1].body.input
+  assert.deepEqual(messages.map((message) => message.role), ['developer', 'user', 'assistant', 'user'])
+  assert.deepEqual(JSON.parse(textOf(messages[2])), first)
+  const correction = textOf(messages[3])
+  assert.match(correction, /\[aviso_fin\]/)
+  assert.match(correction, /Mudanças já aplicadas/)
+  assert.match(correction, /"id":"aviso_fin"/)
+  assert.match(result.transcript, /Correção 1/)
+  assert.deepEqual(validateFlow(result.workflow).filter((issue) => issue.severity === 'error'), [])
+  assertKept(result, [OPEN_MENU.id, OPEN_WELCOME.id])
+})
+
+test('uma queda no meio do modo edição preserva o que já foi aplicado e não duplica componentes', async () => {
+  let resumed = false
+  const result = await runGeneration(editInput('openai'), hooks((call, index) => index === 0 ? dropped('openai', JSON.stringify(FINANCE_EDIT), 0.7) : reply.openai(JSON.stringify(FINANCE_EDIT)), {
+    onProgress: (value) => {
+      if (value.resumed) resumed = true
+    },
+  }))
+  assert.equal(result.success, true)
+  assert.equal(result.partial, undefined)
+  assert.equal(result.rounds, 2)
+  assert.equal(resumed, true)
+  const salvaged = JSON.parse(textOf(calls[1].body.input[2]))
+  assert.ok(salvaged.nodes.length >= 1 && salvaged.nodes.length < FINANCE_EDIT.nodes.length)
+  assert.match(textOf(calls[1].body.input[3]), /interrompida/)
+  assert.match(textOf(calls[1].body.input[3]), /Mudanças já aplicadas/)
+  assert.equal(result.workflow.nodes.length, OPEN_FLOW.nodes.length + 2)
+  assert.deepEqual(result.changes, { added: 2, changed: 2, removed: 0 })
+  assertKept(result, [OPEN_MENU.id, OPEN_WELCOME.id])
+
+  calls.length = 0
+  const cut = await runGeneration(editInput('anthropic'), hooks(() => dropped('anthropic', JSON.stringify(FINANCE_EDIT), 0.7)))
+  assert.equal(cut.success, true)
+  assert.equal(cut.partial, true)
+  assert.equal(cut.mode, 'edit')
+  assert.equal(calls.length, 3)
+  assert.ok(cut.issues.some((issue) => issue.message === INTERRUPTED_NOTICE))
+  assert.equal(cut.workflow.nodes.find((node) => node.id === OPEN_WELCOME.id).data.data.template, WELCOME_EDIT.config[0].value)
+  assert.ok(cut.changes.changed >= 1)
+  assert.deepEqual(validateFlow(cut.workflow).filter((issue) => issue.severity === 'error'), [])
+  assertNoKey(cut, KEYS.anthropic)
+})
+
+test('onPartial do modo edição entrega mudanças que previewEdit desenha sobre o fluxo aberto', async () => {
+  const partials = []
+  const result = await runGeneration(editInput('google'), hooks(() => reply.google(JSON.stringify(FINANCE_EDIT)), { onPartial: (ri) => partials.push(ri) }))
+  assert.equal(result.success, true)
+  assert.ok(partials.length > 2, String(partials.length))
+  for (const ri of partials) {
+    const flow = previewEdit(OPEN_FLOW, ri)
+    if (flow) assert.ok(flow.nodes.length >= OPEN_FLOW.nodes.length)
+  }
+  const last = previewEdit(OPEN_FLOW, partials.at(-1))
+  assert.equal(last.nodes.length, result.workflow.nodes.length)
+  assert.deepEqual(last.nodes.map((node) => node.data.type).sort(), result.workflow.nodes.map((node) => node.data.type).sort())
+})
+
+test('resposta sem nenhuma mudança no modo edição pede correção e termina com mensagem clara', async () => {
+  const result = await runGeneration(editInput('openai'), hooks(() => reply.openai(JSON.stringify({ name: '', description: '', nodes: [], edges: [] }))))
+  assert.deepEqual(result, { success: false, code: 'invalid_output', error: 'O modelo não fez nenhuma mudança no fluxo para este pedido.', details: 'Descreva o que mudar no fluxo e gere novamente.', field: 'prompt' })
+  assert.equal(calls.length, 3)
+  assert.match(textOf(calls[1].body.input[3]), /nenhuma mudança/)
+})
+
+test('a validação da solicitação aceita mode e base e aponta o campo de cada erro', () => {
+  const base = input('openai')
+  const created = parseGenerationRequest(base)
+  assert.equal(created.request.input.mode, 'create')
+  assert.equal(created.request.input.base, undefined)
+  const edited = parseGenerationRequest({ ...base, mode: 'edit', base: OPEN_FLOW })
+  assert.equal(edited.ok, true)
+  assert.equal(edited.request.input.mode, 'edit')
+  assert.notEqual(edited.request.input.base, OPEN_FLOW)
+  assert.deepEqual(edited.request.input.base, OPEN_FLOW)
+  assert.equal(parseGenerationRequest({ ...base, mode: 'edit', base: JSON.stringify(OPEN_FLOW) }).ok, true)
+  assert.deepEqual(parseGenerationRequest({ ...base, mode: 'remix' }), { ok: false, failure: { success: false, code: 'invalid_request', error: 'Escolha criar um fluxo novo ou editar o fluxo aberto.', field: 'mode' } })
+  assert.deepEqual(parseGenerationRequest({ ...base, mode: 'edit' }), { ok: false, failure: { success: false, code: 'invalid_request', error: 'Abra um fluxo para editar.', field: 'base' } })
+  const headless = { ...OPEN_FLOW, nodes: OPEN_FLOW.nodes.filter((node) => node.id !== START_ID), edges: OPEN_FLOW.edges.filter((edge) => edge.source !== START_ID) }
+  for (const value of [{}, { nodes: 'x' }, '{"name":', [], 42, headless]) {
+    const failed = parseGenerationRequest({ ...base, mode: 'edit', base: value })
+    assert.equal(failed.ok, false, JSON.stringify(value).slice(0, 60))
+    assert.equal(failed.failure.field, 'base')
+    assert.equal(failed.failure.error, 'Não foi possível ler o fluxo aberto. Confira o fluxo e tente de novo.')
+  }
+})
+
+const CONFIRM_DEPARTMENT = 'Confira: ID do departamento provisório, troque pelo valor cadastrado na plataforma.'
+const NAMELESS = { ...RI, nodes: RI.nodes.map((node) => (node.id === 'agenda' ? { ...node, config: [] } : node)) }
+const PLAIN_RULE = 'use só o que o pedido informar. Sem a informação, omita a chave'
+const FILL_RULE = '6. Preencha todos os campos de todos os componentes.'
+const departmentOf = (result) => result.workflow.nodes.find((node) => node.data.type === 'departamentos').data.data
+
+test('com preenchimento, o padrão, o nome em branco gera rodada de correção e o ID recebe valor provisório com aviso', async () => {
+  const result = await runGeneration(input('openai'), hooks((call, index) => reply.openai(JSON.stringify(index === 0 ? NAMELESS : RI))))
+  assert.equal(result.success, true)
+  assert.equal(result.rounds, 2)
+  assert.equal(calls.length, 2)
+  const [system, , , correction] = calls[1].body.input
+  assert.ok(textOf(system).includes(FILL_RULE))
+  assert.ok(!textOf(system).includes(PLAIN_RULE))
+  assert.match(textOf(correction), /Informe o nome do departamento\./)
+  assert.match(textOf(correction), /Nome pendente recebe o nome que o pedido traz/)
+  const data = departmentOf(result)
+  assert.deepEqual([data.name, data.departamento], ['Agendamento', 'agendamento'])
+  assert.ok(result.issues.some((issue) => issue.scope === 'plataforma' && issue.message === CONFIRM_DEPARTMENT))
+  assert.ok(result.issues.some((issue) => issue.scope === 'ajuste' && issue.message === 'Preenchido com valor provisório: ID do departamento “agendamento”. Revise.'))
+  assert.deepEqual(validateFlow(result.workflow), [])
+})
+
+test('sem preenchimento nome e ID ficam em branco como dados da plataforma, sem rodada de correção nem aviso provisório', async () => {
+  const result = await runGeneration(input('openai', { fill: false }), hooks(() => reply.openai(JSON.stringify(NAMELESS))))
+  assert.equal(result.success, true)
+  assert.equal(result.rounds, 1)
+  assert.equal(calls.length, 1)
+  const system = textOf(calls[0].body.input[0])
+  assert.ok(system.includes(PLAIN_RULE))
+  assert.ok(!system.includes(FILL_RULE))
+  const data = departmentOf(result)
+  assert.deepEqual(['name', 'departamento', 'id'].map((key) => data[key] ?? ''), ['', '', ''])
+  assert.deepEqual(result.issues.filter((issue) => issue.type === 'departamentos').map((issue) => `${issue.scope}: ${issue.message}`), ['plataforma: Informe o ID do departamento.', 'plataforma: Informe o nome do departamento.'])
+  assert.equal(result.issues.some((issue) => issue.message.startsWith('Confira:') || issue.message.startsWith('Preenchido com valor provisório')), false)
+  assertNoKey(result, KEYS.openai)
+})
+
+const PAYMENT_PROMPT = 'Adicione no menu uma opção para pagamentos, com aviso e transferência para a equipe.'
+const paymentEdit = (department) => ({
+  name: '',
+  description: '',
+  nodes: [MENU_EDIT, { id: 'aviso_fin', type: 'envio_pergunta', config: [{ key: 'template', value: 'Vou chamar a equipe financeira.' }] }, { id: 'fin', type: 'departamentos', config: department }],
+  edges: FINANCE_EDIT.edges,
+})
+
+test('no modo edição com preenchimento o ID que já existe no fluxo aberto não vira provisório e o novo recebe aviso', async () => {
+  assert.equal(OPEN_AGENDA.data.data.departamento, 'agendamento')
+  const rename = { id: OPEN_AGENDA.id, type: 'departamentos', config: [{ key: 'departamento', value: 'agendamento' }, { key: 'name', value: 'Agenda' }] }
+  const delta = paymentEdit([{ key: 'departamento', value: 'fin-77' }, { key: 'name', value: 'Financeiro' }])
+  delta.nodes.push(rename)
+  const result = await runGeneration(editInput('openai', { prompt: PAYMENT_PROMPT }), hooks(() => reply.openai(JSON.stringify(delta))))
+  assert.equal(result.success, true)
+  assert.equal(result.rounds, 1)
+  assert.ok(textOf(calls[0].body.input[0]).includes(FILL_RULE))
+  const added = result.workflow.nodes.find((node) => node.data.type === 'departamentos' && node.data.data.departamento === 'fin-77')
+  assert.equal(result.workflow.nodes.find((node) => node.id === OPEN_AGENDA.id).data.data.name, 'Agenda')
+  assert.deepEqual(result.issues.filter((issue) => issue.message.startsWith('Confira:')).map((issue) => [issue.nodeId, issue.message]), [[added.id, CONFIRM_DEPARTMENT]])
+})
+
+test('no modo edição com preenchimento o departamento novo sem nome passa por correção e sai completo', async () => {
+  const first = paymentEdit([])
+  const second = { name: '', description: '', nodes: [{ id: 'fin', type: 'departamentos', config: [{ key: 'name', value: 'Financeiro' }] }], edges: [] }
+  const result = await runGeneration(editInput('openai', { prompt: PAYMENT_PROMPT }), hooks((call, index) => reply.openai(JSON.stringify(index === 0 ? first : second))))
+  assert.equal(result.success, true)
+  assert.equal(result.rounds, 2)
+  const correction = textOf(calls[1].body.input[3])
+  assert.match(correction, /Informe o nome do departamento\./)
+  assert.match(correction, /Nome pendente recebe o nome que o pedido traz/)
+  const added = result.workflow.nodes.find((node) => node.data.type === 'departamentos' && node.id !== OPEN_AGENDA.id)
+  assert.deepEqual([added.data.data.name, added.data.data.departamento], ['Financeiro', 'financeiro'])
+  assert.ok(result.issues.some((issue) => issue.nodeId === added.id && issue.message === CONFIRM_DEPARTMENT))
+  assertKept(result, [OPEN_MENU.id, OPEN_WELCOME.id])
+})
+
+test('no modo edição sem preenchimento o departamento novo fica em branco, sem correção e sem aviso provisório', async () => {
+  const result = await runGeneration(editInput('openai', { prompt: PAYMENT_PROMPT, fill: false }), hooks(() => reply.openai(JSON.stringify(paymentEdit([])))))
+  assert.equal(result.success, true)
+  assert.equal(result.rounds, 1)
+  assert.equal(calls.length, 1)
+  const system = textOf(calls[0].body.input[0])
+  assert.ok(system.includes(PLAIN_RULE))
+  assert.match(system, /# Modo de edição/)
+  const added = result.workflow.nodes.find((node) => node.data.type === 'departamentos' && node.id !== OPEN_AGENDA.id)
+  assert.deepEqual(['name', 'departamento', 'id'].map((key) => added.data.data[key] ?? ''), ['', '', ''])
+  assert.deepEqual(result.issues.filter((issue) => issue.nodeId === added.id).map((issue) => `${issue.scope}: ${issue.message}`).sort(), ['plataforma: Informe o ID do departamento.', 'plataforma: Informe o nome do departamento.'])
+  assert.equal(result.issues.some((issue) => issue.message.startsWith('Confira:') || issue.message.startsWith('Preenchido com valor provisório')), false)
+  assertKept(result, [OPEN_MENU.id, OPEN_WELCOME.id])
+})
+
+test('a validação da solicitação aceita fill e aponta o campo fill quando o valor não é sim ou não', () => {
+  const base = input('openai')
+  assert.equal(parseGenerationRequest(base).request.input.fill, true)
+  assert.equal(parseGenerationRequest({ ...base, fill: null }).request.input.fill, true)
+  assert.equal(parseGenerationRequest({ ...base, fill: true }).request.input.fill, true)
+  assert.equal(parseGenerationRequest({ ...base, fill: false }).request.input.fill, false)
+  assert.equal(parseGenerationRequest({ ...base, mode: 'edit', base: OPEN_FLOW, fill: false }).request.input.fill, false)
+  for (const value of ['false', 'sim', 0, 1, {}, []]) {
+    assert.deepEqual(parseGenerationRequest({ ...base, fill: value }), { ok: false, failure: { success: false, code: 'invalid_request', error: 'Escolha se a IA preenche os nomes, IDs e URLs que o pedido não traz.', field: 'fill' } }, JSON.stringify(value))
+  }
+})

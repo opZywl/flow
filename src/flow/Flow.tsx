@@ -13,13 +13,17 @@ import { emptyPreview, replyPreview, startPreview, type PreviewState } from "@/l
 import type { AtendimentoFlow } from "@/lib/atendimento/types"
 import { useTheme } from "../ThemeContext"
 import EraDialog from "./era-dialog"
-import WorkflowBuilder, { type WorkflowActions } from "./workflow-builder"
+import WorkflowBuilder, { type PreviewKind, type WorkflowActions } from "./workflow-builder"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
 
 const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
 
-type LivePreviewProps = { onLivePreview: (flow: AtendimentoFlow | null, done?: boolean) => void }
+type LivePreviewProps = {
+  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => void
+  getCurrentFlow: () => AtendimentoFlow | null
+  onWorkflowEdited: (workflow: AtendimentoFlow) => boolean
+}
 const ColorPanel = dynamic(() => import("../ColorPanel"), { ssr: false })
 
 const warm = (load: () => Promise<unknown>) => () => {
@@ -943,11 +947,23 @@ function FlowLayout() {
     return false
   }, [])
 
-  const handleLivePreview = useCallback((flow: AtendimentoFlow | null, done?: boolean) => {
-    actionsRef.current?.previewWorkflow(flow, done)
+  const handleLivePreview = useCallback((flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => {
+    actionsRef.current?.previewWorkflow(flow, done, kind)
   }, [])
 
-  const livePreview = useMemo<LivePreviewProps>(() => ({ onLivePreview: handleLivePreview }), [handleLivePreview])
+  const getCurrentFlow = useCallback(() => actionsRef.current?.getFlow() ?? null, [])
+
+  const handleEdited = useCallback((workflow: AtendimentoFlow) => {
+    const actions = actionsRef.current
+    if (actions) return actions.applyWorkflowEdit(workflow)
+    toast({ title: "Editor indisponível", description: "Aguarde o editor terminar de carregar e tente novamente.", variant: "destructive" })
+    return false
+  }, [])
+
+  const livePreview = useMemo<LivePreviewProps>(
+    () => ({ onLivePreview: handleLivePreview, getCurrentFlow, onWorkflowEdited: handleEdited }),
+    [getCurrentFlow, handleEdited, handleLivePreview],
+  )
 
   const openBackgroundDialog = useCallback(() => setBackgroundDialog(true), [])
 

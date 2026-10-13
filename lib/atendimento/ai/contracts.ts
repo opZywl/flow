@@ -37,6 +37,14 @@ export const RI_LIMITS = {
 
 export const MAX_ROUNDS = 3
 
+export type GenerationMode = "create" | "edit"
+
+export const GENERATION_MODES: readonly GenerationMode[] = ["create", "edit"]
+
+export const DEFAULT_MODE: GenerationMode = "create"
+
+export const DEFAULT_FILL = true
+
 export type Effort = "low" | "medium" | "high" | "max"
 
 export const EFFORTS: readonly Effort[] = ["low", "medium", "high", "max"]
@@ -54,6 +62,9 @@ export interface GenerateRequest {
   name?: string
   effort?: Effort
   stream?: boolean
+  mode?: GenerationMode
+  base?: unknown
+  fill?: boolean
 }
 
 export type IssueScope = "ia" | "plataforma" | "ajuste"
@@ -65,6 +76,12 @@ export interface GenerationIssue {
   nodeId?: string
   riId?: string
   type?: string
+}
+
+export interface GenerationChanges {
+  added: number
+  changed: number
+  removed: number
 }
 
 export interface GenerationUsage {
@@ -82,6 +99,8 @@ export interface GenerateSuccess {
   transcript: string
   model: { provider: ProviderId; id: string }
   partial?: boolean
+  mode?: GenerationMode
+  changes?: GenerationChanges
 }
 
 export type FailureCode =
@@ -103,7 +122,7 @@ export type FailureCode =
   | "aborted"
   | "unknown"
 
-export type RequestField = "provider" | "model" | "apiKey" | "prompt" | "image" | "size" | "count" | "name" | "effort"
+export type RequestField = "provider" | "model" | "apiKey" | "prompt" | "image" | "size" | "count" | "name" | "effort" | "mode" | "base" | "fill"
 
 export interface GenerateFailure {
   success: false

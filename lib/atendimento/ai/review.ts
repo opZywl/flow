@@ -22,20 +22,22 @@ export interface GenerationOutcome {
 
 export const PLATFORM_PATTERNS: readonly RegExp[] = [
   /^Informe o ID (do|da) /,
-  /^Informe o nome (do|da) (departamento|tag|fluxo de destino|template|agente|agente de IA|lista|tabulação)\./,
   /^Informe a URL/,
   /^Informe a planilha\./,
   /^Selecione o agente de IA\./,
   /^API não validada/,
 ]
 
+export const NAME_PATTERN = /^Informe o nome (do|da) (departamento|tag|fluxo de destino|template|agente|agente de IA|lista|tabulação)\./
+
 const GROUP_ORDER = (issue: GenerationIssue) => (issue.severity === "error" ? 0 : issue.scope === "ia" ? 1 : issue.scope === "ajuste" ? 2 : 3)
 
-export function platformScope(message: string): IssueScope {
-  return PLATFORM_PATTERNS.some((pattern) => pattern.test(message)) ? "plataforma" : "ia"
+export function platformScope(message: string, fill = true): IssueScope {
+  return PLATFORM_PATTERNS.some((pattern) => pattern.test(message)) || (!fill && NAME_PATTERN.test(message)) ? "plataforma" : "ia"
 }
 
 export function reviewFlow(assembled: AssembledFlow): GenerationIssue[] {
+  const fill = assembled.fill !== false
   const types = new Map(assembled.flow.nodes.map((node) => [node.id, node.data.type]))
   const issues: GenerationIssue[] = []
   const seen = new Set<string>()
@@ -63,7 +65,7 @@ export function reviewFlow(assembled: AssembledFlow): GenerationIssue[] {
     const type = issue.nodeId ? types.get(issue.nodeId) : undefined
     add({
       severity: issue.severity,
-      scope: platformScope(issue.message),
+      scope: platformScope(issue.message, fill),
       message: issue.message,
       ...(issue.nodeId ? { nodeId: issue.nodeId } : {}),
       ...(riId ? { riId } : {}),

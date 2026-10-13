@@ -5,8 +5,9 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createXai } from "@ai-sdk/xai"
 import { NOTE_TYPE, START_ID, START_TYPE } from "../catalog"
-import { stampExport } from "../format"
-import { COUNT_LIMITS, DEFAULT_EFFORT, GENERATION_SIZES, LIMITS, MAX_ROUNDS } from "./contracts"
+import { importFlow, stampExport } from "../format"
+import type { AtendimentoFlow } from "../types"
+import { COUNT_LIMITS, DEFAULT_EFFORT, DEFAULT_FILL, DEFAULT_MODE, GENERATION_SIZES, LIMITS, MAX_ROUNDS } from "./contracts"
 import type {
   Effort,
   FailureCode,
@@ -14,11 +15,14 @@ import type {
   GenerateResponse,
   GenerateSuccess,
   GenerationIssue,
+  GenerationMode,
   GenerationProgress,
   GenerationSize,
   GenerationUsage,
   RequestField,
 } from "./contracts"
+import { applyEdit, concludeEdit, deltaBetween, editCorrectionPrompt, editRequestPrompt, editResumePrompt, editSnapshot, editSystemPrompt, needsEditCorrection, pickEdit, reviewEdit } from "./edit"
+import type { EditResult, EditReview } from "./edit"
 import { correctionPrompt, formatFailurePrompt, requestPrompt, systemPrompt } from "./prompt"
 import { findPreset, getProvider, isEffort, isProviderId, providerEffort, rateLimitDetails, rateLimitWait } from "./providers"
 import type { ProviderEffort, ProviderId } from "./providers"
@@ -49,6 +53,9 @@ export interface GenerationInput {
   count?: number
   name?: string
   effort: Effort
+  mode?: GenerationMode
+  base?: unknown
+  fill?: boolean
 }
 
 export interface RunHooks {
@@ -61,7 +68,7 @@ export interface RunHooks {
 }
 
 export interface ParsedRequest {
-  input: GenerationInput & { image: GenerationImage | null }
+  input: GenerationInput & { image: GenerationImage | null; mode: GenerationMode; base?: AtendimentoFlow; fill: boolean }
   stream: boolean
 }
 
@@ -90,6 +97,11 @@ interface Abort {
   deadline?: AbortSignal
 }
 
+interface EditRound extends EditReview {
+  delta: RiFlow
+  result: EditResult
+}
+
 interface Attempt {
   ri?: RiFlow
   error?: unknown
@@ -108,6 +120,10 @@ const KEY_MIN = 8
 const READ_ERROR = "Não foi possível ler a solicitação."
 const IMAGE_ERROR = "Imagem inválida. Envie PNG ou JPG de até 5 MB."
 const EMPTY_FLOW = "O modelo não gerou nenhum componente para esta descrição."
+const EMPTY_EDIT = "O modelo não fez nenhuma mudança no fluxo para este pedido."
+const BASE_MISSING = "Abra um fluxo para editar."
+const BASE_INVALID = "Não foi possível ler o fluxo aberto. Confira o fluxo e tente de novo."
+const FILL_INVALID = "Escolha se a IA preenche os nomes, IDs e URLs que o pedido não traz."
 const BROWSER_HEADER = "anthropic-dangerous-direct-browser-access"
 const SIZES: readonly string[] = GENERATION_SIZES
 const KEY_CHARS = /^[\x21-\x7E]+$/
@@ -145,6 +161,13 @@ class EmptyFlowError extends Error {
   constructor() {
     super(EMPTY_FLOW)
     this.name = "EmptyFlowError"
+  }
+}
+
+class EmptyEditError extends Error {
+  constructor() {
+    super(EMPTY_EDIT)
+    this.name = "EmptyEditError"
   }
 }
 
@@ -229,11 +252,26 @@ export function parseGenerationRequest(body: unknown): RequestCheck {
   if (name.length > LIMITS.name) return reject(`O nome do fluxo pode ter até ${LIMITS.name} caracteres.`, "name")
   const effort = body.effort === undefined || body.effort === null || body.effort === "" ? DEFAULT_EFFORT : body.effort
   if (!isEffort(effort)) return reject("Escolha um nível de esforço válido.", "effort")
+  const fill = body.fill === undefined || body.fill === null ? DEFAULT_FILL : body.fill
+  if (typeof fill !== "boolean") return reject(FILL_INVALID, "fill")
+  const mode = body.mode === undefined || body.mode === null || body.mode === "" ? DEFAULT_MODE : body.mode
+  if (mode !== "create" && mode !== "edit") return reject("Escolha criar um fluxo novo ou editar o fluxo aberto.", "mode")
+  let base: AtendimentoFlow | undefined
+  if (mode === "edit") {
+    if (body.base === undefined || body.base === null || body.base === "") return reject(BASE_MISSING, "base")
+    try {
+      base = importFlow(body.base)
+    } catch {
+      return reject(BASE_INVALID, "base")
+    }
+    const starts = base.nodes.filter((node) => node.data.type === START_TYPE)
+    if (starts.length !== 1 || starts[0].id !== START_ID) return reject(BASE_INVALID, "base")
+  }
 
   return {
     ok: true,
     request: {
-      input: { provider, model, apiKey, prompt, image, size: size as GenerationSize, count, name: name || undefined, effort },
+      input: { provider, model, apiKey, prompt, image, size: size as GenerationSize, count, name: name || undefined, effort, mode, ...(base ? { base } : {}), fill },
       stream: body.stream === true,
     },
   }
@@ -461,6 +499,7 @@ function describeFailure(error: unknown, provider: ProviderId, apiKey: string, a
   if (abort.deadline?.aborted) return failure("timeout", provider)
   const cause = unwrap(error)
   if (cause instanceof EmptyFlowError) return { success: false, code: "invalid_output", error: EMPTY_FLOW, details: "Descreva as etapas do atendimento e gere novamente.", field: "prompt" }
+  if (cause instanceof EmptyEditError) return { success: false, code: "invalid_output", error: EMPTY_EDIT, details: "Descreva o que mudar no fluxo e gere novamente.", field: "prompt" }
   if (NoObjectGeneratedError.isInstance(cause)) {
     if (cause.finishReason === "length") return failure("output_too_long", provider)
     if (cause.finishReason === "content-filter") return failure("content_filter", provider)
@@ -659,13 +698,160 @@ function notify<T>(listener: ((value: T) => void) | undefined, value: T): void {
   }
 }
 
-async function generate(input: ResolvedInput, hooks: RunHooks, abort: Abort): Promise<GenerateSuccess> {
+function salvageDelta(partial: unknown): RiFlow | null {
+  const ri = completePart(partial)
+  return ri && (ri.nodes.length > 0 || ri.edges.length > 0) ? ri : null
+}
+
+async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hooks: RunHooks, abort: Abort): Promise<GenerateSuccess> {
   const setup = createSetup(input, hooks)
   const signal = abort.deadline ? AbortSignal.any([abort.client, abort.deadline]) : abort.client
   const deadline = hooks.deadlineMs !== undefined ? Date.now() + hooks.deadlineMs : Number.POSITIVE_INFINITY
   const progress = (value: GenerationProgress) => notify(hooks.onProgress, value)
   const show = (ri: RiFlow) => notify(hooks.onPartial, ri)
-  const system = systemPrompt()
+  const now = new Date()
+  const fill = { fill: input.fill }
+  const system = editSystemPrompt(fill)
+  const request = editRequestPrompt(original, input.prompt, input.image !== null)
+  const messages: ModelMessage[] = [
+    { role: "system", content: system, ...(setup.systemOptions ? { providerOptions: setup.systemOptions } : {}) },
+    { role: "user", content: input.image ? [{ type: "text", text: request }, { type: "image", image: input.image.data, mediaType: input.image.mediaType }] : request },
+  ]
+  const transcript = [
+    section("Sistema", system),
+    section("Pedido", request, input.image ? `[Imagem anexada: ${input.image.mediaType}, ${formatBytes(input.image.bytes)}]` : undefined),
+  ]
+  const usage: GenerationUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+  const salvaged = new WeakSet<EditRound>()
+  const initial: EditResult = { flow: original, notes: [], changes: { added: 0, changed: 0, removed: 0 }, ids: new Map(), detached: { nodes: [], edges: [] } }
+  let state = initial
+  const apply = (delta: RiFlow, prune = true) => applyEdit(state.flow, delta, { now, ids: state.ids, detached: state.detached, prune })
+  const evaluate = (delta: RiFlow, round: number): EditRound => {
+    progress({ stage: "montando", round, maxRounds: MAX_ROUNDS })
+    const applied = apply(delta)
+    const present = new Set(applied.flow.nodes.map((node) => node.id))
+    const carried = state.notes.filter((note) => note.scope === "ajuste" && (!note.nodeId || present.has(note.nodeId)))
+    const result: EditResult = { ...applied, notes: [...carried, ...applied.notes] }
+    const review = reviewEdit(original, result, { ...fill, prompt: input.prompt })
+    progress({ stage: "validando", round, maxRounds: MAX_ROUNDS })
+    return { ...review, delta, result }
+  }
+  const relay = (piece: RiFlow) => {
+    if (state === initial) {
+      show(piece)
+      return
+    }
+    try {
+      const applied = apply(piece, false)
+      show(deltaBetween(original, applied.flow, applied.ids))
+    } catch {
+      return
+    }
+  }
+  const timeLeft = () => !abort.deadline?.aborted && deadline - Date.now() >= ROUND_RESERVE_MS
+  let best: EditRound | null = null
+  let rounds = 0
+  let relaxed = 0
+  for (let round = 1; round <= MAX_ROUNDS; round++) {
+    rounds = round
+    progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, nodes: 0, edges: 0 })
+    let shown = ""
+    let last = 0
+    let relayed = ""
+    const attempt = await callModel(setup, messages, signal, (partial) => {
+      const counts = countRi(partial)
+      const key = `${counts.nodes}:${counts.edges}`
+      if (key !== shown && Date.now() - last >= PARTIAL_INTERVAL_MS) {
+        shown = key
+        last = Date.now()
+        progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, ...counts })
+      }
+      if (!hooks.onPartial) return
+      const piece = completePart(partial)
+      if (!piece) return
+      const signature = `${piece.nodes.length}:${piece.edges.length}:${piece.name}:${piece.description}`
+      if (signature === relayed) return
+      relayed = signature
+      relay(piece)
+    })
+    addUsage(usage, attempt.usage)
+    if (attempt.ri) {
+      const delta = attempt.ri
+      progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, nodes: delta.nodes.length, edges: delta.edges.length })
+      const evaluation = evaluate(delta, round)
+      state = evaluation.result
+      if (hooks.onPartial) show(deltaBetween(original, state.flow, state.ids))
+      best = pickEdit(best, evaluation)
+      if (!needsEditCorrection(evaluation) || round === MAX_ROUNDS || !timeLeft()) break
+      const correction = editCorrectionPrompt(evaluation.pending, editSnapshot(original, state), fill)
+      messages.push({ role: "assistant", content: JSON.stringify(delta) }, { role: "user", content: correction })
+      transcript.push(section(`Correção ${round}`, correction))
+      progress({ stage: "corrigindo", round: round + 1, maxRounds: MAX_ROUNDS, pending: evaluation.issues.filter((issue) => issue.scope === "ia").length + (evaluation.unchanged ? 1 : 0) })
+      continue
+    }
+    const { error } = attempt
+    if (abort.client.aborted) throw error
+    if (relaxed < RELAX_LIMIT && !abort.deadline?.aborted && relax(setup, error)) {
+      relaxed++
+      round--
+      continue
+    }
+    if (isRefusal(error)) {
+      if (best) break
+      throw error
+    }
+    const piece = isInterruption(error) ? salvageDelta(attempt.partial) : null
+    if (piece) {
+      const evaluation = evaluate(piece, round)
+      state = evaluation.result
+      salvaged.add(evaluation)
+      best = pickEdit(best, evaluation)
+      if (round === MAX_ROUNDS || !timeLeft()) break
+      const resume = editResumePrompt(isLength(error), editSnapshot(original, state))
+      messages.push({ role: "assistant", content: JSON.stringify(piece) }, { role: "user", content: resume })
+      transcript.push(section(`Retomada ${round}`, resume))
+      progress({ stage: "corrigindo", round: round + 1, maxRounds: MAX_ROUNDS, resumed: true })
+      continue
+    }
+    if (isFormatFailure(error) && round < MAX_ROUNDS && timeLeft()) {
+      const correction = formatFailurePrompt(error)
+      messages.push({ role: "assistant", content: (error.text ?? "").slice(0, REPLY_LIMIT) || "{}" }, { role: "user", content: correction })
+      transcript.push(section(`Correção ${round}`, correction))
+      progress({ stage: "corrigindo", round: round + 1, maxRounds: MAX_ROUNDS, pending: 1 })
+      continue
+    }
+    if (best) break
+    throw error
+  }
+  if (!best) throw new Error("Nenhuma rodada produziu uma edição.")
+  if (best.unchanged) throw new EmptyEditError()
+  const chosen = input.name && input.name !== best.result.flow.name ? { ...best.result, flow: { ...best.result.flow, name: input.name } } : best.result
+  const finished = concludeEdit(original, chosen, fill)
+  const review = reviewEdit(original, finished, { ...fill, prompt: input.prompt })
+  const partial = salvaged.has(best)
+  return {
+    success: true,
+    workflow: finished.flow,
+    issues: partial ? withNotice(review.issues) : review.issues,
+    rounds,
+    ...(usage.totalTokens > 0 || usage.inputTokens > 0 || usage.outputTokens > 0 ? { usage } : {}),
+    transcript: transcript.join("\n\n").split(input.apiKey).join(MASK),
+    model: { provider: input.provider, id: input.model },
+    ...(partial ? { partial: true } : {}),
+    mode: "edit",
+    changes: review.changes,
+  }
+}
+
+async function generate(input: ResolvedInput, hooks: RunHooks, abort: Abort): Promise<GenerateSuccess> {
+  if (input.mode === "edit" && input.base) return generateEdit(input, input.base, hooks, abort)
+  const setup = createSetup(input, hooks)
+  const signal = abort.deadline ? AbortSignal.any([abort.client, abort.deadline]) : abort.client
+  const deadline = hooks.deadlineMs !== undefined ? Date.now() + hooks.deadlineMs : Number.POSITIVE_INFINITY
+  const progress = (value: GenerationProgress) => notify(hooks.onProgress, value)
+  const show = (ri: RiFlow) => notify(hooks.onPartial, ri)
+  const fill = { fill: input.fill }
+  const system = systemPrompt(fill)
   const request = requestPrompt({ prompt: input.prompt, size: input.size, count: input.count, name: input.name, hasImage: input.image !== null })
   const messages: ModelMessage[] = [
     { role: "system", content: system, ...(setup.systemOptions ? { providerOptions: setup.systemOptions } : {}) },
@@ -679,7 +865,7 @@ async function generate(input: ResolvedInput, hooks: RunHooks, abort: Abort): Pr
   const salvaged = new WeakSet<RoundEvaluation>()
   const evaluate = (ri: RiFlow, round: number) => {
     progress({ stage: "montando", round, maxRounds: MAX_ROUNDS })
-    const evaluation = evaluateRi(ri, { name: input.name, prompt: input.prompt })
+    const evaluation = evaluateRi(ri, { name: input.name, prompt: input.prompt, ...fill })
     progress({ stage: "validando", round, maxRounds: MAX_ROUNDS })
     return evaluation
   }
@@ -714,7 +900,7 @@ async function generate(input: ResolvedInput, hooks: RunHooks, abort: Abort): Pr
       const evaluation = evaluate(ri, round)
       best = pickBetter(best, evaluation)
       if (!needsCorrection(evaluation) || round === MAX_ROUNDS || !timeLeft()) break
-      const correction = correctionPrompt(evaluation.pending)
+      const correction = correctionPrompt(evaluation.pending, fill)
       messages.push({ role: "assistant", content: JSON.stringify(ri) }, { role: "user", content: correction })
       transcript.push(section(`Correção ${round}`, correction))
       base = ri

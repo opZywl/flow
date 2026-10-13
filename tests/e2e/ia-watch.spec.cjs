@@ -587,7 +587,7 @@ test('a provider rejection stays on the key field, and when the browser cannot r
   await expect(page.getByText(BANNER)).toHaveCount(0)
   await expect(page.locator('.react-flow__node')).toHaveCount(PREVIOUS.nodes.length)
   expect(ai.calls).toHaveLength(3)
-  expect(ai.fallbacks).toEqual([{ provider: 'openai', model: 'gpt-6.1-sol', apiKey: KEYS.openai, prompt: PROMPT, image: null, size: 'auto', effort: 'high', stream: true }])
+  expect(ai.fallbacks).toEqual([{ provider: 'openai', model: 'gpt-6.1-sol', apiKey: KEYS.openai, prompt: PROMPT, image: null, size: 'auto', effort: 'high', fill: true, stream: true }])
 
   hold.open()
   const importButton = dialog.getByRole('button', { name: 'Importar para o editor' })
