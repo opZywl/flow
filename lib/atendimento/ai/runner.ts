@@ -782,7 +782,9 @@ export async function runGeneration(input: GenerationInput, hooks: RunHooks): Pr
   }
   if (!checked.ok) return checked.failure
   const resolved = checked.request.input
-  const abort: Abort = { client: hooks.signal, deadline: hooks.deadlineMs !== undefined ? AbortSignal.timeout(Math.max(0, hooks.deadlineMs)) : undefined }
+  const limit = hooks.deadlineMs !== undefined ? new AbortController() : undefined
+  const timer = limit ? setTimeout(() => limit.abort(new DOMException("Prazo esgotado.", "TimeoutError")), Math.max(0, hooks.deadlineMs ?? 0)) : undefined
+  const abort: Abort = { client: hooks.signal, deadline: limit?.signal }
   try {
     if (abort.client.aborted) return failure("aborted", resolved.provider)
     notify(hooks.onProgress, { stage: "preparando", round: 1, maxRounds: MAX_ROUNDS })
@@ -793,5 +795,7 @@ export async function runGeneration(input: GenerationInput, hooks: RunHooks): Pr
     } catch {
       return { ...UNKNOWN_FAILURE }
     }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
