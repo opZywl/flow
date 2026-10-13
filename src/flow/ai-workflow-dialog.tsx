@@ -70,6 +70,7 @@ type Field = "provider" | "apiKey" | "model" | "effort" | "description" | "image
 type FieldErrors = Partial<Record<Field, string>>
 type View = "form" | "result"
 type Tone = "success" | "warning" | "danger"
+type LiveCounts = { nodes: number; edges: number }
 
 interface ReferenceImage {
   name: string
@@ -154,7 +155,7 @@ interface AIWorkflowDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onWorkflowGenerated: (workflow: AtendimentoFlow) => boolean
-  onLivePreview?: (flow: AtendimentoFlow | null) => void
+  onLivePreview?: (flow: AtendimentoFlow | null, done?: boolean) => void
 }
 
 type RunnerModule = typeof import("@/lib/atendimento/ai/runner")
@@ -352,10 +353,10 @@ function stageText(progress: GenerationProgress | null): string {
     : `Corrigindo as pendências, ${round}.`
 }
 
-function progressText(progress: GenerationProgress | null): string {
-  if (progress?.stage !== "gerando" || (progress.nodes === undefined && progress.edges === undefined)) return stageText(progress)
-  const nodes = plural(progress.nodes ?? 0, "componente", "componentes")
-  const edges = plural(progress.edges ?? 0, "conexão", "conexões")
+function progressText(progress: GenerationProgress | null, live?: LiveCounts | null): string {
+  if (progress?.stage !== "gerando" || (!live && progress.nodes === undefined && progress.edges === undefined)) return stageText(progress)
+  const nodes = plural(live?.nodes ?? progress.nodes ?? 0, "componente", "componentes")
+  const edges = plural(live?.edges ?? progress.edges ?? 0, "conexão", "conexões")
   return `Gerando o fluxo, rodada ${progress.round} de ${progress.maxRounds}: ${nodes} e ${edges}.`
 }
 
@@ -814,6 +815,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
   const [notice, setNotice] = useState("")
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState<GenerationProgress | null>(null)
+  const [liveCounts, setLiveCounts] = useState<LiveCounts | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [result, setResult] = useState<Generated | null>(null)
   const [view, setView] = useState<View>("form")
@@ -865,6 +867,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
   const stopPreview = () => {
     feedRef.current?.stop()
     feedRef.current = null
+    setLiveCounts(null)
     if (!previewShownRef.current) return
     previewShownRef.current = false
     try {
@@ -874,12 +877,13 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
     }
   }
 
-  const showPreview = (flow: AtendimentoFlow) => {
+  const showPreview = (flow: AtendimentoFlow, done = false) => {
     const send = livePreviewRef.current
     if (!send) return
     try {
-      send(flow)
+      send(flow, done)
       previewShownRef.current = true
+      setLiveCounts({ nodes: flow.nodes.filter((node) => node.data.type !== START_TYPE).length, edges: flow.edges.length })
     } catch {
       return
     }
@@ -1248,7 +1252,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
         rejectGeneration(outcome.rejection, origin)
         return
       }
-      if (live) showPreview(outcome.received.flow)
+      if (live) showPreview(outcome.received.flow, true)
       reopen()
       setResult({
         ...outcome.received,
@@ -1294,6 +1298,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
       collapsedRef.current = false
       setCollapsed(false)
       toast({ title: "Geração cancelada", description: "O fluxo aberto no editor não foi alterado." })
+      afterRender(() => document.querySelector<HTMLElement>("[data-ai-trigger]")?.focus())
       return
     }
     setNotice("Geração cancelada.")
@@ -1484,7 +1489,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                   </span>
                 </div>
                 <p aria-hidden="true" className="mt-0.5 text-[11px] leading-4 text-flow-muted">
-                  {progressText(progress)}
+                  {progressText(progress, liveCounts)}
                 </p>
                 <p role="status" className="sr-only">
                   {stageText(progress)}
@@ -1698,7 +1703,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                 </div>
 
                 <p className={ui.hint}>
-                  Importar substitui o fluxo aberto no editor. Para voltar ao anterior, use Desfazer (Ctrl+Z).
+                  Importar abre este fluxo no editor e guarda o fluxo que estava aberto em Meus fluxos.
                 </p>
               </section>
             ) : (
@@ -2211,7 +2216,7 @@ export default function AIWorkflowDialog({ open, onOpenChange, onWorkflowGenerat
                     aria-hidden="true"
                   />
                   <span aria-hidden="true" className="min-w-0 flex-1 leading-4">
-                    {progressText(progress)}
+                    {progressText(progress, liveCounts)}
                   </span>
                   <span aria-hidden="true" className="shrink-0 tabular-nums">
                     {clock(elapsed)}

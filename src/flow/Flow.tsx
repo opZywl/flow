@@ -19,7 +19,7 @@ import { ui } from "./ui"
 
 const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
 
-type LivePreviewProps = { onLivePreview: (flow: AtendimentoFlow | null) => void }
+type LivePreviewProps = { onLivePreview: (flow: AtendimentoFlow | null, done?: boolean) => void }
 const ColorPanel = dynamic(() => import("../ColorPanel"), { ssr: false })
 
 const warm = (load: () => Promise<unknown>) => () => {
@@ -515,6 +515,7 @@ function FlowHeader({ botOpen, capturing, hasBackground, onSearch, onOpenAI, onO
           onPointerEnter={warmAI}
           onFocus={warmAI}
           aria-haspopup="dialog"
+          data-ai-trigger=""
           aria-label="Gerar com IA"
           title="Gerar com IA"
           className={cn(ui.accentButton, "px-2 md:px-3")}
@@ -942,8 +943,8 @@ function FlowLayout() {
     return false
   }, [])
 
-  const handleLivePreview = useCallback((flow: AtendimentoFlow | null) => {
-    actionsRef.current?.previewWorkflow(flow)
+  const handleLivePreview = useCallback((flow: AtendimentoFlow | null, done?: boolean) => {
+    actionsRef.current?.previewWorkflow(flow, done)
   }, [])
 
   const livePreview = useMemo<LivePreviewProps>(() => ({ onLivePreview: handleLivePreview }), [handleLivePreview])

@@ -32,7 +32,7 @@ export interface WorkflowActions {
   removeNode: (id: string) => void
   reset: () => void
   download: () => boolean
-  previewWorkflow: (flow: AtendimentoFlow | null) => void
+  previewWorkflow: (flow: AtendimentoFlow | null, done?: boolean) => void
   captureImage: () => Promise<Blob | null>
 }
 
@@ -194,13 +194,13 @@ const CanvasStatus = memo(function CanvasStatus({ container, count, start }: { c
   )
 })
 
-function PreviewBanner({ nodes, edges }: { nodes: number; edges: number }) {
+function PreviewBanner({ nodes, edges, done }: { nodes: number; edges: number; done: boolean }) {
   return (
     <div data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 items-center gap-2.5 border-flow-accent/40 px-3 py-2")}>
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-flow-accent/15 text-flow-accent">
-        <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden />
+        {done ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden />}
       </span>
-      <p role="status" className="min-w-0 text-xs font-semibold leading-5 text-flow-fg">Gerando com IA. O fluxo aparece aqui conforme é criado.</p>
+      <p role="status" className="min-w-0 text-xs font-semibold leading-5 text-flow-fg">{done ? "Fluxo gerado. Importe ou descarte na janela da IA." : "Gerando com IA. O fluxo aparece aqui conforme é criado."}</p>
       <span className="h-4 w-px shrink-0 bg-flow-border" aria-hidden />
       <span className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[11px] font-medium text-flow-muted">
         <span><span className="text-flow-muted-strong">{nodes}</span> {nodes === 1 ? "componente" : "componentes"}</span>
@@ -340,6 +340,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const [currentSavedId, setCurrentSavedId] = useState<string | null>(null)
   const [importError, setImportError] = useState("")
   const [preview, setPreview] = useState<AtendimentoFlow | null>(null)
+  const [previewDone, setPreviewDone] = useState(false)
   const [previewSizes, setPreviewSizes] = useState<Record<string, Size>>({})
   const [, setHistoryVersion] = useState(0)
   const flowRef = useRef(flow)
@@ -506,17 +507,19 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const view = previewView.current
     previewView.current = null
     setPreview(null)
+    setPreviewDone(false)
     setPreviewSizes({})
     releaseView()
     if (view) void setViewport(view)
     return view
   }, [cancelFit, releaseView, setViewport])
 
-  const previewWorkflow = useCallback((next: AtendimentoFlow | null) => {
+  const previewWorkflow = useCallback((next: AtendimentoFlow | null, done = false) => {
     if (!isPreviewFlow(next)) {
       endPreview()
       return
     }
+    setPreviewDone(done)
     const current = previewRef.current
     if (!current) {
       if (performance.now() < previewCooldown.current) return
@@ -935,7 +938,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     removeNode: (id) => handlers.current?.removeNode(id),
     reset: () => handlers.current?.reset(),
     download: () => handlers.current?.download() ?? false,
-    previewWorkflow: (flow) => handlers.current?.previewWorkflow(flow),
+    previewWorkflow: (flow, done) => handlers.current?.previewWorkflow(flow, done),
     captureImage: () => handlers.current?.captureImage() ?? Promise.resolve(null),
   }), [])
 
@@ -1631,7 +1634,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             </button>
           )}
           {showIssues && !previewing && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
-          {preview && <PreviewBanner nodes={preview.nodes.length} edges={preview.edges.length} />}
+          {preview && <PreviewBanner nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} />}
           <CanvasStatus container={canvas} count={display.nodes.length} start={startNode?.position} />
         </div>
         {panelNode && (
