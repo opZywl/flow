@@ -1,9 +1,10 @@
 import { START_ID, getComponentLabel } from "../catalog"
-import { validateFlow } from "../format"
+import { WAIT_QUESTION_MESSAGE, validateFlow } from "../format"
 import type { AtendimentoFlow } from "../types"
 import { assembleFlow, finalizeFlow, type AssembleOptions, type AssembledFlow } from "./assemble"
 import type { GenerationIssue, IssueScope } from "./contracts"
 import type { RiFlow } from "./ri"
+import { listQuoted, quote } from "./text"
 
 export type Score = readonly [number, number, number]
 
@@ -80,8 +81,17 @@ export function describeIssue(issue: Pick<GenerationIssue, "message" | "riId" | 
   return `[${issue.riId ?? "fluxo"}] ${label}${issue.message}`
 }
 
+function waitGuidance(assembled: AssembledFlow, issue: GenerationIssue): string {
+  if (issue.message !== WAIT_QUESTION_MESSAGE || !issue.nodeId) return ""
+  const types = new Map(assembled.flow.nodes.map((node) => [node.id, node.data.type]))
+  const sources = assembled.flow.edges.filter((edge) => edge.target === issue.nodeId && types.get(edge.source) !== "envio_pergunta").map((edge) => assembled.riIds.get(edge.source) ?? edge.source)
+  const wait = issue.riId ?? issue.nodeId
+  const link = sources.length ? ` Ligue ${listQuoted([...new Set(sources)])} ao novo Enviar Mensagem e ligue esse Enviar Mensagem a ${quote(wait)}.` : ""
+  return ` A pergunta vai num Enviar Mensagem (envio_pergunta) ligado direto à entrada do Aguardando Mensagem, que guarda a resposta.${link}`
+}
+
 export function correctionItems(assembled: AssembledFlow, issues: readonly GenerationIssue[]): string[] {
-  const items = issues.filter((issue) => issue.scope === "ia").map(describeIssue)
+  const items = issues.filter((issue) => issue.scope === "ia").map((issue) => `${describeIssue(issue)}${waitGuidance(assembled, issue)}`)
   for (const note of assembled.notes) if (note.level === "hint") items.push(describeIssue(note))
   return [...new Set(items)]
 }

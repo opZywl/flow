@@ -44,6 +44,28 @@ const PROTOCOL_TYPE = "protocolo"
 const MESSAGE_TYPE = "envio_pergunta"
 const MENU_TITLE_LIMIT = 1024
 const MENU_PLACEHOLDER = "Escolha uma opção."
+const WAIT_TYPE = "waitForAnswer"
+const GENERIC_QUESTION = "Por favor, envie a sua resposta para continuarmos."
+const DATE_HINT = "Use o formato DD/MM/AAAA."
+const GENERIC_FIELD = /^(field\d*|campo\d*|campogenerico\d*|resposta\d*|answer\d*)$/
+const KNOWN_QUESTIONS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^(name|nome|nomecompleto|fullname|seunome)$/, "Por favor, digite o seu nome."],
+  [/^(empresa|company|nomedaempresa|razaosocial)$/, "Por favor, informe o nome da sua empresa."],
+  [/^(email|mail)$/, "Por favor, informe o seu e-mail."],
+  [/^(telefone|phone|celular|whatsapp|fone)$/, "Por favor, informe o seu telefone com DDD."],
+  [/^(cpfcnpj|documento|document)$/, "Por favor, informe o seu CPF ou CNPJ."],
+  [/^cpf$/, "Por favor, informe o seu CPF."],
+  [/^cnpj$/, "Por favor, informe o CNPJ da empresa."],
+  [/^(endereco|address)$/, "Por favor, informe o seu endereço com rua, número e bairro."],
+  [/^(cep|zipcode|zip)$/, "Por favor, informe o seu CEP."],
+  [/^(cidade|city)$/, "Por favor, informe a sua cidade."],
+  [/^(datanascimento|nascimento|birthdate|birthday)$/, "Por favor, informe a sua data de nascimento."],
+  [/^(data|date)$/, "Por favor, informe a data."],
+  [/^(problema|problem|motivo|assunto|subject|reason)$/, "Por favor, descreva em poucas palavras o motivo do contato."],
+  [/^(descricao|description|problemdescription|detalhes|details)$/, "Por favor, conte com detalhes o que aconteceu."],
+  [/^(pedido|order|numeropedido|ordernumber)$/, "Por favor, informe o número do seu pedido."],
+  [/^(protocolo|protocol)$/, "Por favor, informe o número do protocolo."],
+]
 const UNCHECKED_KINDS = new Set(["menuOptions", "conditionPairs", "menuNode"])
 
 const blank = (value: unknown) => typeof value !== "string" || value.trim() === ""
@@ -639,6 +661,54 @@ function detachUnreachable(flow: AtendimentoFlow, riIds: ReadonlyMap<string, str
   }
 }
 
+function fieldName(value: string): string {
+  const parts = value.split(":")
+  return (parts[parts.length - 1] ?? "").trim()
+}
+
+export function waitQuestion(data: JsonObject): string {
+  const field = fieldName(typeof data.customFields === "string" ? data.customFields : "")
+  const key = compactKey(field)
+  const known = KNOWN_QUESTIONS.find(([pattern]) => pattern.test(key))?.[1]
+  const human = field.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim()
+  const question = known ?? (key && !GENERIC_FIELD.test(key) && human ? `Por favor, informe: ${human}.` : GENERIC_QUESTION)
+  return data.mask === "DD/MM/YYYY" ? `${question} ${DATE_HINT}` : question
+}
+
+export function unaskedWaits(flow: AtendimentoFlow, include: (edge: AtendimentoEdge) => boolean = () => true): AtendimentoEdge[] {
+  const types = new Map(flow.nodes.map((node) => [node.id, node.data.type]))
+  return flow.edges.filter((edge) => {
+    const source = types.get(edge.source)
+    return types.get(edge.target) === WAIT_TYPE && source !== undefined && source !== MESSAGE_TYPE && source !== NOTE_TYPE && include(edge)
+  })
+}
+
+export function askBeforeWaits(flow: AtendimentoFlow, edges: readonly AtendimentoEdge[], nextId: () => string, riOf: (id: string) => string | undefined): { notes: AssemblyNote[]; added: string[] } {
+  const notes: AssemblyNote[] = []
+  const added: string[] = []
+  for (const edge of edges) {
+    const wait = flow.nodes.find((node) => node.id === edge.target)
+    if (!wait || !flow.edges.includes(edge)) continue
+    const ask = newNode(MESSAGE_TYPE, { x: 0, y: 0 }, nextId())
+    const question = waitQuestion(wait.data.data)
+    ask.data.data.template = question
+    flow.nodes.push(ask)
+    retarget(flow, edge, ask.id)
+    flow.edges.push(createEdge(flow.edges, ask.id, "output-0", wait.id))
+    added.push(ask.id)
+    const origin = riOf(wait.id)
+    notes.push({
+      level: "warning",
+      scope: "ajuste",
+      message: `Foi incluído um Enviar Mensagem com a pergunta ${quote(question)} logo antes do Aguardando Mensagem. Revise.`,
+      nodeId: ask.id,
+      ...(origin ? { riId: origin } : {}),
+      type: MESSAGE_TYPE,
+    })
+  }
+  return { notes, added }
+}
+
 export function provisionalReferences(node: AtendimentoNode, riId?: string): AssemblyNote[] {
   const provisional = fillReferences(node)
   if (!provisional.filled.length) return []
@@ -671,6 +741,7 @@ export function finalizeFlow(assembled: AssembledFlow): AssembledFlow {
   splitLongMenus(flow, riIds, notes)
   settleReturns(flow)
   detachUnreachable(flow, riIds, notes)
+  notes.push(...askBeforeWaits(flow, unaskedWaits(flow), () => nextNodeId(flow.nodes), (id) => riIds.get(id)).notes)
   const reachable = new Set([START_ID, ...descendants(flow.edges, START_ID)])
   for (const node of [...flow.nodes]) {
     if (!reachable.has(node.id) || node.data.type === NOTE_TYPE) continue

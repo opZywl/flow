@@ -797,6 +797,12 @@ function single(type, data) {
     flow.nodes.push(menu)
     link(flow, START_ID, '20')
     link(flow, '20', '2')
+  } else if (type === 'waitForAnswer') {
+    const ask = newNode('envio_pergunta', { x: 150, y: 0 }, '21')
+    ask.data.data.template = 'Qual é o seu nome?'
+    flow.nodes.push(ask)
+    link(flow, START_ID, '21')
+    link(flow, '21', '2')
   } else link(flow, START_ID, '2')
   outputHandles(node).forEach((handle, index) => link(flow, '2', finish(flow, String(3 + index)), handle))
   return flow
@@ -858,6 +864,11 @@ function everything() {
   for (const type of Object.keys(SPEC).filter(type => type !== START_TYPE && SPEC[type].outputs.length > 0)) {
     const node = add(type)
     if (type === 'envio_mensagem') menu = node
+    if (type === 'waitForAnswer') {
+      const ask = add('envio_pergunta')
+      link(flow, previous.id, ask.id)
+      previous = ask
+    }
     link(flow, previous.id, node.id)
     for (const handle of outputHandles(node).slice(1)) link(flow, node.id, terminal().id, handle)
     previous = node
@@ -1665,6 +1676,7 @@ const COMPONENT_ISSUES = [
   /^Componente sem conexões; ele não será executado\.$/, /^Componente desconectado do início\.$/, /^Conecte a saída “.*”\.$/, /^A saída .* (não existe neste componente|tem mais de um destino)\.$/,
   /^O componente (recebe mais de uma conexão|não pode se conectar a ele mesmo)/, /^Este componente (não pode receber conexões|é gravado pela plataforma com type)/, /^Notas não podem ser conectadas\.$/,
   /^Tipo preservado do arquivo/, /^O ID deste componente deve ser/, /^API não validada: valide na plataforma depois de importar\.$/,
+  /^Coloque um Enviar Mensagem com a pergunta logo antes do Aguardando Mensagem\.$/,
 ]
 const issueFields = (type, patch) => validateFlow(single(type, patched(type, patch))).filter(issue => issue.nodeId === '2').map(issue => [issue.message, issue.fields])
 const placementOf = (flow, nodeId) => {

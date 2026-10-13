@@ -88,7 +88,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     does: "Aguarda a resposta do contato e guarda o texto em um campo.",
     required: ["customFields"],
     outputs: ["segue com a resposta guardada"],
-    rules: ["Faça a pergunta antes, com Enviar Mensagem.", "customFields: name, empresa ou field_1 a field_5; custom:ID:campo só se o pedido informar. Depois use @@@campo nas mensagens."],
+    rules: ["Faça a pergunta antes, com Enviar Mensagem.", "Ele vem sempre logo depois de um Enviar Mensagem com a pergunta, ligado direto na saída desse Enviar Mensagem, e guarda a resposta.", "customFields: name, empresa ou field_1 a field_5; custom:ID:campo só se o pedido informar. Depois use @@@campo nas mensagens."],
   },
   envio_arquivo: {
     does: "Envia um arquivo por URL, como PDF, áudio ou vídeo.",

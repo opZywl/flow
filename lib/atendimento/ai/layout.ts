@@ -11,6 +11,8 @@ export const LAYOUT = {
   cardBase: 166,
   outputRow: 29,
   noteHeight: 150,
+  noteGap: 24,
+  noteStep: 20,
   margin: 60,
   viewWidth: 1200,
   viewHeight: 680,
@@ -74,7 +76,6 @@ export function layoutFlow(flow: AtendimentoFlow): void {
   }
 
   const nextY = new Map<number, number>()
-  let bottom: number = LAYOUT.origin
   for (const id of order) {
     const node = nodes.get(id)
     const box = boxes.get(id)
@@ -85,16 +86,55 @@ export function layoutFlow(flow: AtendimentoFlow): void {
     const y = Math.max(nextY.get(column) ?? LAYOUT.origin, parentY)
     node.position = { x: columnX[column] ?? LAYOUT.origin, y }
     nextY.set(column, y + box.height + LAYOUT.rowGap)
-    bottom = Math.max(bottom, y + box.height)
   }
 
-  let noteY: number = order.length ? bottom + LAYOUT.rowGap : LAYOUT.origin
+  const placed = flow.nodes.filter((node) => node.data.type !== NOTE_TYPE)
+  let anchor: AtendimentoNode | undefined = nodes.get(START_ID)
   for (const node of flow.nodes) {
-    if (node.data.type !== NOTE_TYPE) continue
-    node.position = { x: LAYOUT.origin, y: noteY }
-    noteY += (boxes.get(node.id)?.height ?? LAYOUT.noteHeight) + LAYOUT.rowGap
+    if (node.data.type !== NOTE_TYPE) {
+      anchor = node
+      continue
+    }
+    node.position = notePosition(node, anchor, placed)
+    placed.push(node)
   }
   flow.viewport = viewportFor(flow)
+}
+
+interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+const rectOf = (node: AtendimentoNode): Rect => ({ ...node.position, ...layoutBox(node) })
+
+const hits = (box: Rect, other: Rect) =>
+  box.x < other.x + other.width + LAYOUT.noteGap && other.x < box.x + box.width + LAYOUT.noteGap && box.y < other.y + other.height + LAYOUT.noteGap && other.y < box.y + box.height + LAYOUT.noteGap
+
+export function notePosition(note: AtendimentoNode, anchor: AtendimentoNode | undefined, placed: readonly AtendimentoNode[]): { x: number; y: number } {
+  const { width, height } = layoutBox(note)
+  const others = placed.filter((node) => node !== note && node.id !== note.id).map(rectOf)
+  const free = (x: number, y: number) => !others.some((other) => hits({ x, y, width, height }, other))
+  const base: Rect = anchor ? rectOf(anchor) : { x: LAYOUT.origin, y: LAYOUT.origin, width: 0, height: 0 }
+  const gap = LAYOUT.noteGap
+  const right = Math.round(base.x + base.width + gap)
+  const left = Math.round(base.x - width - gap)
+  const column = Math.round(base.x)
+  const top = Math.round(base.y)
+  const candidates = [
+    { x: right, y: top },
+    { x: column, y: Math.round(base.y - height - gap) },
+    { x: column, y: Math.round(base.y + base.height + gap) },
+    { x: left, y: top },
+  ]
+  for (const candidate of candidates) if (free(candidate.x, candidate.y)) return candidate
+  const floor = others.reduce((max, other) => Math.max(max, other.y + other.height + gap), top)
+  for (let y = top + LAYOUT.noteStep; y <= floor; y += LAYOUT.noteStep) {
+    for (const x of [right, column, left]) if (free(x, y)) return { x, y }
+  }
+  return { x: right, y: Math.round(floor) }
 }
 
 export function viewportFor(flow: AtendimentoFlow): AtendimentoFlow["viewport"] {

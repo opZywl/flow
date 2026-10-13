@@ -183,7 +183,8 @@ const introLines = (fill: boolean): string[] => [
   "O editor mostra cada componente assim que ele chega, e uma resposta interrompida só aproveita o que veio antes. Por isso:",
   "1. Escreva os nodes na ordem do caminho da conversa: primeiro o passo ligado ao inicio, depois o seguinte. Em um componente com várias saídas, escreva o ramo inteiro da primeira saída, até o encerramento ou o Retornar ao Menu, antes de começar o ramo da saída seguinte.",
   "2. Escreva as edges na mesma ordem dos nodes: primeiro a conexão que sai do inicio e depois, para cada componente da lista, a conexão que chega a ele.",
-  "3. Nas correções, mantenha os mesmos ids e a mesma ordem.",
+  "3. Cada Nota vem em nodes logo depois do componente que ela explica, e o editor a mostra ao lado dele. A nota geral do fluxo vem antes de todos os componentes e fica junto do início.",
+  "4. Nas correções, mantenha os mesmos ids e a mesma ordem.",
 ]
 
 export const DELIVERY = "Responda com a RI do fluxo inteiro, dentro do tamanho pedido: todos os ramos, mensagens completas, todas as saídas ligadas, e nodes e edges na ordem do caminho da conversa."

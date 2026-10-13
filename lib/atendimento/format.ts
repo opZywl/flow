@@ -51,6 +51,9 @@ const DATASTORES = ["contact", "datastore"]
 const INVOICE_MODES = ["Enviar Todos", "Enviar Menu", "Catalog"]
 const TICKET_ACTIONS = ["enableComment", "enableReopen", "enableClose", "enableCsat"]
 const INVALID_URL = "Informe uma URL válida, iniciada por http:// ou https://."
+const WAIT_TYPE = "waitForAnswer"
+const QUESTION_TYPE = "envio_pergunta"
+export const WAIT_QUESTION_MESSAGE = "Coloque um Enviar Mensagem com a pergunta logo antes do Aguardando Mensagem."
 const WEEK_DAYS = new Set(weekDayOptions.map((day) => day.value))
 const FIELD_TYPES = new Map(Object.entries(fieldTypes as Record<string, Record<string, string[]>>).map(([type, fields]) => [type, new Map(Object.entries(fields))]))
 const LEGACY_TYPES = new Map([["start", START_TYPE], ["sendMessage", "envio_pergunta"], ["options", MENU_TYPE], ["finalizar", "finalizar"]])
@@ -829,6 +832,7 @@ export function validateFlow(flow: AtendimentoFlow): FlowIssue[] {
     incoming.set(edge.target, (incoming.get(edge.target) ?? 0) + 1)
     if (!source.handles.has(edge.sourceHandle)) add(`A saída ${edge.sourceHandle} não existe neste componente.`, edge.source)
     if (target.data.type === START_TYPE) add("Este componente não pode receber conexões.", edge.target)
+    if (target.data.type === WAIT_TYPE && source.node.data.type !== QUESTION_TYPE) add(WAIT_QUESTION_MESSAGE, edge.target, "warning")
     if (edge.source === edge.target) add("O componente não pode se conectar a ele mesmo.", edge.source)
     const handles = used.get(edge.source) ?? new Set<string>()
     if (handles.has(edge.sourceHandle)) add(`A saída “${labelOf(source.node, edge.sourceHandle, source.keys)}” tem mais de um destino.`, edge.source)

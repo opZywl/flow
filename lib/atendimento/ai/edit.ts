@@ -1,12 +1,12 @@
 import { MENU_TYPE, NOTE_TYPE, START_ID, START_TYPE, defaultMeasured, getDefinition, getNodeType, getTemplate, mirrorKeys } from "../catalog"
 import { conditionIndices, createEdge, isObject, maxNumericId, newNode, optionIndices, outputHandles, outputLabel, validateFlow } from "../format"
 import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode, FieldSpec, JsonObject, JsonValue } from "../types"
-import { provisionalLabels, provisionalMessage, provisionalReferences, requestText } from "./assemble"
+import { askBeforeWaits, provisionalLabels, provisionalMessage, provisionalReferences, requestText, unaskedWaits } from "./assemble"
 import type { AssemblyNote } from "./assemble"
 import { LIMITS, RI_LIMITS } from "./contracts"
 import type { GenerationIssue } from "./contracts"
 import { guideOf } from "./guide"
-import { LAYOUT, layoutBox } from "./layout"
+import { LAYOUT, layoutBox, notePosition } from "./layout"
 import { FILL_CORRECTION, systemPrompt } from "./prompt"
 import type { PromptOptions } from "./prompt"
 import { compareScores, correctionItems, reviewFlow, scoreOf } from "./review"
@@ -423,7 +423,7 @@ function freeY(node: AtendimentoNode, x: number, y: number, placed: readonly Ate
   return top
 }
 
-function place(flow: AtendimentoFlow, pending: readonly string[]): void {
+function place(flow: AtendimentoFlow, pending: readonly string[], anchors: ReadonlyMap<string, string> = new Map()): void {
   if (!pending.length) return
   const wanted = new Set(pending)
   const nodes = new Map(flow.nodes.map((node) => [node.id, node]))
@@ -432,7 +432,7 @@ function place(flow: AtendimentoFlow, pending: readonly string[]): void {
   const order = walkOrder(flow).filter((id) => wanted.has(id))
   for (const id of order) {
     const node = nodes.get(id)
-    if (!node) continue
+    if (!node || node.data.type === NOTE_TYPE) continue
     const parent = flow.edges.filter((edge) => edge.target === id).map((edge) => nodes.get(edge.source)).find((entry): entry is AtendimentoNode => entry !== undefined && done.has(entry.id))
     let x: number
     let y: number
@@ -452,6 +452,29 @@ function place(flow: AtendimentoFlow, pending: readonly string[]): void {
     placed.push(node)
     done.add(id)
   }
+  for (const id of pending) {
+    const node = nodes.get(id)
+    if (!node || node.data.type !== NOTE_TYPE) continue
+    node.position = notePosition(node, nodes.get(anchors.get(id) ?? START_ID), placed)
+    placed.push(node)
+  }
+}
+
+function noteAnchors(flow: AtendimentoFlow, mentioned: readonly string[], added: readonly string[], touched: ReadonlySet<string>): Map<string, string> {
+  const nodes = new Map(flow.nodes.map((node) => [node.id, node]))
+  const component = (id: string) => {
+    const node = nodes.get(id)
+    return node !== undefined && node.data.type !== NOTE_TYPE
+  }
+  const fresh = new Set(added)
+  const nearest = [...touched].reverse().find(component)
+  const anchors = new Map<string, string>()
+  mentioned.forEach((id, index) => {
+    if (!fresh.has(id) || component(id) || !nodes.has(id) || anchors.has(id)) return
+    const anchor = mentioned.slice(0, index).reverse().find(component) ?? mentioned.slice(index + 1).find(component) ?? nearest
+    if (anchor) anchors.set(id, anchor)
+  })
+  return anchors
 }
 
 function restore(flow: AtendimentoFlow, detached: EditDetached): void {
@@ -518,6 +541,7 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
     return String(counter)
   }
   const added: string[] = []
+  const mentioned: string[] = []
   const touched = new Set<string>()
   const handled = new Set<string>()
   const returns: Array<{ id: string; target: string; riId: string; fallback?: JsonValue }> = []
@@ -582,6 +606,7 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
       if (!current) return
       if (handled.has(existing)) notes.push(noteOf("hint", "ia", `O id ${quote(given)} apareceu mais de uma vez em nodes; valeu a última versão.`, { riId: given, nodeId: existing, type }))
       handled.add(existing)
+      mentioned.push(existing)
       const outcome = configureNode(type, raw.config, context)
       record(outcome.notes, given, existing, type)
       const sameType = current.data.type === type
@@ -622,6 +647,7 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
     fresh.set(riId, id)
     ids.set(riId, id)
     added.push(id)
+    mentioned.push(id)
     touched.add(id)
     handled.add(id)
     record(outcome.notes, riId, id, type)
@@ -822,7 +848,7 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
     const node = nodes.get(id)
     if (node?.data.type === RETURN_TYPE) settleReturn(node, flow)
   }
-  place(flow, added.filter((id) => nodes.has(id)))
+  place(flow, added.filter((id) => nodes.has(id)), noteAnchors(flow, mentioned, added, touched))
 
   const name = shorten(ri.name, LIMITS.name)
   if (name && name !== flow.name) flow.name = name
@@ -889,6 +915,17 @@ export function concludeEdit(original: AtendimentoFlow, result: EditResult, opti
   const reachable = reachFrom(flow.edges, [START_ID])
   let counter = maxNumericId([...flow.nodes.map((node) => node.id), ...result.ids.keys(), ...result.detached.nodes.map((entry) => entry.node.id)])
   const taken = new Set([...flow.nodes.map((node) => node.id), ...result.ids.keys()])
+  const allocate = () => {
+    do counter++
+    while (taken.has(String(counter)))
+    const id = String(counter)
+    taken.add(id)
+    return id
+  }
+  const linkedOriginally = new Set(original.edges.map((edge) => edgeKey(edge.source, edge.sourceHandle, edge.target)))
+  const unasked = unaskedWaits(flow, (edge) => touched.has(edge.target) || touched.has(edge.source) || !linkedOriginally.has(edgeKey(edge.source, edge.sourceHandle, edge.target)))
+  const asked = askBeforeWaits(flow, unasked, allocate, (id) => name(id))
+  notes.push(...asked.notes)
   const ends: string[] = []
   for (const node of [...flow.nodes]) {
     if (isStart(node) || node.data.type === NOTE_TYPE || !reachable.has(node.id)) continue
@@ -896,10 +933,7 @@ export function concludeEdit(original: AtendimentoFlow, result: EditResult, opti
     for (const handle of outputHandles(node)) {
       if (connected.has(handle)) continue
       if (!touched.has(node.id) && !(previous.has(node.id) && linkedBefore.has(`${node.id}\u0000${handle}`))) continue
-      do counter++
-      while (taken.has(String(counter)))
-      const id = String(counter)
-      taken.add(id)
+      const id = allocate()
       const end = newNode(FINISH_TYPE, { x: 0, y: 0 }, id)
       flow.nodes.push(end)
       flow.edges.push(createEdge(flow.edges, node.id, handle, id))
@@ -907,7 +941,7 @@ export function concludeEdit(original: AtendimentoFlow, result: EditResult, opti
       notes.push(noteOf("warning", "ajuste", `A saída ${quote(outputLabel(node, handle))} estava sem destino e foi ligada a um novo Encerrar Conversa. Revise.`, { riId: name(node.id), nodeId: node.id, type: node.data.type }))
     }
   }
-  place(flow, ends)
+  place(flow, [...asked.added, ...ends])
   const ids = new Map([...result.ids].filter(([, id]) => flow.nodes.some((node) => node.id === id)))
   return { flow, notes, changes: countChanges(original, flow), ids, detached: result.detached }
 }

@@ -137,6 +137,12 @@ function allTypes() {
   const chained = componentCatalog.map(entry => entry.nativeType).filter(type => type !== START_TYPE && type !== 'note' && !TERMINALS.includes(type))
   for (const type of chained) {
     const id = type === 'envio_mensagem' ? 'menu' : `n_${type.toLowerCase()}`
+    if (type === 'waitForAnswer') {
+      nodes.push(node('n_pergunta_espera', 'envio_pergunta', FULL.envio_pergunta))
+      edges.push(edge(previous, typeLabels(previousType)[0], 'n_pergunta_espera'))
+      previous = 'n_pergunta_espera'
+      previousType = 'envio_pergunta'
+    }
     nodes.push(node(id, type, FULL[type]))
     edges.push(edge(previous, typeLabels(previousType)[0], id))
     for (const label of typeLabels(type).slice(1)) edges.push(edge(id, label, terminal()))
@@ -757,8 +763,10 @@ test('the layout goes left to right without overlaps, is deterministic and fits 
   assert.ok(zoom >= 0.3 && zoom <= 1)
   assert.ok(Number.isFinite(x) && Number.isFinite(y))
   const note = first.flow.nodes.find(entry => entry.data.type === 'note')
-  const lowest = Math.max(...first.flow.nodes.filter(entry => entry !== note).map(entry => entry.position.y + layoutBox(entry).height))
-  assert.ok(note.position.y > lowest)
+  const anchor = first.flow.nodes[first.flow.nodes.indexOf(note) - 1]
+  const gapX = Math.max(anchor.position.x - (note.position.x + layoutBox(note).width), note.position.x - (anchor.position.x + layoutBox(anchor).width))
+  const gapY = Math.max(anchor.position.y - (note.position.y + layoutBox(note).height), note.position.y - (anchor.position.y + layoutBox(anchor).height))
+  assert.ok(Math.max(gapX, gapY) >= 0 && Math.max(gapX, gapY) < 140)
   assert.deepEqual(first.flow.nodes[0].position, { x: 120, y: 120 })
 
   const menu = assemble(flowOf([node('menu', 'envio_mensagem', { title: 'Escolha', options: JSON.stringify(Array.from({ length: 10 }, (_, index) => `Opção ${index + 1}`)) })], []))
