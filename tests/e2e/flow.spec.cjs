@@ -763,3 +763,24 @@ test('clearing empties the canvas with undo, and a new flow keeps the current on
   await expect(page.getByText('Nenhum fluxo salvo ainda.')).toBeVisible()
   expect(await library()).toEqual([])
 })
+
+test('the canvas image downloads the whole flow as a PNG', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await open(page)
+  await upload(page, connectedStart('Fluxo da imagem'))
+  await page.getByRole('button', { name: 'Imagem de fundo' }).click()
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Salvar imagem do canvas' }).click(),
+  ])
+  expect(download.suggestedFilename()).toMatch(/.png$/)
+  const bytes = fs.readFileSync(await download.path())
+  expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  expect(bytes.readUInt32BE(16)).toBeGreaterThan(400)
+  expect(bytes.readUInt32BE(20)).toBeGreaterThan(150)
+  expect(bytes.length).toBeGreaterThan(5000)
+  await expect(page.getByText('Imagem do canvas salva').first()).toBeVisible()
+  await expect(page.getByText('Não foi possível salvar a imagem')).toHaveCount(0)
+  expect(errors).toEqual([])
+})

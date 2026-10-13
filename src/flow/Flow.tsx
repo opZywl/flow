@@ -137,11 +137,6 @@ function storedFlowName(): string {
   }
 }
 
-function solidBackground(element: Element): string | null {
-  const color = getComputedStyle(element).backgroundColor
-  return color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)" ? color : null
-}
-
 function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement("a")
@@ -461,7 +456,7 @@ function BackgroundMenu({ hasImage, capturing, onChange, onSave, onReset }: { ha
       {open && (
         <div id={menuId} role="group" aria-label="Opções da imagem de fundo" className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-flow-border bg-flow-surface py-1 shadow-lg">
           <MenuAction icon={Link2} label="Trocar imagem" description="Aplicar uma imagem a partir de um link" onSelect={() => run(onChange)} />
-          <MenuAction icon={Camera} label="Salvar imagem do canvas" description="Baixar o canvas atual em PNG" disabled={capturing} onSelect={() => run(onSave)} />
+          <MenuAction icon={Camera} label="Salvar imagem do canvas" description="Baixar o fluxo inteiro em PNG" disabled={capturing} onSelect={() => run(onSave)} />
           <div className="my-1 border-t border-flow-border" />
           <MenuAction
             icon={RotateCcw}
@@ -979,22 +974,12 @@ function FlowLayout() {
   }, [])
 
   const saveCanvasImage = useCallback(async () => {
-    const container = containerRef.current
-    if (!container || capturingRef.current) return
+    const actions = actionsRef.current
+    if (!actions || capturingRef.current) return
     capturingRef.current = true
     setCapturing(true)
     try {
-      const { default: html2canvas } = await import("html2canvas")
-      const flowElement = container.querySelector<HTMLElement>(".react-flow")
-      const target = flowElement?.parentElement ?? container
-      const canvas = await html2canvas(target, {
-        backgroundColor: solidBackground(target) ?? solidBackground(container),
-        ignoreElements: (element) => element.classList.contains("react-flow__panel") || (flowElement !== null && element.parentElement === target && element !== flowElement),
-        logging: false,
-        scale: Math.min(window.devicePixelRatio || 1, 2),
-        useCORS: true,
-      })
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
+      const blob = await actions.captureImage()
       if (!blob) throw new Error("blob")
       const fileName = exportFileName({ name: storedFlowName(), created_at: new Date().toISOString() })
         .replace(/\.json$/, ".png")

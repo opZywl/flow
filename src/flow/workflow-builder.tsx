@@ -33,6 +33,7 @@ export interface WorkflowActions {
   reset: () => void
   download: () => boolean
   previewWorkflow: (flow: AtendimentoFlow | null) => void
+  captureImage: () => Promise<Blob | null>
 }
 
 interface WorkflowBuilderProps {
@@ -52,6 +53,17 @@ const STORAGE_KEY = "workflow"
 const EXECUTED_KEY = "executedFlow"
 const BACKUP_KEY = "workflow-backup"
 const HISTORY_LIMIT = 50
+const IMAGE_PADDING = 48
+const IMAGE_MAX_SIDE = 8000
+const TRANSPARENT = new Set(["", "transparent", "rgba(0, 0, 0, 0)"])
+
+function backgroundOf(element: HTMLElement | null): string {
+  for (let current = element; current; current = current.parentElement) {
+    const color = getComputedStyle(current).backgroundColor
+    if (!TRANSPARENT.has(color)) return color
+  }
+  return "#ffffff"
+}
 const DELETE_KEYS = ["Backspace", "Delete"]
 const MULTI_SELECTION_KEYS = ["Shift", "Control", "Meta"]
 const PRO_OPTIONS = { hideAttribution: true }
@@ -882,8 +894,33 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     if (!previewBusy()) fileInput.current?.click()
   }, [previewBusy])
 
+  const captureImage = useCallback(async (): Promise<Blob | null> => {
+    const surface = canvas.current
+    const viewport = surface?.querySelector<HTMLElement>(".react-flow__viewport")
+    const nodes = getNodes()
+    if (!surface || !viewport || !nodes.length) return null
+    const bounds = getNodesBounds(nodes)
+    const fullWidth = bounds.width + IMAGE_PADDING * 2
+    const fullHeight = bounds.height + IMAGE_PADDING * 2
+    const scale = Math.min(1, IMAGE_MAX_SIDE / Math.max(fullWidth, fullHeight))
+    const width = Math.ceil(fullWidth * scale)
+    const height = Math.ceil(fullHeight * scale)
+    const { toBlob } = await import("html-to-image")
+    return toBlob(viewport, {
+      backgroundColor: backgroundOf(surface),
+      width,
+      height,
+      pixelRatio: Math.min(2, IMAGE_MAX_SIDE / Math.max(width, height)),
+      style: {
+        width: `${width}px`,
+        height: `${height}px`,
+        transform: `translate(${(IMAGE_PADDING - bounds.x) * scale}px, ${(IMAGE_PADDING - bounds.y) * scale}px) scale(${scale})`,
+      },
+    })
+  }, [getNodes])
+
   useLayoutEffect(() => {
-    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, previewWorkflow, undo, redo }
+    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, previewWorkflow, captureImage, undo, redo }
   })
 
   const actions = useMemo<WorkflowActions>(() => ({
@@ -899,6 +936,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     reset: () => handlers.current?.reset(),
     download: () => handlers.current?.download() ?? false,
     previewWorkflow: (flow) => handlers.current?.previewWorkflow(flow),
+    captureImage: () => handlers.current?.captureImage() ?? Promise.resolve(null),
   }), [])
 
   useEffect(() => {

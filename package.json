@@ -69,7 +69,7 @@
     "cmdk": "latest",
     "embla-carousel-react": "latest",
     "framer-motion": "latest",
-    "html2canvas": "^1.4.1",
+    "html-to-image": "1.11.11",
     "input-otp": "latest",
     "lucide-react": "^0.454.0",
     "next": "15.2.9",
