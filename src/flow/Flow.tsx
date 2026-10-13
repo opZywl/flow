@@ -22,7 +22,7 @@ const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: fa
 const AICopilot = dynamic(() => import("./ai-copilot"), { ssr: false })
 
 type LivePreviewProps = {
-  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => void
+  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean) => void
   getCurrentFlow: () => AtendimentoFlow | null
   onWorkflowEdited: (workflow: AtendimentoFlow) => boolean
 }
@@ -1008,8 +1008,8 @@ function FlowLayout() {
     return false
   }, [])
 
-  const handleLivePreview = useCallback((flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => {
-    actionsRef.current?.previewWorkflow(flow, done, kind)
+  const handleLivePreview = useCallback((flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean) => {
+    actionsRef.current?.previewWorkflow(flow, done, kind, fresh)
   }, [])
 
   const getCurrentFlow = useCallback(() => actionsRef.current?.getFlow() ?? null, [])

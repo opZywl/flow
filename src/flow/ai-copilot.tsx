@@ -82,7 +82,7 @@ export interface AICopilotProps {
   open: boolean
   onClose: () => void
   getCurrentFlow: () => AtendimentoFlow | null
-  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => void
+  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean) => void
   onWorkflowEdited: (workflow: AtendimentoFlow) => boolean
   onOpenGenerate: () => void
   dialogBusy?: boolean
@@ -334,7 +334,7 @@ export default function AICopilot({
   const options: CopilotOptions = {
     settings: { provider, model, apiKey, effort, fill },
     getFlow: () => safeFlow(propsRef.current.getCurrentFlow),
-    preview: (flow, done) => propsRef.current.onLivePreview(flow, done, "edit"),
+    preview: (flow, done, fresh) => propsRef.current.onLivePreview(flow, done, "edit", fresh),
     applyEdit: (flow) => propsRef.current.onWorkflowEdited(flow),
     generate: generateFlow,
     engine: loadEngine,

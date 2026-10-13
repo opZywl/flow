@@ -56,7 +56,7 @@ export type CopilotAttention = "ready" | "failed"
 export interface CopilotOptions {
   settings: CopilotSettings
   getFlow: () => AtendimentoFlow | null | undefined
-  preview: (flow: AtendimentoFlow | null, done: boolean) => void
+  preview: (flow: AtendimentoFlow | null, done: boolean, fresh?: boolean) => void
   applyEdit: (flow: AtendimentoFlow) => boolean
   generate: CopilotGenerate
   engine?: () => Promise<Engine | null>
@@ -250,9 +250,9 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     }
   }
 
-  const show = (flow: AtendimentoFlow, done: boolean) => {
+  const show = (flow: AtendimentoFlow, done: boolean, fresh = true) => {
     try {
-      read().preview(flow, done)
+      read().preview(flow, done, fresh)
       shown = true
     } catch {
       return
@@ -464,7 +464,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
           (flow) => {
             if (!alive(current)) return
             current.live = flow
-            if (active()) show(flow, false)
+            if (active()) show(flow, false, false)
           },
           read().interval ?? PREVIEW_INTERVAL_MS,
         )

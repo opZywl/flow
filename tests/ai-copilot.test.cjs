@@ -128,6 +128,7 @@ function harness({ flow = BASE, outcomes = [], visible = true } = {}) {
     flow,
     accept: true,
     previews: [],
+    fresh: [],
     applied: [],
     notified: [],
     requests: [],
@@ -138,7 +139,10 @@ function harness({ flow = BASE, outcomes = [], visible = true } = {}) {
       return env.settings
     },
     getFlow: () => env.flow,
-    preview: (shown, done) => env.previews.push(shown ? { flow: shown, done } : null),
+    preview: (shown, done, fresh) => {
+      env.previews.push(shown ? { flow: shown, done } : null)
+      env.fresh.push(fresh)
+    },
     applyEdit: (applied) => {
       env.applied.push(applied)
       if (env.accept) env.flow = applied
@@ -249,6 +253,30 @@ test('the live preview builds each partial answer on top of the base', async () 
   release.open()
   await settled(store)
   assert.deepEqual(lastPreview(env), { flow: FIRST, done: true })
+})
+
+test('the first frame of a request opens the canvas preview even right after an import, and the stream frames follow it', async () => {
+  const release = gate()
+  const { store, env } = harness({
+    outcomes: [
+      async ({ onPartial }) => {
+        onPartial(DELTA)
+        await release.opened
+        return received(FIRST)
+      },
+    ],
+  })
+  store.send('Acrescente a opção Segunda via de boleto')
+  assert.deepEqual(env.previews[0], { flow: BASE, done: false })
+  assert.equal(env.fresh[0], true)
+  await tick()
+  assert.equal(env.previews.length, 2)
+  assert.equal(env.previews[1].done, false)
+  assert.equal(env.fresh[1], false)
+  release.open()
+  await settled(store)
+  assert.deepEqual(lastPreview(env), { flow: FIRST, done: true })
+  assert.equal(env.fresh.at(-1), true)
 })
 
 test('the next request refines the pending proposal and the changes count from the open flow', async () => {

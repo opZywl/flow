@@ -32,7 +32,7 @@ export interface WorkflowActions {
   removeNode: (id: string) => void
   reset: () => void
   download: () => boolean
-  previewWorkflow: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind) => void
+  previewWorkflow: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean) => void
   captureImage: () => Promise<Blob | null>
   getFlow: () => AtendimentoFlow
   applyWorkflowEdit: (flow: AtendimentoFlow) => boolean
@@ -524,7 +524,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     return view
   }, [cancelFit, releaseView, setViewport])
 
-  const previewWorkflow = useCallback((next: AtendimentoFlow | null, done = false, kind: PreviewKind = "create") => {
+  const previewWorkflow = useCallback((next: AtendimentoFlow | null, done = false, kind: PreviewKind = "create", fresh = false) => {
     if (!isPreviewFlow(next)) {
       endPreview()
       return
@@ -533,7 +533,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setPreviewKind(kind)
     const current = previewRef.current
     if (!current) {
-      if (performance.now() < previewCooldown.current) return
+      if (!fresh && performance.now() < previewCooldown.current) return
       previewView.current = settledView()
       previewFollow.current = true
       previewFitted.current = false
@@ -974,7 +974,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     removeNode: (id) => handlers.current?.removeNode(id),
     reset: () => handlers.current?.reset(),
     download: () => handlers.current?.download() ?? false,
-    previewWorkflow: (flow, done, kind) => handlers.current?.previewWorkflow(flow, done, kind),
+    previewWorkflow: (flow, done, kind, fresh) => handlers.current?.previewWorkflow(flow, done, kind, fresh),
     captureImage: () => handlers.current?.captureImage() ?? Promise.resolve(null),
     getFlow: () => handlers.current?.getFlow() ?? newFlow(),
     applyWorkflowEdit: (flow) => handlers.current?.applyWorkflowEdit(flow) ?? false,
