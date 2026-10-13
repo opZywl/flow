@@ -391,7 +391,7 @@ test('Claude com corpo vazio ou cortado sem message_stop responde em vez de trav
   assert.equal(last.result.code, 'invalid_output')
 })
 
-function dropped(provider) {
+function dropped(provider, text = JSON.stringify(RI).slice(0, 120)) {
   const head = {
     openai: reply.openai,
     anthropic: reply.anthropic,
@@ -400,8 +400,8 @@ function dropped(provider) {
   }[provider]
   const encoder = new TextEncoder()
   return (async () => {
-    const full = await head(JSON.stringify(RI)).text()
-    const part = full.slice(0, Math.floor(full.length / 3))
+    const full = await head(text).text()
+    const part = full.slice(0, Math.floor(full.length * (text.length < 200 ? 0.6 : 0.8)))
     const socket = Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' })
     const body = new ReadableStream({
       start(controller) {
@@ -414,12 +414,28 @@ function dropped(provider) {
 }
 
 for (const provider of ['openai', 'anthropic', 'google', 'xai']) {
-  test(`queda da conexão no meio do streaming da ${provider} vira network`, async () => {
+  test(`queda da conexão no meio do streaming da ${provider} sem componentes completos vira network`, async () => {
     responder = () => dropped(provider)
     const { response, data, text } = await run(payload(provider))
     assert.equal(response.status, 502)
     assert.deepEqual(data, { success: false, code: 'network', error: 'Não foi possível conectar ao provedor.', details: 'Verifique a conexão com a internet e tente novamente.' })
     assert.equal(text.includes('Failed to process'), false)
+    assertNoKey(text, KEYS[provider])
+  })
+}
+
+for (const provider of ['openai', 'anthropic', 'google', 'xai']) {
+  test(`queda da conexão da ${provider} depois de componentes completos retoma a geração e devolve o fluxo parcial`, async () => {
+    responder = () => dropped(provider, JSON.stringify(RI))
+    const { response, data, text } = await run(payload(provider))
+    assert.equal(response.status, 200)
+    assert.equal(data.success, true)
+    assert.equal(data.partial, true)
+    assert.equal(data.rounds, 3)
+    assert.equal(calls.length, 3)
+    assert.ok(data.issues.some((issue) => issue.scope === 'ia' && issue.message === 'A geração foi interrompida antes do fim e o fluxo pode estar incompleto.'))
+    assert.ok(data.workflow.nodes.some((node) => node.data.type === 'envio_pergunta'))
+    assert.match(userText(calls[1]), /interrompida/)
     assertNoKey(text, KEYS[provider])
   })
 }
@@ -943,7 +959,7 @@ test('busca de modelos trata rede, resposta inválida e entrada inválida', asyn
 
 test('as predefinições de cada provedor passam na validação de modelo da rota', async () => {
   for (const provider of PROVIDERS) {
-    assert.equal(provider.presets.length, 2)
+    assert.ok(provider.presets.length >= 2)
     for (const preset of provider.presets) {
       calls.length = 0
       responder = () => reply[provider.id](JSON.stringify(RI))

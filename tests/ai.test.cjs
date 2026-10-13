@@ -20,7 +20,7 @@ const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.t
 const { configureNode, acceptedKeys, fixedKeys, balanceWeights, daysOf, timeOf } = require('../lib/atendimento/ai/values.ts')
 const { layoutBox } = require('../lib/atendimento/ai/layout.ts')
 const { reviewFlow, correctionItems, scoreOf, compareScores, evaluateRi, pickBetter, needsCorrection, concludeGeneration, platformScope } = require('../lib/atendimento/ai/review.ts')
-const { systemPrompt, componentBlock, requestPrompt, sizeInstruction, correctionPrompt, formatCorrectionPrompt, formatFailurePrompt, describeFormatProblem, PROMPT_EXAMPLES } = require('../lib/atendimento/ai/prompt.ts')
+const { systemPrompt, componentBlock, requestPrompt, sizeInstruction, correctionPrompt, formatCorrectionPrompt, formatFailurePrompt, describeFormatProblem, PROMPT_EXAMPLES, DELIVERY, CORRECTION_RULES } = require('../lib/atendimento/ai/prompt.ts')
 const { COMPONENT_GUIDE } = require('../lib/atendimento/ai/guide.ts')
 const { PROVIDERS, PROVIDER_IDS, isProviderId, getProvider, defaultModel, findPreset } = require('../lib/atendimento/ai/providers.ts')
 const { SIZE_RANGES, COUNT_LIMITS, AUTO_COMPONENT_LIMIT, RI_LIMITS, MAX_ROUNDS, GENERATION_SIZES } = require('../lib/atendimento/ai/contracts.ts')
@@ -842,7 +842,14 @@ test('correction messages cite the RI id, the component and the pending item, an
     '- [boas_vindas] Enviar Mensagem: Preencha a mensagem.',
     '- [menu] Menu de Opções: Conecte a saída “Suporte”.',
     '- [boas_vindas] Enviar Mensagem: A chave “texto” não existe e foi descartada. Chaves aceitas: template.',
+    '',
+    '# Como corrigir',
+    '- Mude só o necessário para resolver cada pendência. Tudo o que já está certo continua igual: mesmos ids, tipos, textos, opções, chaves e conexões.',
+    '- Não remova, não resuma e não junte componentes, a menos que a pendência peça.',
+    '- Saída sem destino vai para um componente novo que faça sentido para aquele resultado, como mensagem e Encerrar Conversa, Retornar ao Menu ou transferência. Nunca ligue a um componente que já recebe conexão.',
+    '- Mantenha a ordem do caminho da conversa em nodes e edges, com os componentes novos no ponto do caminho em que entram.',
   ].join('\n'))
+  assert.deepEqual(CORRECTION_RULES.map(rule => `- ${rule}`), correctionPrompt([]).split('# Como corrigir\n')[1].split('\n'))
 
   const fixed = JSON.parse(JSON.stringify(broken))
   fixed.nodes[0].config = [{ key: 'template', value: 'Olá, #NAME.' }]
@@ -1276,9 +1283,24 @@ test('the system prompt is generated from the catalog: every type, every accepte
     '@@@variavel',
     '#NAME',
     'use Enviar Mensagem e depois Encerrar Conversa',
+    'Escreva todos, sem resumir',
+    'Mensagens completas e naturais',
+    'Toda saída de todo componente vai a um destino',
+    'Todo submenu tem uma opção para voltar, ligada a Retornar ao Menu',
+    'O menu principal tem uma opção de encerramento',
+    'Dados coletados são reaproveitados',
+    'Sem a informação, omita a chave',
+    'Escreva os nodes na ordem do caminho da conversa',
+    'Escreva as edges na mesma ordem dos nodes',
+    'Nas correções, mantenha os mesmos ids e a mesma ordem.',
   ]) assert.ok(prompt.includes(rule), rule)
+  assert.ok(PROMPT_EXAMPLES.length >= 3)
+  assert.ok(PROMPT_EXAMPLES.some(example => example.ri.nodes.some(entry => entry.type === 'voltar' && entry.config.some(item => item.key === 'targetNodeId' && item.value !== example.ri.nodes.find(first => first.type === 'envio_mensagem').id))))
   for (const example of PROMPT_EXAMPLES) {
     assert.ok(prompt.includes(JSON.stringify(example.ri)))
+    const position = new Map(example.ri.nodes.map((entry, index) => [entry.id, index]))
+    assert.equal(example.ri.edges[0].from, 'inicio', example.title)
+    assert.deepEqual(example.ri.edges.map(entry => position.get(entry.to)), example.ri.nodes.map((_, index) => index), example.title)
     const evaluation = evaluateRi(example.ri, { now: NOW })
     assert.deepEqual(evaluation.pending, [], example.title)
     assert.ok(evaluation.issues.every(issue => issue.scope === 'plataforma'), example.title)
@@ -1287,7 +1309,7 @@ test('the system prompt is generated from the catalog: every type, every accepte
 })
 
 test('request prompts describe the size, the name and the image', () => {
-  assert.equal(sizeInstruction('auto'), `Use a quantidade de componentes que o pedido exigir, até ${AUTO_COMPONENT_LIMIT}, sem contar o início.`)
+  assert.equal(sizeInstruction('auto'), `Escreva todos os componentes que o pedido descreve, sem resumir. A quantidade vem do pedido, até ${AUTO_COMPONENT_LIMIT}, sem contar o início.`)
   for (const size of ['small', 'medium', 'large']) assert.equal(sizeInstruction(size), `Gere entre ${SIZE_RANGES[size][0]} e ${SIZE_RANGES[size][1]} componentes, sem contar o início.`)
   assert.equal(sizeInstruction('custom', 12), 'Gere exatamente 12 componentes, sem contar o início.')
   assert.equal(sizeInstruction('custom', 1), `Gere exatamente ${COUNT_LIMITS.min} componentes, sem contar o início.`)
@@ -1298,10 +1320,13 @@ test('request prompts describe the size, the name and the image', () => {
     '# Pedido\nClínica odontológica',
     '# Tamanho\nGere entre 3 e 6 componentes, sem contar o início.',
     '# Nome do fluxo\nClínica',
+    `# Entrega\n${DELIVERY}`,
   ].join('\n\n'))
+  assert.ok(DELIVERY.includes('todas as saídas ligadas') && DELIVERY.includes('na ordem do caminho da conversa'), DELIVERY)
   const withImage = requestPrompt({ prompt: '', size: 'auto', image: { mediaType: 'image/png', bytes: 2048 } })
   assert.ok(withImage.startsWith('# Pedido\nMonte o fluxo mostrado na imagem anexada.'))
-  assert.ok(withImage.endsWith('# Imagem\nA imagem anexada mostra o fluxo de referência. Reproduza as etapas, as mensagens, as opções e as conexões.'))
+  assert.ok(withImage.includes('\n\n# Imagem\nA imagem anexada mostra o fluxo de referência. Reproduza todas as etapas, mensagens, opções e conexões, com os textos da imagem.\n\n# Entrega\n'), withImage)
+  assert.ok(withImage.endsWith(`# Entrega\n${DELIVERY}`), withImage)
   assert.ok(!requestPrompt({ prompt: 'x', size: 'auto', image: null }).includes('# Imagem'))
 })
 
@@ -1318,13 +1343,13 @@ test('names and descriptions come from the request, the RI or the prompt', () =>
   assert.equal(assemble(ri, { prompt: 'Pedido do usuário' }).flow.description, 'Pedido do usuário')
 })
 
-test('providers list ChatGPT, Claude, Gemini and Grok with two current models each', () => {
+test('providers list ChatGPT, Claude, Gemini and Grok with their current models', () => {
   assert.deepEqual(PROVIDERS.map(provider => provider.id), [...PROVIDER_IDS])
   assert.deepEqual(PROVIDERS.map(provider => provider.name), ['ChatGPT', 'Claude', 'Gemini', 'Grok'])
   const ids = PROVIDERS.flatMap(provider => provider.presets.map(preset => preset.id))
-  assert.equal(new Set(ids).size, 8)
+  assert.equal(new Set(ids).size, ids.length)
   for (const provider of PROVIDERS) {
-    assert.equal(provider.presets.length, 2, provider.id)
+    assert.equal(provider.presets.length, provider.id === 'openai' ? 3 : 2, provider.id)
     assert.equal(getProvider(provider.id), provider)
     assert.equal(defaultModel(provider.id), provider.presets[0])
     assert.ok(provider.of && provider.vendor && provider.keyPlaceholder, provider.id)
@@ -1335,7 +1360,7 @@ test('providers list ChatGPT, Claude, Gemini and Grok with two current models ea
     }
     assert.ok(RI_PROVIDER_OPTIONS[provider.id], provider.id)
   }
-  assert.deepEqual(ids, ['gpt-6.1-sol', 'gpt-6-astra', 'claude-opus-5-5', 'claude-sonnet-5-5', 'gemini-3.8-flash', 'gemini-3.1-pro-preview', 'grok-4.7', 'grok-4.3'])
+  assert.deepEqual(ids, ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'claude-opus-5-5', 'claude-sonnet-5-5', 'gemini-3.8-flash', 'gemini-3.1-pro-preview', 'grok-4.7', 'grok-4.3'])
   assert.equal(isProviderId('anthropic'), true)
   assert.equal(isProviderId('deepseek'), false)
   assert.equal(isProviderId('toString'), false)

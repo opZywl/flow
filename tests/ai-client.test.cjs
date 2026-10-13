@@ -33,6 +33,8 @@ const { START_ID } = require('../lib/atendimento/catalog.ts')
 const { PROMPT_EXAMPLES } = require('../lib/atendimento/ai/prompt.ts')
 const { evaluateRi, concludeGeneration } = require('../lib/atendimento/ai/review.ts')
 const { stampExport } = require('../lib/atendimento/format.ts')
+const { PROVIDERS } = require('../lib/atendimento/ai/providers.ts')
+const { previewFlow } = require('../lib/atendimento/ai/preview.ts')
 
 globalThis.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -54,7 +56,7 @@ afterEach(() => {
   calls.length = 0
 })
 
-const CLIENT_NAMES = ['readEvents', 'readOutcome', 'readProgress', 'requestGeneration', 'requestModels', 'readModels', 'keyWarning', 'progressText', 'stageText']
+const CLIENT_NAMES = ['readEvents', 'readOutcome', 'readProgress', 'requestGeneration', 'requestModels', 'readModels', 'keyWarning', 'progressText', 'stageText', 'generateFlow', 'loadEngine', 'previewFeed', 'modelChoices', 'pickEffort', 'effortChoices']
 
 function loadClient() {
   const moved = path.join(ROOT, 'src/flow/ai/generation-client.ts')
@@ -80,7 +82,7 @@ function loadClient() {
 const client = loadClient()
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
 const BASE = { provider: 'openai', model: 'gpt-6.1-sol', apiKey: KEY, prompt: 'Atendimento da Clínica Exemplo', size: 'auto', image: null }
-const DIALOG_FIELDS = ['provider', 'apiKey', 'model', 'description', 'image', 'size', 'count', 'name']
+const DIALOG_FIELDS = ['provider', 'apiKey', 'model', 'effort', 'description', 'image', 'size', 'count', 'name']
 const FAILURE_CODES = ['invalid_request', 'unsupported_media', 'payload_too_large', 'invalid_key', 'forbidden', 'billing', 'model_not_found', 'rate_limit', 'provider_error', 'provider_unavailable', 'network', 'timeout', 'invalid_output', 'output_too_long', 'content_filter', 'aborted', 'unknown']
 const PT_TEXT = /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ][^!—–]*\.$/
 
@@ -208,7 +210,7 @@ test('falhas da rota chegam com código e campo do diálogo, em NDJSON e em JSON
   let out = await client.requestGeneration(BASE, signal(), () => {})
   assert.equal(out.rejection.code, 'invalid_key')
   assert.equal(out.rejection.failure.details, 'Confira a chave.')
-  const fields = { provider: 'provider', model: 'model', apiKey: 'apiKey', prompt: 'description', image: 'image', size: 'size', count: 'count', name: 'name' }
+  const fields = { provider: 'provider', model: 'model', apiKey: 'apiKey', prompt: 'description', image: 'image', size: 'size', count: 'count', name: 'name', effort: 'effort' }
   for (const [sent, shown] of Object.entries(fields)) {
     serve(JSON.stringify({ success: false, code: 'invalid_request', error: 'Campo inválido.', field: sent }), { status: 400, headers: { 'content-type': 'application/json' } })
     out = await client.requestGeneration(BASE, signal(), () => {})
@@ -504,4 +506,198 @@ test('nomes de tipo por rótulo e caixa trocada são aceitos sem nova rodada', a
   const out = await client.requestGeneration(BASE, signal(), () => {})
   assertImportable(out, 'rótulos')
   assert.ok(used() >= 1)
+})
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function watchProvider() {
+  const seen = []
+  const inner = provider
+  provider = (url, init) => {
+    seen.push({ url, body: JSON.parse(init.body), headers: Object.fromEntries(new Headers(init.headers).entries()) })
+    return inner(url, init)
+  }
+  return seen
+}
+
+test('a geração roda direto no navegador com o provedor simulado, sem passar pela rota', async () => {
+  model(TICKETS)
+  const seen = watchProvider()
+  const stages = []
+  const partials = []
+  const out = await client.generateFlow({ ...BASE, effort: 'high' }, signal(), (progress) => stages.push(progress.stage), (ri) => partials.push(ri))
+  assertImportable(out, 'geração direta')
+  assert.equal(calls.length, 0)
+  assert.ok(seen.length >= 1 && seen.length <= 3)
+  for (const call of seen) assert.equal(call.url, 'https://api.openai.com/v1/responses')
+  for (const call of seen) assert.equal(call.body.reasoning?.effort, 'high')
+  assert.equal(seen[0].headers.authorization, `Bearer ${KEY}`)
+  assert.equal(seen[0].body.model, BASE.model)
+  for (const stage of ['preparando', 'gerando', 'montando', 'validando']) assert.ok(stages.includes(stage), stage)
+  assert.ok(partials.length >= 1)
+  assert.equal(out.received.model, BASE.model)
+  assert.equal(out.received.partial, false)
+  assert.equal(JSON.stringify(out).includes(KEY), false)
+})
+
+test('o esforço escolhido vai no corpo da requisição direta e da rota, e o padrão é equilibrado', async () => {
+  for (const [effort, expected] of [['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['max', 'max'], [undefined, 'medium']]) {
+    model(TICKETS)
+    const seen = watchProvider()
+    const request = effort ? { ...BASE, effort } : BASE
+    const out = await client.generateFlow(request, signal(), () => {})
+    assert.equal(out.ok, true, String(effort))
+    assert.equal(seen[0].body.reasoning?.effort, expected, String(effort))
+    provider = null
+  }
+  model(TICKETS)
+  const out = await client.requestGeneration({ ...BASE, effort: 'max' }, signal(), () => {})
+  assert.equal(out.ok, true)
+  assert.equal(calls[0].body.effort, 'max')
+})
+
+test('a rota vira reserva quando o fetch direto falha antes de qualquer resposta', async () => {
+  let direct = 0
+  let served = 0
+  provider = () => {
+    if (direct === 0) {
+      direct++
+      throw new TypeError('Failed to fetch')
+    }
+    served++
+    return openaiReply(JSON.stringify(TICKETS))
+  }
+  const stages = []
+  const out = await client.generateFlow({ ...BASE, effort: 'high' }, signal(), (progress) => stages.push(progress.stage))
+  assertImportable(out, 'reserva pela rota')
+  assert.equal(direct, 1)
+  assert.ok(served >= 1 && served <= 3)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/api/generate-workflow')
+  assert.deepEqual(calls[0].body, { ...BASE, effort: 'high', stream: true })
+  assert.ok(stages.includes('gerando'))
+})
+
+test('sem o motor no navegador a geração usa a rota, e uma recusa do provedor não aciona a reserva', async () => {
+  model(TICKETS)
+  let out = await client.generateFlow(BASE, signal(), () => {}, undefined, null)
+  assert.equal(out.ok, true)
+  assert.equal(calls.length, 1)
+  calls.length = 0
+  provider = () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401, headers: { 'content-type': 'application/json' } })
+  out = await client.generateFlow(BASE, signal(), () => {})
+  assert.equal(out.ok, false)
+  assert.equal(out.rejection.code, 'invalid_key')
+  assert.equal(calls.length, 0)
+  assert.equal(JSON.stringify(out).includes(KEY), false)
+  provider = () => {
+    throw new TypeError('Failed to fetch')
+  }
+  out = await client.generateFlow(BASE, signal(), () => {})
+  assert.equal(out.ok, false)
+  assert.equal(out.rejection.code, 'network')
+  assert.equal(calls.length, 1)
+  assert.match(out.rejection.failure.title, PT_TEXT)
+})
+
+test('o cancelamento da geração direta não chama a rota', async () => {
+  const controller = new AbortController()
+  provider = (url, init) => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    setTimeout(() => controller.abort(), 5)
+  })
+  const out = await client.generateFlow(BASE, controller.signal, () => {})
+  assert.equal(out.ok, false)
+  assert.equal(out.rejection.code, 'aborted')
+  assert.equal(calls.length, 0)
+})
+
+test('a prévia acompanha o streaming: RI parcial vira fluxo no canvas, no máximo a cada intervalo', async () => {
+  model(ALL_TYPES)
+  const partials = []
+  const out = await client.generateFlow(BASE, signal(), () => {}, (ri) => partials.push(ri))
+  assert.equal(out.ok, true)
+  assert.ok(partials.length >= 3, String(partials.length))
+  const flows = partials.map((ri) => previewFlow(ri)).filter(Boolean)
+  assert.ok(flows.length >= 2)
+  const sizes = flows.map((flow) => flow.nodes.length)
+  assert.ok(sizes[sizes.length - 1] > sizes[0], sizes.join(','))
+  assert.ok(sizes[sizes.length - 1] >= ALL_TYPES.nodes.length)
+
+  const sent = []
+  const feed = client.previewFeed(previewFlow, (flow) => sent.push(flow), 40)
+  for (const ri of partials) feed.push(ri)
+  await sleep(15)
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].nodes.length, sizes[sizes.length - 1])
+  feed.push(partials[0])
+  feed.push(partials[partials.length - 2])
+  await sleep(10)
+  assert.equal(sent.length, 1)
+  await sleep(60)
+  assert.equal(sent.length, 2)
+  feed.push(partials[partials.length - 1])
+  feed.stop()
+  await sleep(60)
+  assert.equal(sent.length, 2)
+})
+
+test('a prévia ignora RI sem componentes e falhas da montagem', async () => {
+  const sent = []
+  let feed = client.previewFeed(previewFlow, (flow) => sent.push(flow), 0)
+  feed.push({ name: 'x', nodes: [], edges: [] })
+  feed.push(null)
+  await sleep(5)
+  feed.push({ nodes: [{ id: 'a', type: 'tipo_incompl' }] })
+  await sleep(5)
+  assert.equal(sent.length, 0)
+  feed = client.previewFeed(() => {
+    throw new Error('falhou')
+  }, (flow) => sent.push(flow), 0)
+  feed.push(TICKETS)
+  await sleep(5)
+  assert.equal(sent.length, 0)
+})
+
+test('o resultado parcial chega marcado para o diálogo avisar e permitir importar', () => {
+  const out = client.readOutcome({ ...SUCCESS, partial: true }, 200)
+  assert.equal(out.ok, true)
+  assert.equal(out.received.partial, true)
+  assert.equal(client.readOutcome(SUCCESS, 200).received.partial, false)
+  assert.equal(client.stageText({ stage: 'corrigindo', round: 2, maxRounds: 3, resumed: true }), 'Retomando a geração interrompida, rodada 2 de 3.')
+  assert.equal(client.readProgress({ stage: 'corrigindo', round: 2, maxRounds: 3, resumed: true }).resumed, true)
+  assert.equal(client.readProgress({ stage: 'corrigindo', round: 2, maxRounds: 3 }).resumed, undefined)
+})
+
+test('o GPT-6 Luna aparece nas opções de modelo da OpenAI', () => {
+  const openai = PROVIDERS.find((entry) => entry.id === 'openai')
+  const options = client.modelChoices(openai, 'gpt-6.1-sol')
+  const luna = options.find((option) => option.value === 'gpt-6-luna')
+  assert.deepEqual(luna, { value: 'gpt-6-luna', label: 'GPT-6 Luna (o mais rápido)', group: 'Recomendados' })
+  assert.deepEqual(options.map((option) => option.value), ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna'])
+  const listed = client.modelChoices(openai, 'gpt-6-luna', [{ id: 'gpt-6-luna', name: 'GPT-6 Luna' }, { id: 'o3-mini', name: 'o3-mini' }])
+  assert.equal(listed.find((option) => option.value === 'gpt-6-luna').label, 'GPT-6 Luna (o mais rápido)')
+  assert.equal(listed.find((option) => option.value === 'gpt-6.1-sol').label, 'GPT-6.1 Sol (não encontrado na conta)')
+  assert.deepEqual(client.modelChoices(openai, 'modelo-x').slice(0, 1), [{ value: 'modelo-x', label: 'modelo-x' }])
+})
+
+test('o seletor de esforço usa as opções do modelo e se ajusta ao trocar de modelo', () => {
+  assert.deepEqual(client.effortChoices('openai', 'gpt-6-luna'), [
+    { value: 'low', label: 'Rápido' },
+    { value: 'medium', label: 'Equilibrado' },
+    { value: 'high', label: 'Alto' },
+    { value: 'max', label: 'Máximo' },
+  ])
+  assert.deepEqual(client.effortChoices('google', 'gemini-3.8-flash').map((option) => option.value), ['low', 'medium', 'high'])
+  for (const provider of PROVIDERS) {
+    for (const preset of provider.presets) {
+      const values = client.effortChoices(provider.id, preset.id).map((option) => option.value)
+      assert.equal(client.pickEffort(null, provider.id, preset.id), 'medium', preset.id)
+      for (const choice of ['low', 'medium', 'high', 'max']) assert.ok(values.includes(client.pickEffort(choice, provider.id, preset.id)), `${preset.id} ${choice}`)
+    }
+  }
+  assert.equal(client.pickEffort('max', 'google', 'gemini-3.8-flash'), 'high')
+  assert.equal(client.pickEffort('max', 'openai', 'gpt-6-luna'), 'max')
+  assert.equal(client.pickEffort('low', 'google', 'gemini-3.1-pro-preview'), 'low')
+  assert.equal(client.pickEffort('max', 'anthropic', 'modelo-da-conta'), 'max')
 })

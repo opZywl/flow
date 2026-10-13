@@ -37,6 +37,12 @@ export const RI_LIMITS = {
 
 export const MAX_ROUNDS = 3
 
+export type Effort = "low" | "medium" | "high" | "max"
+
+export const EFFORTS: readonly Effort[] = ["low", "medium", "high", "max"]
+
+export const DEFAULT_EFFORT: Effort = "medium"
+
 export interface GenerateRequest {
   provider: ProviderId
   model: string
@@ -46,6 +52,7 @@ export interface GenerateRequest {
   size: GenerationSize
   count?: number
   name?: string
+  effort?: Effort
   stream?: boolean
 }
 
@@ -74,6 +81,7 @@ export interface GenerateSuccess {
   usage?: GenerationUsage
   transcript: string
   model: { provider: ProviderId; id: string }
+  partial?: boolean
 }
 
 export type FailureCode =
@@ -95,7 +103,7 @@ export type FailureCode =
   | "aborted"
   | "unknown"
 
-export type RequestField = "provider" | "model" | "apiKey" | "prompt" | "image" | "size" | "count" | "name"
+export type RequestField = "provider" | "model" | "apiKey" | "prompt" | "image" | "size" | "count" | "name" | "effort"
 
 export interface GenerateFailure {
   success: false
@@ -116,6 +124,7 @@ export interface GenerationProgress {
   nodes?: number
   edges?: number
   pending?: number
+  resumed?: boolean
 }
 
 export type GenerateEvent =

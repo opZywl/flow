@@ -1,9 +1,9 @@
 "use client"
 
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
-import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, useReactFlow, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type Viewport, type XYPosition } from "reactflow"
+import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, getNodesBounds, getViewportForBounds, useReactFlow, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type Viewport, type XYPosition } from "reactflow"
 import "reactflow/dist/style.css"
-import { Check, Download, Eraser, FilePlus2, Info, MapIcon, Maximize, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
+import { Check, Download, Eraser, FilePlus2, Info, Loader2, MapIcon, Maximize, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -32,6 +32,7 @@ export interface WorkflowActions {
   removeNode: (id: string) => void
   reset: () => void
   download: () => boolean
+  previewWorkflow: (flow: AtendimentoFlow | null) => void
 }
 
 interface WorkflowBuilderProps {
@@ -70,6 +71,15 @@ const SEARCH_COLUMNS = 12
 const SEARCH_ROWS = 24
 const OVERLAY_SELECTOR = ".react-flow__minimap, [data-canvas-overlay]"
 const NO_INVALID_NODES: ReadonlySet<string> = new Set()
+const NO_EDGE_ACTIONS = {}
+const MIN_ZOOM = 0.05
+const FIT_INTERVAL = 1000
+const FIT_DURATION = 450
+const FIT_PADDING = 0.15
+const FIT_MAX_ZOOM = 1
+const FIT_MARGIN = 16
+const FIT_TOP_MARGIN = 64
+const PREVIEW_COOLDOWN = 1000
 const ID_SEPARATOR = "\u0000"
 const CANVAS_HINTS: ReadonlyArray<readonly [string, string]> = [
   ['[id^="react-flow__node-desc-"]', "Pressione Enter ou Espaço para selecionar o componente. Depois, use as setas para movê-lo, Delete para removê-lo e Esc para cancelar."],
@@ -87,6 +97,28 @@ const minimapColor = (node: Node<AtendimentoData>) => (node.data.type === NOTE_T
 const minimapClass = (node: Node<AtendimentoData>) => (node.data.type === START_TYPE ? "fill-flow-success" : "")
 const overlaps = (first: Box, second: Box, gap: number) =>
   first.x < second.x + second.width + gap && second.x < first.x + first.width + gap && first.y < second.y + second.height + gap && second.y < first.y + first.height + gap
+const sameJson = (first: unknown, second: unknown) => first === second || JSON.stringify(first) === JSON.stringify(second)
+const isPreviewFlow = (value: AtendimentoFlow | null): value is AtendimentoFlow => Boolean(value && Array.isArray(value.nodes) && Array.isArray(value.edges) && value.nodes.length)
+
+function stabilizePreview(next: AtendimentoFlow, previous: AtendimentoFlow | null): AtendimentoFlow {
+  if (!previous) return next
+  const oldNodes = new Map(previous.nodes.map((node) => [node.id, node]))
+  const oldEdges = new Map(previous.edges.map((edge) => [edge.id, edge]))
+  let changed = next.nodes.length !== previous.nodes.length || next.edges.length !== previous.edges.length
+  const nodes = next.nodes.map((node, index) => {
+    const old = oldNodes.get(node.id)
+    const kept = old && sameJson(old, node) ? old : node
+    if (kept !== previous.nodes[index]) changed = true
+    return kept
+  })
+  const edges = next.edges.map((edge, index) => {
+    const old = oldEdges.get(edge.id)
+    const kept = old && sameJson(old, edge) ? old : edge
+    if (kept !== previous.edges[index]) changed = true
+    return kept
+  })
+  return changed ? { ...next, nodes, edges } : previous
+}
 
 function translateCanvasAnnouncements(root: HTMLElement) {
   for (const [selector, text] of CANVAS_HINTS) {
@@ -150,6 +182,22 @@ const CanvasStatus = memo(function CanvasStatus({ container, count, start }: { c
   )
 })
 
+function PreviewBanner({ nodes, edges }: { nodes: number; edges: number }) {
+  return (
+    <div data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 items-center gap-2.5 border-flow-accent/40 px-3 py-2")}>
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-flow-accent/15 text-flow-accent">
+        <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden />
+      </span>
+      <p role="status" className="min-w-0 text-xs font-semibold leading-5 text-flow-fg">Gerando com IA. O fluxo aparece aqui conforme é criado.</p>
+      <span className="h-4 w-px shrink-0 bg-flow-border" aria-hidden />
+      <span className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[11px] font-medium text-flow-muted">
+        <span><span className="text-flow-muted-strong">{nodes}</span> {nodes === 1 ? "componente" : "componentes"}</span>
+        <span><span className="text-flow-muted-strong">{edges}</span> {edges === 1 ? "conexão" : "conexões"}</span>
+      </span>
+    </div>
+  )
+}
+
 function IssuesPanel({ id, issues, nodes, onClose, onSelect }: {
   id: string
   issues: FlowIssue[]
@@ -212,8 +260,9 @@ function IssuesPanel({ id, issues, nodes, onClose, onSelect }: {
   )
 }
 
-function FlowSettings({ open, onOpenChange, triggerRef, description, serviceType, onDescriptionChange, onServiceTypeChange, onCreateNew }: {
+function FlowSettings({ open, disabled, onOpenChange, triggerRef, description, serviceType, onDescriptionChange, onServiceTypeChange, onCreateNew }: {
   open: boolean
+  disabled?: boolean
   onOpenChange: (open: boolean) => void
   triggerRef: RefObject<HTMLButtonElement | null>
   description: string
@@ -227,7 +276,7 @@ function FlowSettings({ open, onOpenChange, triggerRef, description, serviceType
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <button ref={triggerRef} type="button" aria-label="Configurações do fluxo" title="Configurações do fluxo" className={cn(ui.toolButton, open && ui.toolButtonActive)}>
+        <button ref={triggerRef} type="button" disabled={disabled} aria-label="Configurações do fluxo" title="Configurações do fluxo" className={cn(ui.toolButton, open && ui.toolButtonActive)}>
           <Settings2 className="h-4 w-4" aria-hidden />
         </button>
       </PopoverTrigger>
@@ -278,6 +327,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [currentSavedId, setCurrentSavedId] = useState<string | null>(null)
   const [importError, setImportError] = useState("")
+  const [preview, setPreview] = useState<AtendimentoFlow | null>(null)
+  const [previewSizes, setPreviewSizes] = useState<Record<string, Size>>({})
   const [, setHistoryVersion] = useState(0)
   const flowRef = useRef(flow)
   const past = useRef<AtendimentoFlow[]>([])
@@ -297,14 +348,27 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const canvas = useRef<HTMLDivElement>(null)
   const settingsTrigger = useRef<HTMLButtonElement>(null)
   const clearTrigger = useRef<HTMLButtonElement>(null)
+  const previewRef = useRef<AtendimentoFlow | null>(null)
+  const previewView = useRef<Viewport | null>(null)
+  const previewFollow = useRef(true)
+  const previewFitted = useRef(false)
+  const previewCooldown = useRef(0)
+  const lastFit = useRef(0)
+  const fitTimer = useRef<number | undefined>(undefined)
+  const fitFrame = useRef(0)
+  const fitPending = useRef(false)
+  const moveOrigin = useRef<Viewport | null>(null)
   const issuesId = useId()
-  const { setViewport, getViewport, screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
+  const { setViewport, getViewport, getNodes, screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
   const store = useStoreApi()
   const dirty = Object.values(drafts).some(Boolean)
+  const previewing = preview !== null
+  const display = preview ?? flow
   const issues = useMemo(() => validateFlow(flow), [flow])
   const errorCount = useMemo(() => issues.filter((issue) => issue.severity === "error").length, [issues])
   const nodesById = useMemo(() => new Map(flow.nodes.map((node) => [node.id, node])), [flow.nodes])
-  const startNode = useMemo(() => flow.nodes.find((node) => node.data.type === START_TYPE), [flow.nodes])
+  const displayById = useMemo(() => (preview ? new Map(preview.nodes.map((node) => [node.id, node])) : nodesById), [nodesById, preview])
+  const startNode = useMemo(() => display.nodes.find((node) => node.data.type === START_TYPE), [display.nodes])
   const panelNode = panelId ? nodesById.get(panelId) : undefined
   const panelIssuesKey = useMemo(() => (panelId ? JSON.stringify(issues.filter((issue) => issue.nodeId === panelId)) : "[]"), [issues, panelId])
   const panelIssues = useMemo<FlowIssue[]>(() => JSON.parse(panelIssuesKey), [panelIssuesKey])
@@ -353,7 +417,16 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setFlowState(next)
   }, [pushHistory])
 
-  const commit = useCallback((change: (current: AtendimentoFlow) => AtendimentoFlow, coalesce?: string) => setDocument(change(flowRef.current), "history", { coalesce }), [setDocument])
+  const commit = useCallback((change: (current: AtendimentoFlow) => AtendimentoFlow, coalesce?: string) => {
+    if (previewRef.current) return
+    setDocument(change(flowRef.current), "history", { coalesce })
+  }, [setDocument])
+
+  const previewBusy = useCallback(() => {
+    if (!previewRef.current) return false
+    toast({ title: "Geração com IA em andamento", description: "Aguarde o fluxo ficar pronto para editar, salvar ou exportar." })
+    return true
+  }, [])
 
   const removal = useCallback(() => {
     const mode = removalBatch.current ? "silent" as const : "history" as const
@@ -366,6 +439,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
 
   const syncViewport = useCallback((delay = 0) => {
     setTimeout(() => {
+      if (previewRef.current) return
       const viewport = getViewport()
       const current = flowRef.current
       if (current.viewport.x !== viewport.x || current.viewport.y !== viewport.y || current.viewport.zoom !== viewport.zoom) setDocument({ ...current, viewport }, "silent")
@@ -399,7 +473,101 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     syncViewport(PAN_DURATION + 50)
   }, [holdView, setViewport, store, syncViewport])
 
-  useEffect(() => () => window.clearTimeout(revealTimer.current), [])
+  useEffect(() => () => {
+    window.clearTimeout(revealTimer.current)
+    window.clearTimeout(fitTimer.current)
+    cancelAnimationFrame(fitFrame.current)
+  }, [])
+
+  const cancelFit = useCallback(() => {
+    window.clearTimeout(fitTimer.current)
+    cancelAnimationFrame(fitFrame.current)
+    fitTimer.current = undefined
+    fitFrame.current = 0
+    fitPending.current = false
+  }, [])
+
+  const endPreview = useCallback((): Viewport | null => {
+    if (!previewRef.current) return null
+    previewRef.current = null
+    cancelFit()
+    const view = previewView.current
+    previewView.current = null
+    setPreview(null)
+    setPreviewSizes({})
+    releaseView()
+    if (view) void setViewport(view)
+    return view
+  }, [cancelFit, releaseView, setViewport])
+
+  const previewWorkflow = useCallback((next: AtendimentoFlow | null) => {
+    if (!isPreviewFlow(next)) {
+      endPreview()
+      return
+    }
+    const current = previewRef.current
+    if (!current) {
+      if (performance.now() < previewCooldown.current) return
+      previewView.current = settledView()
+      previewFollow.current = true
+      previewFitted.current = false
+      lastFit.current = 0
+      setSettingsOpen(false)
+      setLibraryOpen(false)
+      setConfirmClear(false)
+    }
+    const stable = stabilizePreview(next, current)
+    if (stable === current) return
+    previewRef.current = stable
+    setPreview(stable)
+  }, [endPreview, settledView])
+
+  const fitPreview = useCallback((force: boolean) => {
+    if (!previewRef.current) return
+    const { width, height } = store.getState()
+    const nodes = getNodes()
+    if (!width || !height || !nodes.length) return
+    const bounds = getNodesBounds(nodes.map((node) => (node.width && node.height ? node : { ...node, width: DEFAULT_NODE_SIZE.width, height: DEFAULT_NODE_SIZE.height })))
+    const current = settledView()
+    if (!force && previewFitted.current) {
+      const left = bounds.x * current.zoom + current.x
+      const top = bounds.y * current.zoom + current.y
+      const right = left + bounds.width * current.zoom
+      const bottom = top + bounds.height * current.zoom
+      if (left >= FIT_MARGIN && top >= FIT_TOP_MARGIN && right <= width - FIT_MARGIN && bottom <= height - FIT_MARGIN) return
+    }
+    previewFitted.current = true
+    lastFit.current = performance.now()
+    const target = getViewportForBounds(bounds, width, height, MIN_ZOOM, FIT_MAX_ZOOM, FIT_PADDING)
+    if (Math.abs(target.zoom - current.zoom) < 0.005 && Math.abs(target.x - current.x) < 2 && Math.abs(target.y - current.y) < 2) return
+    holdView(FIT_DURATION, target)
+    void setViewport(target, { duration: FIT_DURATION })
+  }, [getNodes, holdView, setViewport, settledView, store])
+
+  const scheduleFit = useCallback(function schedule() {
+    if (!previewRef.current || !previewFollow.current) return
+    if (fitFrame.current) {
+      fitPending.current = true
+      return
+    }
+    if (fitTimer.current !== undefined) return
+    fitPending.current = false
+    const wait = previewFitted.current ? Math.max(0, lastFit.current + FIT_INTERVAL - performance.now()) : 0
+    fitTimer.current = window.setTimeout(() => {
+      fitTimer.current = undefined
+      fitFrame.current = requestAnimationFrame(() => {
+        fitFrame.current = requestAnimationFrame(() => {
+          fitFrame.current = 0
+          if (previewFollow.current) fitPreview(false)
+          if (fitPending.current) schedule()
+        })
+      })
+    }, wait)
+  }, [fitPreview])
+
+  useEffect(() => {
+    if (preview) scheduleFit()
+  }, [preview, scheduleFit])
 
   const allocateId = useCallback(() => {
     idFloor.current = Math.max(idFloor.current, maxNumericId(flowRef.current.nodes.map((node) => node.id))) + 1
@@ -511,10 +679,12 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [])
 
   const loadWorkflow = useCallback((input: unknown) => {
+    const view = endPreview()
+    previewCooldown.current = performance.now() + PREVIEW_COOLDOWN
     if (!ensureApplied()) return false
     try {
       const imported = importFlow(input)
-      if (!recovery && storeCurrent({ ...flowRef.current, viewport: getViewport() }) === false) return false
+      if (!recovery && storeCurrent({ ...flowRef.current, viewport: view ?? getViewport() }) === false) return false
       backupStored()
       selectSaved(null)
       setDocument(imported, "silent", { resetIds: true })
@@ -530,7 +700,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       setImportError(cause instanceof SyntaxError ? "O arquivo não é um JSON válido." : (cause as Error).message)
       return false
     }
-  }, [backupStored, clearSelection, ensureApplied, getViewport, persist, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
+  }, [backupStored, clearSelection, endPreview, ensureApplied, getViewport, persist, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
 
   const reportIssues = useCallback((title: string) => {
     setShowIssues(true)
@@ -538,6 +708,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [errorCount])
 
   const save = useCallback(() => {
+    if (previewBusy()) return false
     if (recovery) {
       toast({ title: "Salvamento pausado", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
       return false
@@ -552,10 +723,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       toast({ title: "Fluxo salvo", description: `${plural(document.nodes.length, "componente", "componentes")} e ${plural(document.edges.length, "conexão", "conexões")} guardados neste navegador.${pending}` })
     }
     return saved
-  }, [ensureApplied, errorCount, getViewport, persist, recovery, setDocument, storeCurrent])
+  }, [ensureApplied, errorCount, getViewport, persist, previewBusy, recovery, setDocument, storeCurrent])
 
   const download = useCallback(() => {
-    if (!ensureApplied()) return false
+    if (previewBusy() || !ensureApplied()) return false
     if (errorCount) {
       reportIssues("Corrija as pendências antes de exportar")
       return false
@@ -570,10 +741,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       toast({ title: "Exportação bloqueada", description: (cause as Error).message, variant: "destructive" })
       return false
     }
-  }, [ensureApplied, errorCount, getViewport, reportIssues])
+  }, [ensureApplied, errorCount, getViewport, previewBusy, reportIssues])
 
   const execute = useCallback(() => {
-    if (recovery || !ensureApplied()) return false
+    if (previewBusy() || recovery || !ensureApplied()) return false
     if (errorCount) {
       reportIssues("Corrija as pendências antes de abrir a prévia")
       return false
@@ -583,7 +754,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     window.dispatchEvent(new CustomEvent("workflow:executed", { detail: document }))
     onOpenBot?.()
     return true
-  }, [ensureApplied, errorCount, onOpenBot, persist, recovery, reportIssues])
+  }, [ensureApplied, errorCount, onOpenBot, persist, previewBusy, recovery, reportIssues])
 
   const removeNodes = useCallback((ids: string[]) => {
     const current = flowRef.current
@@ -603,10 +774,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [findNode, removal, setDocument])
 
   const removeNode = useCallback((id: string) => {
-    if (ensureApplied()) removeNodes([id])
-  }, [ensureApplied, removeNodes])
+    if (!previewBusy() && ensureApplied()) removeNodes([id])
+  }, [ensureApplied, previewBusy, removeNodes])
 
   const removeEdges = useCallback((ids: string[]) => {
+    if (previewRef.current) return
     const remove = new Set(ids)
     const current = flowRef.current
     if (!current.edges.some((edge) => remove.has(edge.id))) return
@@ -615,7 +787,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [removal, setDocument])
 
   const reset = useCallback(() => {
-    if (!ensureApplied()) return
+    if (previewBusy() || !ensureApplied()) return
     backupStored()
     selectSaved(null)
     const empty = newFlow()
@@ -626,7 +798,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     clearSelection()
     void setViewport(empty.viewport)
     persist(empty)
-  }, [backupStored, clearSelection, ensureApplied, persist, resetHistory, selectSaved, setDocument, setViewport])
+  }, [backupStored, clearSelection, ensureApplied, persist, previewBusy, resetHistory, selectSaved, setDocument, setViewport])
 
   const focusNode = useCallback((node: AtendimentoNode) => {
     setPanelId(node.id)
@@ -642,7 +814,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [ensureApplied, focusNode])
 
   const search = useCallback((query: string) => {
-    if (!ensureApplied()) return false
+    if (previewBusy() || !ensureApplied()) return false
     const text = query.trim()
     const term = normalize(text)
     if (!term) return false
@@ -655,10 +827,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     }
     focusNode(node)
     return true
-  }, [ensureApplied, focusNode])
+  }, [ensureApplied, focusNode, previewBusy])
 
   const undo = useCallback(() => {
-    if (!ensureApplied()) return
+    if (previewBusy() || !ensureApplied()) return
     const previous = past.current.pop()
     if (!previous) return
     future.current = [flowRef.current, ...future.current].slice(0, HISTORY_LIMIT)
@@ -666,10 +838,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setDocument(previous, "silent")
     setHistoryVersion((version) => version + 1)
     clearSelection()
-  }, [clearSelection, ensureApplied, setDocument])
+  }, [clearSelection, ensureApplied, previewBusy, setDocument])
 
   const redo = useCallback(() => {
-    if (!ensureApplied()) return
+    if (previewBusy() || !ensureApplied()) return
     const [next, ...rest] = future.current
     if (!next) return
     past.current = [...past.current, flowRef.current].slice(-HISTORY_LIMIT)
@@ -678,30 +850,40 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setDocument(next, "silent")
     setHistoryVersion((version) => version + 1)
     clearSelection()
-  }, [clearSelection, ensureApplied, setDocument])
+  }, [clearSelection, ensureApplied, previewBusy, setDocument])
 
   const zoomInView = useCallback(() => {
+    previewFollow.current = false
     holdView(ZOOM_DURATION)
     void zoomIn({ duration: ZOOM_DURATION })
     syncViewport(ZOOM_DURATION + 50)
   }, [holdView, syncViewport, zoomIn])
 
   const zoomOutView = useCallback(() => {
+    previewFollow.current = false
     holdView(ZOOM_DURATION)
     void zoomOut({ duration: ZOOM_DURATION })
     syncViewport(ZOOM_DURATION + 50)
   }, [holdView, syncViewport, zoomOut])
 
   const fitCanvas = useCallback(() => {
+    if (previewRef.current) {
+      previewFollow.current = true
+      cancelFit()
+      fitPreview(true)
+      return
+    }
     holdView(PAN_DURATION)
     void fitView({ padding: 0.2, duration: PAN_DURATION })
     syncViewport(PAN_DURATION + 50)
-  }, [fitView, holdView, syncViewport])
+  }, [cancelFit, fitPreview, fitView, holdView, syncViewport])
 
-  const openFile = useCallback(() => fileInput.current?.click(), [])
+  const openFile = useCallback(() => {
+    if (!previewBusy()) fileInput.current?.click()
+  }, [previewBusy])
 
   useLayoutEffect(() => {
-    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, undo, redo }
+    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, previewWorkflow, undo, redo }
   })
 
   const actions = useMemo<WorkflowActions>(() => ({
@@ -716,6 +898,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     removeNode: (id) => handlers.current?.removeNode(id),
     reset: () => handlers.current?.reset(),
     download: () => handlers.current?.download() ?? false,
+    previewWorkflow: (flow) => handlers.current?.previewWorkflow(flow),
   }), [])
 
   useEffect(() => {
@@ -834,6 +1017,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [centerOn, findNode, settledView, store])
 
   const addComponent = useCallback((type: string, position?: XYPosition) => {
+    if (previewBusy()) return
     if (recovery) {
       toast({ title: "Edição pausada", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
       return
@@ -853,7 +1037,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     } catch (cause) {
       toast({ title: "Componente indisponível", description: (cause as Error).message, variant: "destructive" })
     }
-  }, [allocateId, commit, ensureApplied, placeComponent, recovery, revealNode])
+  }, [allocateId, commit, ensureApplied, placeComponent, previewBusy, recovery, revealNode])
 
   const isValidConnection = useCallback((connection: Connection) => {
     const source = findNode(connection.source)
@@ -863,7 +1047,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
 
   const connect = useCallback((connection: Connection) => {
     const { source: sourceId, sourceHandle, target } = connection
-    if (!sourceId || !target || !sourceHandle || !isValidConnection(connection)) return
+    if (previewRef.current || !sourceId || !target || !sourceHandle || !isValidConnection(connection)) return
     const source = findNode(sourceId)
     if (!source) return
     const current = flowRef.current
@@ -880,6 +1064,19 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [commit, findNode, isValidConnection])
 
   const handleNodeChanges = useCallback((changes: NodeChange[]) => {
+    if (previewRef.current) {
+      const measured = changes.flatMap((change) => (change.type === "dimensions" && change.dimensions ? [{ id: change.id, width: change.dimensions.width, height: change.dimensions.height }] : []))
+      if (measured.length) setPreviewSizes((current) => {
+        let next = current
+        for (const { id, width, height } of measured) {
+          if (current[id]?.width === width && current[id]?.height === height) continue
+          if (next === current) next = { ...current }
+          next[id] = { width, height }
+        }
+        return next
+      })
+      return
+    }
     const removals: string[] = []
     const dimensions: Array<{ id: string } & Size> = []
     const selections = new Map<string, boolean>()
@@ -926,6 +1123,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [ensureApplied, removeNodes, revealNode, setDocument])
 
   const handleEdgeChanges = useCallback((changes: EdgeChange[]) => {
+    if (previewRef.current) return
     const selections = new Map<string, boolean>()
     const removals: string[] = []
     for (const change of changes) {
@@ -960,20 +1158,34 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [pushHistory])
 
   const openNode = useCallback((_: ReactMouseEvent, node: Node) => {
-    if (node.id === panelId || !ensureApplied()) return
+    if (previewRef.current || node.id === panelId || !ensureApplied()) return
     setPanelId(node.id)
     setDrafts({})
   }, [ensureApplied, panelId])
 
   const closeOnPane = useCallback(() => {
-    if (!ensureApplied()) return
+    if (previewRef.current || !ensureApplied()) return
     setPanelId(null)
     setDrafts({})
   }, [ensureApplied])
 
-  const moveEnd = useCallback(() => {
+  const moveStart = useCallback((_: MouseEvent | TouchEvent | null, viewport: Viewport) => {
+    releaseView()
+    moveOrigin.current = viewport
+  }, [releaseView])
+
+  const moveEnd = useCallback((_: MouseEvent | TouchEvent | null, viewport: Viewport) => {
+    const origin = moveOrigin.current
+    moveOrigin.current = null
+    if (previewRef.current) {
+      if (origin && (origin.x !== viewport.x || origin.y !== viewport.y || origin.zoom !== viewport.zoom)) {
+        previewFollow.current = false
+        cancelFit()
+      }
+      return
+    }
     if (ready) syncViewport()
-  }, [ready, syncViewport])
+  }, [cancelFit, ready, syncViewport])
 
   const dragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     const types = Array.from(event.dataTransfer.types)
@@ -992,6 +1204,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
 
   const drop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
+    if (previewBusy()) return
     const type = event.dataTransfer.getData("application/reactflow")
     if (type) {
       addComponent(type, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
@@ -1004,7 +1217,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       return
     }
     void readFile(file)
-  }, [addComponent, readFile, screenToFlowPosition])
+  }, [addComponent, previewBusy, readFile, screenToFlowPosition])
 
   const importFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -1063,7 +1276,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const setServiceType = useCallback((serviceType: string) => commit((current) => ({ ...current, service_type: serviceType }), "service_type"), [commit])
 
   const startNewFlow = useCallback(() => {
-    if (!ensureApplied()) return
+    if (previewBusy() || !ensureApplied()) return
     setSettingsOpen(false)
     if (recovery) {
       reset()
@@ -1075,9 +1288,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     toast(stored
       ? { title: "Novo fluxo criado", description: `“${stored.flow.name.trim() || "Sem nome"}” ficou guardado em Meus fluxos.` }
       : { title: "Novo fluxo criado", description: "O fluxo anterior estava vazio e não foi guardado." })
-  }, [ensureApplied, getViewport, recovery, reset, storeCurrent])
+  }, [ensureApplied, getViewport, previewBusy, recovery, reset, storeCurrent])
 
   const requestClear = useCallback(() => {
+    if (previewBusy()) return
     if (recovery) {
       toast({ title: "Edição pausada", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
       return
@@ -1088,18 +1302,18 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       return
     }
     setConfirmClear(true)
-  }, [ensureApplied, recovery])
+  }, [ensureApplied, previewBusy, recovery])
 
   const confirmClearFlow = useCallback(() => {
     setConfirmClear(false)
-    if (!ensureApplied()) return
+    if (previewRef.current || !ensureApplied()) return
     setDocument(clearedFlow(flowRef.current), "history")
     clearSelection()
     toast({ title: "Fluxo limpo", description: "Componentes e conexões removidos. Use Desfazer (Ctrl+Z) para recuperar." })
   }, [clearSelection, ensureApplied, setDocument])
 
   const openSaved = useCallback((id: string) => {
-    if (!ensureApplied()) return
+    if (previewBusy() || !ensureApplied()) return
     let entries: SavedFlow[] = []
     try {
       entries = readLibrary(localStorage)
@@ -1129,9 +1343,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     void setViewport(restored.viewport)
     persist(restored)
     toast({ title: "Fluxo aberto", description: `“${restored.name.trim() || "Sem nome"}” com ${plural(restored.nodes.length, "componente", "componentes")}. O anterior ficou em Meus fluxos.` })
-  }, [backupStored, clearSelection, ensureApplied, getViewport, persist, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
+  }, [backupStored, clearSelection, ensureApplied, getViewport, persist, previewBusy, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
 
   const duplicateSaved = useCallback((id: string) => {
+    if (previewBusy()) return
     try {
       const entries = readLibrary(localStorage)
       const entry = entries.find((item) => item.id === id)
@@ -1145,9 +1360,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     } catch {
       toast({ title: "Não foi possível duplicar", description: "O armazenamento do navegador está cheio ou bloqueado. Exporte o JSON antes de continuar.", variant: "destructive" })
     }
-  }, [getViewport])
+  }, [getViewport, previewBusy])
 
   const deleteSaved = useCallback((id: string) => {
+    if (previewBusy()) return
     try {
       const next = removeSaved(readLibrary(localStorage), id)
       writeLibrary(localStorage, next)
@@ -1157,9 +1373,23 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     } catch {
       toast({ title: "Não foi possível excluir", description: "O navegador bloqueou o armazenamento local.", variant: "destructive" })
     }
-  }, [selectSaved])
+  }, [previewBusy, selectSaved])
 
   const canvasNodes = useMemo<Node<AtendimentoData>[]>(() => {
+    if (preview) return preview.nodes.map((node) => ({
+      id: node.id,
+      type: "custom",
+      position: node.position,
+      data: node.data,
+      ...previewSizes[node.id],
+      selected: false,
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      deletable: false,
+      focusable: false,
+      ariaLabel: `${getComponentLabel(node.data.type)}, ID ${node.id}`,
+    }))
     const selected = new Set(selectedNodes)
     return flow.nodes.map((node) => ({
       id: node.id,
@@ -1171,12 +1401,12 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       deletable: node.data.type !== START_TYPE && node.deletable !== false,
       ariaLabel: `${getComponentLabel(node.data.type)}, ID ${node.id}`,
     }))
-  }, [flow.nodes, selectedNodes, sizes])
+  }, [flow.nodes, preview, previewSizes, selectedNodes, sizes])
 
   const canvasEdges = useMemo<Edge[]>(() => {
-    const selected = new Set(selectedEdges)
-    return flow.edges.map((edge) => {
-      const source = nodesById.get(edge.source)
+    const selected = new Set(previewing ? [] : selectedEdges)
+    return display.edges.map((edge) => {
+      const source = displayById.get(edge.source)
       return {
         id: edge.id,
         type: "deletable",
@@ -1185,10 +1415,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
         target: edge.target,
         targetHandle: edge.targetHandle ?? undefined,
         selected: selected.has(edge.id),
+        ...(previewing && { selectable: false, deletable: false, focusable: false, updatable: false }),
         ariaLabel: `Conexão de ${source ? `${getComponentLabel(source.data.type)} ${source.id} (${outputLabel(source, edge.sourceHandle)})` : edge.source} para ${edge.target}`,
       }
     })
-  }, [flow.edges, nodesById, selectedEdges])
+  }, [display.edges, displayById, previewing, selectedEdges])
 
   const edgeActions = useMemo(() => ({ remove: (id: string) => removeEdges([id]) }), [removeEdges])
   const nodeActions = useMemo(() => ({
@@ -1214,12 +1445,14 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
         <ToolButton label="Ajustar à tela" icon={Maximize} onClick={fitCanvas} />
         <ToolButton label="Minimapa" title={showMinimap ? "Ocultar minimapa" : "Mostrar minimapa"} icon={MapIcon} pressed={showMinimap} onClick={() => setShowMinimap((visible) => !visible)} />
         <span className={ui.divider} aria-hidden />
-        <ToolButton label="Desfazer" title="Desfazer (Ctrl+Z)" icon={Undo2} onClick={undo} disabled={!canUndo} />
-        <ToolButton label="Refazer" title="Refazer (Ctrl+Y)" icon={Redo2} onClick={redo} disabled={!canRedo} />
+        <ToolButton label="Desfazer" title="Desfazer (Ctrl+Z)" icon={Undo2} onClick={undo} disabled={!canUndo || previewing} />
+        <ToolButton label="Refazer" title="Refazer (Ctrl+Y)" icon={Redo2} onClick={redo} disabled={!canRedo || previewing} />
         <span className={ui.divider} aria-hidden />
-        <ToolButton label="Novo fluxo" title="Novo fluxo: guarda o atual em Meus fluxos e começa um em branco" icon={FilePlus2} onClick={startNewFlow} />
-        <SavedFlows open={libraryOpen} onOpenChange={setLibraryOpen} entries={library} currentId={currentSavedId} onOpen={openSaved} onDuplicate={duplicateSaved} onDelete={deleteSaved} />
-        <button ref={clearTrigger} type="button" aria-label="Limpar fluxo" title="Limpar fluxo: remove todos os componentes e conexões" className={cn(ui.toolButton, "hover:border-flow-danger hover:text-flow-danger")} onClick={requestClear} disabled={Boolean(recovery)}>
+        <ToolButton label="Novo fluxo" title="Novo fluxo: guarda o atual em Meus fluxos e começa um em branco" icon={FilePlus2} onClick={startNewFlow} disabled={previewing} />
+        <span inert={previewing} className={cn("inline-flex shrink-0", previewing && "opacity-40")}>
+          <SavedFlows open={libraryOpen && !previewing} onOpenChange={(open) => setLibraryOpen(open && !previewRef.current)} entries={library} currentId={currentSavedId} onOpen={openSaved} onDuplicate={duplicateSaved} onDelete={deleteSaved} />
+        </span>
+        <button ref={clearTrigger} type="button" aria-label="Limpar fluxo" title="Limpar fluxo: remove todos os componentes e conexões" className={cn(ui.toolButton, "hover:border-flow-danger hover:text-flow-danger")} onClick={requestClear} disabled={Boolean(recovery) || previewing}>
           <Eraser className="h-4 w-4" aria-hidden />
         </button>
         <span className={ui.divider} aria-hidden />
@@ -1228,7 +1461,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
           value={flow.name}
           placeholder="Nome do fluxo"
           spellCheck={false}
-          className="h-8 min-w-[10rem] max-w-md flex-1 truncate rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-flow-fg transition placeholder:text-flow-muted hover:border-flow-border focus-visible:border-flow-accent focus-visible:bg-flow-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/25"
+          disabled={previewing}
+          className="h-8 min-w-[10rem] max-w-md flex-1 truncate rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-flow-fg transition placeholder:text-flow-muted hover:border-flow-border focus-visible:border-flow-accent focus-visible:bg-flow-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/25 disabled:pointer-events-none disabled:opacity-60"
           onChange={(event) => renameFlow(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur() }}
         />
@@ -1236,11 +1470,12 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
           <button
             type="button"
             onClick={() => setShowIssues((open) => !open)}
-            aria-expanded={showIssues}
-            aria-controls={showIssues ? issuesId : undefined}
+            disabled={previewing}
+            aria-expanded={showIssues && !previewing}
+            aria-controls={showIssues && !previewing ? issuesId : undefined}
             title={showIssues ? "Ocultar validação do fluxo" : errorCount ? "Ver pendências do fluxo" : "Ver validação do fluxo"}
             className={cn(
-              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2",
+              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-40",
               errorCount
                 ? "border-flow-warning/40 bg-flow-warning/10 text-flow-warning hover:bg-flow-warning/15 focus-visible:ring-flow-warning/30"
                 : "border-flow-success/40 bg-flow-success/10 text-flow-success hover:bg-flow-success/15 focus-visible:ring-flow-success/30",
@@ -1249,25 +1484,26 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             {errorCount ? <TriangleAlert className="h-3.5 w-3.5" aria-hidden /> : <Check className="h-3.5 w-3.5" aria-hidden />}
             {errorCount ? plural(errorCount, "pendência", "pendências") : "Fluxo validado"}
           </button>
-          <button type="button" className={ui.button} onClick={openFile} title="Abrir um arquivo JSON de Atendimento">
+          <button type="button" className={ui.button} onClick={openFile} disabled={previewing} title="Abrir um arquivo JSON de Atendimento">
             <Upload className="h-3.5 w-3.5" aria-hidden />
             Importar JSON
           </button>
-          <button type="button" className={ui.button} onClick={download} title="Baixar o fluxo no formato JSON de Atendimento">
+          <button type="button" className={ui.button} onClick={download} disabled={previewing} title="Baixar o fluxo no formato JSON de Atendimento">
             <Download className="h-3.5 w-3.5" aria-hidden />
             Exportar JSON
           </button>
-          <button type="button" className={ui.button} onClick={save} title="Salvar neste navegador (Ctrl+S)">
+          <button type="button" className={ui.button} onClick={save} disabled={previewing} title="Salvar neste navegador (Ctrl+S)">
             <Save className="h-3.5 w-3.5" aria-hidden />
             Salvar
           </button>
-          <button type="button" className={ui.primaryButton} onClick={execute} title="Validar o fluxo e abrir a prévia do atendimento">
+          <button type="button" className={ui.primaryButton} onClick={execute} disabled={previewing} title="Validar o fluxo e abrir a prévia do atendimento">
             <Play className="h-3.5 w-3.5" aria-hidden />
             Prévia
           </button>
           <FlowSettings
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
+            open={settingsOpen && !previewing}
+            disabled={previewing}
+            onOpenChange={(open) => setSettingsOpen(open && !previewRef.current)}
             triggerRef={settingsTrigger}
             description={flow.description}
             serviceType={flow.service_type}
@@ -1288,10 +1524,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       <div className="relative flex min-h-0 flex-1">
         {showLibrary && <NodeLibrary onAdd={addComponent} />}
         <div ref={canvas} tabIndex={-1} className="flow-background relative min-w-0 flex-1 bg-flow-bg focus:outline-none">
-          <InvalidNodesContext.Provider value={invalidNodes}>
-            <AtendimentoEdgesContext.Provider value={flow.edges}>
-              <EdgeActionsContext.Provider value={edgeActions}>
-                <NodeActionsContext.Provider value={nodeActions}>
+          <InvalidNodesContext.Provider value={previewing ? NO_INVALID_NODES : invalidNodes}>
+            <AtendimentoEdgesContext.Provider value={display.edges}>
+              <EdgeActionsContext.Provider value={previewing ? NO_EDGE_ACTIONS : edgeActions}>
+                <NodeActionsContext.Provider value={previewing ? null : nodeActions}>
                   <ReactFlow
                     nodes={canvasNodes}
                     edges={canvasEdges}
@@ -1309,12 +1545,18 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
                     onConnect={connect}
                     onDragOver={dragOver}
                     onDrop={drop}
-                    onMoveStart={releaseView}
+                    onMoveStart={moveStart}
                     onMoveEnd={moveEnd}
                     defaultViewport={flow.viewport}
-                    minZoom={0.05}
+                    minZoom={MIN_ZOOM}
                     maxZoom={2}
-                    deleteKeyCode={dirty ? null : DELETE_KEYS}
+                    nodesDraggable={!previewing}
+                    nodesConnectable={!previewing}
+                    nodesFocusable={!previewing}
+                    edgesFocusable={!previewing}
+                    edgesUpdatable={!previewing}
+                    elementsSelectable={!previewing}
+                    deleteKeyCode={dirty || previewing ? null : DELETE_KEYS}
                     multiSelectionKeyCode={MULTI_SELECTION_KEYS}
                     selectNodesOnDrag={false}
                     connectionLineStyle={CONNECTION_LINE_STYLE}
@@ -1350,23 +1592,26 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
               Componentes
             </button>
           )}
-          {showIssues && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
-          <CanvasStatus container={canvas} count={flow.nodes.length} start={startNode?.position} />
+          {showIssues && !previewing && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
+          {preview && <PreviewBanner nodes={preview.nodes.length} edges={preview.edges.length} />}
+          <CanvasStatus container={canvas} count={display.nodes.length} start={startNode?.position} />
         </div>
         {panelNode && (
-          <ConfigPanel
-            key={panelNode.id}
-            node={panelNode}
-            issues={panelIssues}
-            updateData={updateData}
-            onDraft={trackDraft}
-            removeOption={removeOption}
-            removeOutput={removePanelOutput}
-            insertOutput={insertPanelOutput}
-            onClose={closePanel}
-            onRemove={removePanelNode}
-            onDuplicate={duplicate}
-          />
+          <div className={previewing ? "hidden" : "contents"}>
+            <ConfigPanel
+              key={panelNode.id}
+              node={panelNode}
+              issues={panelIssues}
+              updateData={updateData}
+              onDraft={trackDraft}
+              removeOption={removeOption}
+              removeOutput={removePanelOutput}
+              insertOutput={insertPanelOutput}
+              onClose={closePanel}
+              onRemove={removePanelNode}
+              onDuplicate={duplicate}
+            />
+          </div>
         )}
       </div>
       <Dialog open={Boolean(importError)} onOpenChange={(open) => { if (!open) setImportError("") }}>

@@ -18,6 +18,8 @@ import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-no
 import { ui } from "./ui"
 
 const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
+
+type LivePreviewProps = { onLivePreview: (flow: AtendimentoFlow | null) => void }
 const ColorPanel = dynamic(() => import("../ColorPanel"), { ssr: false })
 
 const warm = (load: () => Promise<unknown>) => () => {
@@ -945,6 +947,12 @@ function FlowLayout() {
     return false
   }, [])
 
+  const handleLivePreview = useCallback((flow: AtendimentoFlow | null) => {
+    actionsRef.current?.previewWorkflow(flow)
+  }, [])
+
+  const livePreview = useMemo<LivePreviewProps>(() => ({ onLivePreview: handleLivePreview }), [handleLivePreview])
+
   const openBackgroundDialog = useCallback(() => setBackgroundDialog(true), [])
 
   const closeBackgroundDialog = useCallback(() => setBackgroundDialog(false), [])
@@ -1023,7 +1031,7 @@ function FlowLayout() {
         {builder}
       </main>
       <YenFlowBot isOpen={botOpen} openRequest={botRequest} onClose={closeBot} onStart={runPreview} />
-      {aiLoaded && <AIWorkflowDialog open={aiOpen} onOpenChange={setAiOpen} onWorkflowGenerated={handleGenerated} />}
+      {aiLoaded && <AIWorkflowDialog open={aiOpen} onOpenChange={setAiOpen} onWorkflowGenerated={handleGenerated} {...livePreview} />}
       <EraDialog open={eraOpen} onOpenChange={setEraOpen} />
       {showColorPanel && <ColorPanel />}
       <Dialog open={backgroundDialog} onOpenChange={setBackgroundDialog}>

@@ -18,7 +18,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     does: "Envia uma mensagem com opções numeradas e aguarda a escolha do contato.",
     required: ["title", "options"],
     dynamic: "uma por opção, na ordem da lista. Em output, use o texto da opção.",
-    rules: ["buttons \"true\" só com até 3 opções."],
+    rules: ["buttons \"true\" só com até 3 opções.", "Em submenus, inclua uma opção para voltar, ligada a Retornar ao Menu."],
   },
   envio_pergunta: {
     does: "Envia uma mensagem de texto e segue.",
@@ -28,6 +28,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
   departamentos: {
     does: "Transfere a conversa para a fila de um departamento e encerra o caminho do robô.",
     platform: ["departamento", "name"],
+    rules: ["Para avisar o contato da transferência, coloque antes um Enviar Mensagem."],
   },
   tags: {
     does: "Aplica uma tag ao contato e segue. Pode enviar uma mensagem.",
@@ -71,7 +72,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     does: "Aguarda a resposta do contato e guarda o texto em um campo.",
     required: ["customFields"],
     outputs: ["segue com a resposta guardada"],
-    rules: ["customFields: name, empresa ou field_1 a field_5; custom:ID:campo só se o pedido informar. Depois use @@@campo nas mensagens."],
+    rules: ["Faça a pergunta antes, com Enviar Mensagem.", "customFields: name, empresa ou field_1 a field_5; custom:ID:campo só se o pedido informar. Depois use @@@campo nas mensagens."],
   },
   envio_arquivo: {
     does: "Envia um arquivo por URL, como PDF, áudio ou vídeo.",
@@ -222,7 +223,7 @@ export const COMPONENT_GUIDE: Readonly<Record<string, ComponentGuide>> = {
     required: ["text"],
   },
   voltar: {
-    does: "Volta a um Menu de Opções deste fluxo. Use no lugar de conexões de volta.",
+    does: "Volta a um Menu de Opções deste fluxo, que é mostrado de novo. Use no lugar de conexões de volta: no fim dos ramos que só informam e na opção de voltar dos submenus.",
     required: ["targetNodeId"],
   },
   randomizer: {

@@ -1,3 +1,5 @@
+import { DEFAULT_EFFORT, EFFORTS, type Effort } from "./contracts"
+
 export const PROVIDER_IDS = ["openai", "anthropic", "google", "xai"] as const
 
 export type ProviderId = (typeof PROVIDER_IDS)[number]
@@ -7,6 +9,7 @@ export interface ModelPreset {
   name: string
   note: string
   vision: boolean
+  efforts?: readonly Effort[]
 }
 
 export interface ProviderInfo {
@@ -16,8 +19,14 @@ export interface ProviderInfo {
   of: string
   keyPlaceholder: string
   keyPrefix?: string
-  presets: readonly [ModelPreset, ModelPreset]
+  presets: readonly [ModelPreset, ModelPreset, ...ModelPreset[]]
 }
+
+const GOOGLE_EFFORTS: readonly Effort[] = ["low", "medium", "high"]
+
+export type ProviderEffort = "low" | "medium" | "high" | "xhigh" | "max"
+
+const MAX_EFFORT: Readonly<Record<ProviderId, ProviderEffort>> = { openai: "max", anthropic: "max", google: "high", xai: "xhigh" }
 
 export const PROVIDERS: readonly ProviderInfo[] = [
   {
@@ -30,6 +39,7 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     presets: [
       { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", note: "recomendado", vision: true },
       { id: "gpt-6-astra", name: "GPT-6 Astra", note: "o mais capaz", vision: true },
+      { id: "gpt-6-luna", name: "GPT-6 Luna", note: "o mais rápido", vision: true },
     ],
   },
   {
@@ -52,8 +62,8 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyPlaceholder: "AIza...",
     keyPrefix: "AIza",
     presets: [
-      { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", note: "recomendado", vision: true },
-      { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro (prévia)", note: "mais raciocínio", vision: true },
+      { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", note: "recomendado", vision: true, efforts: GOOGLE_EFFORTS },
+      { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro (prévia)", note: "mais raciocínio", vision: true, efforts: GOOGLE_EFFORTS },
     ],
   },
   {
@@ -88,6 +98,23 @@ export function defaultModel(id: ProviderId): ModelPreset {
 
 export function findPreset(id: ProviderId, model: string): ModelPreset | undefined {
   return getProvider(id).presets.find((preset) => preset.id === model)
+}
+
+export function effortsFor(provider: ProviderId, model: string): readonly Effort[] {
+  return findPreset(provider, model)?.efforts ?? EFFORTS
+}
+
+export function defaultEffort(provider: ProviderId, model: string): Effort {
+  const efforts = effortsFor(provider, model)
+  return efforts.includes(DEFAULT_EFFORT) ? DEFAULT_EFFORT : efforts[0] ?? DEFAULT_EFFORT
+}
+
+export function isEffort(value: unknown): value is Effort {
+  return typeof value === "string" && (EFFORTS as readonly string[]).includes(value)
+}
+
+export function providerEffort(provider: ProviderId, effort: Effort): ProviderEffort {
+  return effort === "max" ? MAX_EFFORT[provider] : effort
 }
 
 const WAIT_LIMIT_SECONDS = 3600
