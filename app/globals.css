@@ -140,14 +140,17 @@
 }
 
 @keyframes flow-edge-dash {
+  from {
+    stroke-dashoffset: 0;
+  }
   to {
-    stroke-dashoffset: -22;
+    stroke-dashoffset: -36;
   }
 }
 
 .flow-edge-dash {
-  stroke-dasharray: 5 13;
-  animation: flow-edge-dash 0.9s linear infinite;
+  stroke-dasharray: 6 12;
+  animation: flow-edge-dash 0.8s linear infinite;
 }
 
 .flow-edge-glow {
