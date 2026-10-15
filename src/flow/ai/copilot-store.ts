@@ -1,20 +1,24 @@
 import {
   LIMITS,
   type Effort,
+  type GenerateFailure,
   type GenerateRequest,
   type GenerationChanges,
   type GenerationIssue,
   type GenerationProgress,
   type GenerationUsage,
 } from "@/lib/atendimento/ai/contracts"
+import type { InterviewMessage, InterviewTurn } from "@/lib/atendimento/ai/interview"
 import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
 import { importFlow, validateFlow } from "@/lib/atendimento/format"
 import type { AtendimentoFlow, AtendimentoNode } from "@/lib/atendimento/types"
+import type { InterviewTurnResult } from "../ai-interview"
 import {
   ISSUE_GROUPS,
   PLATFORM_HINTS,
   PREVIEW_INTERVAL_MS,
   apiKeyError,
+  changeLabels,
   documentKey,
   failureField,
   hasComponents,
@@ -23,6 +27,7 @@ import {
   messageLines,
   plural,
   previewFeed,
+  requestField,
   type Engine,
   type Failure,
   type Field,
@@ -51,7 +56,16 @@ export type CopilotGenerate = (
   engine?: Engine | null,
 ) => Promise<Outcome>
 
-export type CopilotAttention = "ready" | "failed"
+export interface CopilotTurnInput {
+  history: InterviewMessage[]
+  flow: AtendimentoFlow
+  proposal: boolean
+  settings: CopilotSettings
+}
+
+export type CopilotTurn = (input: CopilotTurnInput, signal: AbortSignal) => Promise<InterviewTurnResult>
+
+export type CopilotAttention = "ready" | "failed" | "question"
 
 export interface CopilotOptions {
   settings: CopilotSettings
@@ -59,6 +73,7 @@ export interface CopilotOptions {
   preview: (flow: AtendimentoFlow | null, done: boolean, fresh?: boolean) => void
   applyEdit: (flow: AtendimentoFlow) => boolean
   generate: CopilotGenerate
+  turn: CopilotTurn
   engine?: () => Promise<Engine | null>
   notify?: (attention: CopilotAttention) => void
   interval?: number
@@ -90,9 +105,10 @@ export interface CopilotProposal {
 
 export type CopilotEntry =
   | { id: string; kind: "user"; text: string }
+  | { id: string; kind: "assistant"; text: string }
   | { id: string; kind: "proposal"; proposal: CopilotProposal; status: ProposalStatus }
   | { id: string; kind: "note"; text: string; tone: CopilotTone }
-  | { id: string; kind: "error"; failure: Failure; prompt?: string }
+  | { id: string; kind: "error"; failure: Failure; prompt?: string; turn?: boolean }
 
 export interface CopilotFocus {
   field: Field
@@ -101,12 +117,15 @@ export interface CopilotFocus {
 
 export interface CopilotState {
   entries: CopilotEntry[]
+  thinking: boolean
   running: boolean
   refining: boolean
   progress: GenerationProgress | null
   startedAt: number | null
   pending: string | null
   retry: string | null
+  suggestions: string[]
+  plan: string
   visible: boolean
   blocked: boolean
   attention: CopilotAttention | null
@@ -118,6 +137,7 @@ export interface CopilotStore {
   getState: () => CopilotState
   subscribe: (listener: () => void) => () => void
   send: (text: string) => boolean
+  editNow: () => boolean
   cancel: () => void
   apply: () => boolean
   discard: () => boolean
@@ -129,11 +149,14 @@ export interface CopilotStore {
   dispose: () => void
 }
 
-interface Job {
-  prompt: string
+interface Target {
   base: AtendimentoFlow
   original: AtendimentoFlow
   refines: string | null
+}
+
+interface Job extends Target {
+  prompt: string
   settings: CopilotSettings
 }
 
@@ -152,6 +175,10 @@ export const COPILOT_TEXT = {
   stale: "O fluxo aberto mudou depois desta proposta. Peça de novo para editar a versão atual.",
 } as const
 
+export const EDIT_NOW_TEXT = "Pode editar agora com o que já foi decidido."
+export const FOLLOW_UP_TEXT = "Precisa mudar mais alguma coisa no fluxo?"
+export const SILENT_TURN = "A IA não respondeu desta vez."
+
 export const STATUS_LABELS: Readonly<Record<Exclude<ProposalStatus, "pending">, string>> = {
   applied: "Aplicada",
   discarded: "Descartada",
@@ -168,18 +195,23 @@ export const SETTINGS_FIELDS: readonly Field[] = ["provider", "apiKey", "model",
 
 const INITIAL_STATE: CopilotState = {
   entries: [],
+  thinking: false,
   running: false,
   refining: false,
   progress: null,
   startedAt: null,
   pending: null,
   retry: null,
+  suggestions: [],
+  plan: "",
   visible: false,
   blocked: false,
   attention: null,
   fieldErrors: {},
   focus: null,
 }
+
+const SUGGESTION_LIMIT = 6
 
 export function credentialErrors(settings: CopilotSettings): FieldErrors {
   const info = PROVIDERS.find((entry) => entry.id === settings.provider) ?? PROVIDERS[0]
@@ -208,6 +240,51 @@ export function proposalGroups(proposal: CopilotProposal): IssueGroup[] {
   })).filter((group) => group.items.length > 0)
 }
 
+export function proposalSummary(proposal: CopilotProposal): string {
+  if (!proposal.changes) return "Proposta pronta no canvas."
+  const [added, changed, removed] = changeLabels(proposal.changes)
+  return `Proposta pronta no canvas: ${added}, ${changed} e ${removed}.`
+}
+
+export function copilotHistory(entries: readonly CopilotEntry[]): InterviewMessage[] {
+  const history: InterviewMessage[] = []
+  for (const entry of entries) {
+    if (entry.kind === "error") continue
+    const text = (entry.kind === "proposal" ? proposalSummary(entry.proposal) : entry.text).trim()
+    if (!text) continue
+    const role: InterviewMessage["role"] = entry.kind === "user" ? "user" : "assistant"
+    const last = history[history.length - 1]
+    if (last && last.role === role) last.text = `${last.text}\n\n${text}`
+    else history.push({ role, text })
+  }
+  return history
+}
+
+function chipsOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const chips: string[] = []
+  for (const item of value) {
+    if (typeof item !== "string") continue
+    const text = item.trim()
+    const key = text.toLowerCase()
+    if (!text || seen.has(key)) continue
+    seen.add(key)
+    chips.push(text)
+    if (chips.length === SUGGESTION_LIMIT) break
+  }
+  return chips
+}
+
+function turnRejection(failure: GenerateFailure | null | undefined): Rejection {
+  const details = failure?.details?.trim()
+  return {
+    code: failure?.code ?? "unknown",
+    field: requestField(failure?.field),
+    failure: { title: failure?.error?.trim() || SILENT_TURN, ...(details ? { details } : {}), items: [] },
+  }
+}
+
 function countOf(diff: FlowDiff): GenerationChanges {
   return { added: diff.added.length, changed: diff.changed.length, removed: diff.removed.length }
 }
@@ -215,6 +292,7 @@ function countOf(diff: FlowDiff): GenerationChanges {
 export function createCopilot(read: () => CopilotOptions): CopilotStore {
   let state = INITIAL_STATE
   let run: Run | null = null
+  let asking: AbortController | null = null
   let shown = false
   let sequence = 0
   let focusSequence = 0
@@ -240,7 +318,11 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
 
   const note = (text: string, tone: CopilotTone): CopilotEntry => ({ id: nextId(), kind: "note", text, tone })
 
+  const said = (text: string): CopilotEntry => ({ id: nextId(), kind: "assistant", text })
+
   const active = () => state.visible && !state.blocked
+
+  const busy = () => run !== null || asking !== null
 
   const currentFlow = (): AtendimentoFlow | null => {
     try {
@@ -287,7 +369,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     const id = state.pending
     if (!id) return
     hide()
-    set({ entries: [...mark(id, "discarded"), note(COPILOT_TEXT.stale, "warning")], pending: null })
+    set({ entries: [...mark(id, "discarded"), note(COPILOT_TEXT.stale, "warning")], pending: null, plan: "", suggestions: [] })
   }
 
   const notify = (attention: CopilotAttention) => {
@@ -336,26 +418,62 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     base: job.base,
   })
 
-  const prepare = (prompt: string): Job | null => {
+  const checkSettings = (): CopilotSettings | null => {
     const settings = read().settings
     const errors = credentialErrors(settings)
     const invalid = SETTINGS_FIELDS.find((field) => errors[field])
-    if (invalid) {
-      focusSequence += 1
-      set({ fieldErrors: { ...state.fieldErrors, ...errors }, focus: { field: invalid, seq: focusSequence } })
-      return null
-    }
+    if (!invalid) return { ...settings }
+    focusSequence += 1
+    set({ fieldErrors: { ...state.fieldErrors, ...errors }, focus: { field: invalid, seq: focusSequence } })
+    return null
+  }
+
+  const target = (): Target | null => {
     const proposal = pendingProposal()
     if (proposal) {
       if (stale(proposal)) {
         dropStale()
         return null
       }
-      return { prompt, base: proposal.flow, original: proposal.original, refines: state.pending, settings: { ...settings } }
+      return { base: proposal.flow, original: proposal.original, refines: state.pending }
     }
     const opened = currentFlow()
     if (!hasComponents(opened)) return null
-    return { prompt, base: opened, original: opened, refines: null, settings: { ...settings } }
+    return { base: opened, original: opened, refines: null }
+  }
+
+  const prepare = (prompt: string): Job | null => {
+    const settings = checkSettings()
+    if (!settings) return null
+    const found = target()
+    return found ? { ...found, prompt, settings } : null
+  }
+
+  const lastRequest = (): string => {
+    for (let index = state.entries.length - 1; index >= 0; index--) {
+      const entry = state.entries[index]
+      if (entry.kind === "user") return entry.text
+    }
+    return ""
+  }
+
+  const report = (rejection: Rejection, retry: { prompt: string } | { turn: true }, patch: Partial<CopilotState>): boolean => {
+    const field = failureField(rejection.code, rejection.field)
+    const id = nextId()
+    const unseen = !state.visible
+    const next: Partial<CopilotState> = {
+      ...patch,
+      entries: [...state.entries, { id, kind: "error", failure: rejection.failure, ...retry }],
+      retry: id,
+      ...(unseen ? { attention: "failed" as const } : {}),
+    }
+    if (field && SETTINGS_FIELDS.includes(field)) {
+      focusSequence += 1
+      next.fieldErrors = { ...state.fieldErrors, [field]: [rejection.failure.title, rejection.failure.details].filter(Boolean).join(" ") }
+      next.focus = { field, seq: focusSequence }
+    }
+    set(next)
+    return unseen
   }
 
   const finishRun = (current: Run) => {
@@ -410,6 +528,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     set({
       entries: [...entries, { id, kind: "proposal", proposal, status: "pending" }],
       pending: id,
+      plan: "",
       running: false,
       refining: false,
       progress: null,
@@ -423,24 +542,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
 
   const fail = (current: Run, rejection: Rejection) => {
     finishRun(current)
-    const field = failureField(rejection.code, rejection.field)
-    const id = nextId()
-    const unseen = !state.visible
-    const patch: Partial<CopilotState> = {
-      entries: [...state.entries, { id, kind: "error", failure: rejection.failure, prompt: current.job.prompt }],
-      retry: id,
-      running: false,
-      refining: false,
-      progress: null,
-      startedAt: null,
-      ...(unseen ? { attention: "failed" as const } : {}),
-    }
-    if (field && SETTINGS_FIELDS.includes(field)) {
-      focusSequence += 1
-      patch.fieldErrors = { ...state.fieldErrors, [field]: [rejection.failure.title, rejection.failure.details].filter(Boolean).join(" ") }
-      patch.focus = { field, seq: focusSequence }
-    }
-    set(patch)
+    const unseen = report(rejection, { prompt: current.job.prompt }, { running: false, refining: false, progress: null, startedAt: null })
     restore()
     if (unseen) notify("failed")
   }
@@ -495,12 +597,71 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     else fail(current, outcome.rejection)
   }
 
-  const start = (job: Job) => {
+  const start = (job: Job, entries: CopilotEntry[] = state.entries) => {
     const current: Run = { job, controller: new AbortController(), feed: null, live: null }
     run = current
-    set({ running: true, refining: job.refines !== null, progress: null, startedAt: now(), retry: null })
+    set({ entries, thinking: false, running: true, refining: job.refines !== null, progress: null, startedAt: now(), retry: null, suggestions: [] })
     if (active()) show(job.base, false)
     void execute(current)
+  }
+
+  const heard = (controller: AbortController) => asking === controller && !controller.signal.aborted
+
+  const misheard = (controller: AbortController, rejection: Rejection) => {
+    if (asking === controller) asking = null
+    const unseen = report(rejection, { turn: true }, { thinking: false })
+    if (unseen) notify("failed")
+  }
+
+  const answered = (controller: AbortController, turn: InterviewTurn) => {
+    if (asking === controller) asking = null
+    const message = typeof turn.message === "string" ? turn.message.trim() : ""
+    const plan = (typeof turn.plan === "string" ? turn.plan.trim() : "") || state.plan
+    const entries = message ? [...state.entries, said(message)] : state.entries
+    if (turn.action === "finish") {
+      set({ entries, thinking: false, suggestions: [], plan: "" })
+      return
+    }
+    if (turn.action === "edit" || turn.action === "generate") {
+      set({ entries, suggestions: [], plan })
+      const prompt = plan || lastRequest()
+      const job = prompt ? prepare(prompt) : null
+      if (job) start(job)
+      else set({ thinking: false })
+      return
+    }
+    const unseen = !state.visible
+    set({ entries, thinking: false, suggestions: chipsOf(turn.suggestions), plan, ...(unseen ? { attention: "question" as const } : {}) })
+    if (unseen) notify("question")
+  }
+
+  async function converse(controller: AbortController, input: CopilotTurnInput): Promise<void> {
+    let result: InterviewTurnResult | null | undefined
+    try {
+      result = await read().turn(input, controller.signal)
+    } catch {
+      if (heard(controller)) misheard(controller, { code: "network", failure: CONNECTION_FAILURE })
+      return
+    }
+    if (!heard(controller)) return
+    if (result?.ok) answered(controller, result.turn)
+    else misheard(controller, turnRejection(result?.failure))
+  }
+
+  const think = (settings: CopilotSettings, found: Target, entries: CopilotEntry[]) => {
+    const controller = new AbortController()
+    asking = controller
+    set({ entries, thinking: true, suggestions: [], retry: null })
+    void converse(controller, { history: copilotHistory(entries), flow: found.base, proposal: found.refines !== null, settings })
+  }
+
+  const listen = (entries: () => CopilotEntry[]): boolean => {
+    const settings = checkSettings()
+    if (!settings) return false
+    const found = target()
+    if (!found) return false
+    think(settings, found, entries())
+    return true
   }
 
   const store: CopilotStore = {
@@ -513,14 +674,24 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     },
     send(text) {
       const prompt = text.trim()
-      if (!prompt || prompt.length > LIMITS.prompt || run || state.blocked) return false
-      const job = prepare(prompt)
+      if (!prompt || prompt.length > LIMITS.prompt || busy() || state.blocked) return false
+      return listen(() => [...state.entries, { id: nextId(), kind: "user", text: prompt }])
+    },
+    editNow() {
+      if (busy() || state.blocked || !state.plan) return false
+      const job = prepare(state.plan)
       if (!job) return false
-      set({ entries: [...state.entries, { id: nextId(), kind: "user", text: prompt }] })
-      start(job)
+      start(job, [...state.entries, { id: nextId(), kind: "user", text: EDIT_NOW_TEXT }])
       return true
     },
     cancel() {
+      const controller = asking
+      if (controller) {
+        asking = null
+        controller.abort()
+        set({ thinking: false, entries: [...state.entries, note(COPILOT_TEXT.cancelled, "muted")] })
+        return
+      }
       const current = run
       if (!current) return
       run = null
@@ -536,7 +707,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       restore()
     },
     apply() {
-      if (run || state.blocked) return false
+      if (busy() || state.blocked) return false
       const id = state.pending
       const proposal = pendingProposal()
       if (!id || !proposal) return false
@@ -562,25 +733,32 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
         set({ entries: [...state.entries, note(COPILOT_TEXT.rejected, "danger")] })
         return false
       }
-      set({ entries: [...mark(id, "applied"), note(COPILOT_TEXT.applied, "success")], pending: null })
+      set({
+        entries: [...mark(id, "applied"), note(COPILOT_TEXT.applied, "success"), said(FOLLOW_UP_TEXT)],
+        pending: null,
+        plan: "",
+        suggestions: [],
+      })
       return true
     },
     discard() {
-      if (run) return false
+      if (busy()) return false
       const id = state.pending
       if (!id || !pendingProposal()) return false
       hide()
-      set({ entries: [...mark(id, "discarded"), note(COPILOT_TEXT.discarded, "muted")], pending: null })
+      set({ entries: [...mark(id, "discarded"), note(COPILOT_TEXT.discarded, "muted")], pending: null, plan: "", suggestions: [] })
       return true
     },
     retry() {
-      if (run || state.blocked || !state.retry) return false
+      if (busy() || state.blocked || !state.retry) return false
       const entry = state.entries.find((item) => item.id === state.retry)
-      if (!entry || entry.kind !== "error" || !entry.prompt) return false
+      if (!entry || entry.kind !== "error") return false
+      const without = () => state.entries.filter((item) => item.id !== entry.id)
+      if (entry.turn) return listen(without)
+      if (!entry.prompt) return false
       const job = prepare(entry.prompt)
       if (!job) return false
-      set({ entries: state.entries.filter((item) => item.id !== entry.id) })
-      start(job)
+      start(job, without())
       return true
     },
     setVisible(visible) {
@@ -613,13 +791,16 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       set({ fieldErrors: next })
     },
     dispose() {
+      const controller = asking
       const current = run
+      asking = null
       run = null
+      controller?.abort()
       if (current) {
         current.controller.abort()
         current.feed?.stop()
-        set({ running: false, refining: false, progress: null, startedAt: null })
       }
+      if (controller || current) set({ thinking: false, running: false, refining: false, progress: null, startedAt: null })
       hide()
     },
   }

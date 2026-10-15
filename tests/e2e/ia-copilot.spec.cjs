@@ -6,6 +6,7 @@ const { importFlow } = require('../../lib/atendimento/format.ts')
 const { START_TYPE } = require('../../lib/atendimento/catalog.ts')
 const { assembleFlow, finalizeFlow } = require('../../lib/atendimento/ai/assemble.ts')
 const { flowToRi } = require('../../lib/atendimento/ai/edit.ts')
+const { INTERVIEW_SCHEMA_NAME } = require('../../lib/atendimento/ai/interview.ts')
 
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
 const HOST = 'api.openai.com'
@@ -15,7 +16,7 @@ const EDIT_BANNER = 'Editando com IA. As mudanças aparecem aqui conforme chegam
 const EDIT_DONE = 'Edição pronta. Aplique ou descarte no Copiloto.'
 const FILL_ON = 'Nomes, IDs e URLs saem sempre preenchidos. Os valores provisórios aparecem em Dados da plataforma para você conferir.'
 const FILL_OFF = 'Dados cadastrados na plataforma, como nomes, IDs e URLs, ficam em branco para você completar no editor.'
-const INTRO = 'O copiloto edita o fluxo aberto a partir do seu pedido. As mudanças aparecem no canvas para você conferir e só valem quando você aplicar. Desfazer (Ctrl+Z) volta ao fluxo anterior.'
+const INTRO = 'O copiloto edita o fluxo aberto a partir do seu pedido. Quando faltar alguma informação, como o texto de uma opção ou o destino de uma transferência, ele pergunta antes de mudar. As mudanças aparecem no canvas para você conferir e só valem quando você aplicar. Desfazer (Ctrl+Z) volta ao fluxo anterior.'
 const EXAMPLES = [
   'Peça o CPF do cliente antes do menu principal',
   'Troque a mensagem de boas-vindas por uma mais curta',
@@ -29,12 +30,41 @@ const EMPTY_NOTICE = 'O fluxo aberto só tem o Início. Para criar um fluxo do z
 const REFINE_HINT = 'O próximo pedido ajusta a proposta mostrada no canvas.'
 const FALLBACK_ERROR = 'A rota de reserva não fazia parte deste teste.'
 const SUMMARY = 'OpenAI · GPT-6.1 Sol · Esforço equilibrado'
+const THINKING = 'Pensando no pedido.'
+const FOLLOW_UP = 'Precisa mudar mais alguma coisa no fluxo?'
+const EDIT_NOW = 'Pode editar agora com o que já foi decidido.'
+const EDIT_NOW_LABEL = 'Editar agora com o que já foi decidido'
+const FULL_REQUEST = 'Ver o pedido completo'
+const KEY_REJECTED = 'A chave da API foi recusada.'
+const KEY_DETAILS = 'Confira a chave da OpenAI e tente novamente.'
 const BOLETO_TEXT = 'Acesse a segunda via em https://boletos.exemplo.com.br.'
 const FAREWELL = 'Obrigado pelo contato. Até logo.'
 const REFINED_BOLETO = 'Segunda via direto no link https://boletos.exemplo.com.br/2via.'
 const REFINED_FAREWELL = 'Obrigado pelo contato. Volte sempre que precisar.'
 const NEW_OPTION = 'Segunda via de boleto'
 const PANEL_WIDTH = 384
+
+const PLAN = 'No menu Como podemos ajudar?, acrescente a opção Segunda via de boleto, que envia o link https://boletos.exemplo.com.br e encerra o atendimento.'
+const REFINE_PLAN = 'Na proposta, troque a mensagem da Segunda via de boleto por um link direto para a segunda via e deixe a despedida mais calorosa, convidando o cliente a voltar sempre que precisar.'
+const EDIT_TURN = { message: 'Vou acrescentar a opção Segunda via de boleto no menu principal.', suggestions: [], action: 'edit', plan: PLAN }
+const REFINE_TURN = { message: 'Vou trocar a mensagem do boleto e a despedida.', suggestions: [], action: 'edit', plan: REFINE_PLAN }
+const ASK_EDIT = {
+  message: 'A opção Segunda via de boleto entra no fim do menu principal e envia o link do boleto. Fica assim ou quer outro texto?',
+  suggestions: ['Pode ser assim', 'Quero outro texto'],
+  action: 'ask',
+  plan: PLAN,
+}
+
+const OPTION_REQUEST = 'crie uma opcao 8'
+const OPTION_PLAN = 'No menu Como podemos ajudar?, acrescente a opção 8 Segunda via de boleto, que envia o link https://boletos.exemplo.com.br e encerra o atendimento.'
+const ASK_OPTION = {
+  message: 'O menu Como podemos ajudar? tem 7 opções. Pensei na opção 8 Segunda via de boleto, que envia o link do boleto e encerra o atendimento. Fica assim ou quer outro texto?',
+  suggestions: ['Pode ser assim', 'Quero outro texto', 'Transferir para a recepção'],
+  action: 'ask',
+  plan: 'No menu Como podemos ajudar?, acrescente a opção 8 Segunda via de boleto.',
+}
+const EDIT_OPTION = { message: 'Vou acrescentar a opção 8 Segunda via de boleto no fim do menu.', suggestions: [], action: 'edit', plan: OPTION_PLAN }
+const OPTIONS = ['Agendar consulta', 'Remarcar consulta', 'Cancelar consulta', 'Resultado de exames', 'Convênios aceitos', 'Endereço e horários', 'Falar com a recepção']
 
 const SOURCE = {
   name: 'Atendimento Clínica Exemplo',
@@ -55,31 +85,73 @@ const SOURCE = {
   ],
 }
 
-const BASE_FLOW = importFlow(JSON.parse(JSON.stringify(finalizeFlow(assembleFlow(SOURCE, { now: new Date('2026-01-15T12:00:00.000Z') })).flow)))
-const BASE_RI = flowToRi(BASE_FLOW)
-const MENU = BASE_RI.nodes.find((node) => node.type === 'envio_mensagem')
-const MENU_ID = MENU.id
-const DELTA = {
-  name: '',
-  description: '',
+const MENU_SOURCE = {
+  name: 'Atendimento Clínica Exemplo',
+  description: 'Menu principal com sete opções',
   nodes: [
-    {
-      id: MENU_ID,
-      type: 'envio_mensagem',
-      config: MENU.config.map((entry) => (entry.key === 'options' ? { key: 'options', value: JSON.stringify([{ text: 'Agendar consulta' }, { text: 'Encerrar' }, { text: NEW_OPTION }]) } : entry)),
-    },
-    { id: 'boleto', type: 'envio_pergunta', config: [{ key: 'template', value: BOLETO_TEXT }] },
-    { id: 'fim_boleto', type: 'finalizar', config: [] },
+    { id: 'boas_vindas', type: 'envio_pergunta', config: [{ key: 'template', value: 'Olá, #NAME. Você está no atendimento da Clínica Exemplo.' }] },
+    { id: 'menu', type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify(OPTIONS.map((text) => ({ text }))) }] },
+    { id: 'agenda', type: 'departamentos', config: [{ key: 'name', value: 'Agendamento' }, { key: 'departamento', value: 'agendamento' }] },
+    { id: 'exames', type: 'envio_pergunta', config: [{ key: 'template', value: 'Os resultados ficam em https://exames.exemplo.com.br.' }] },
+    { id: 'convenios', type: 'envio_pergunta', config: [{ key: 'template', value: 'Atendemos os principais convênios da região.' }] },
+    { id: 'endereco', type: 'envio_pergunta', config: [{ key: 'template', value: 'Rua das Flores, 100. De segunda a sexta, das 8h às 18h.' }] },
+    { id: 'recepcao', type: 'departamentos', config: [{ key: 'name', value: 'Recepção' }, { key: 'departamento', value: 'recepcao' }] },
+    { id: 'despedida', type: 'envio_pergunta', config: [{ key: 'template', value: FAREWELL }] },
+    { id: 'fim', type: 'finalizar', config: [] },
   ],
   edges: [
-    ...BASE_RI.edges.filter((edge) => edge.from === MENU_ID),
-    { from: MENU_ID, output: NEW_OPTION, to: 'boleto' },
-    { from: 'boleto', output: '', to: 'fim_boleto' },
+    { from: 'inicio', output: '', to: 'boas_vindas' },
+    { from: 'boas_vindas', output: '', to: 'menu' },
+    { from: 'menu', output: 'Agendar consulta', to: 'agenda' },
+    { from: 'menu', output: 'Remarcar consulta', to: 'agenda' },
+    { from: 'menu', output: 'Cancelar consulta', to: 'agenda' },
+    { from: 'menu', output: 'Resultado de exames', to: 'exames' },
+    { from: 'menu', output: 'Convênios aceitos', to: 'convenios' },
+    { from: 'menu', output: 'Endereço e horários', to: 'endereco' },
+    { from: 'menu', output: 'Falar com a recepção', to: 'recepcao' },
+    { from: 'exames', output: '', to: 'despedida' },
+    { from: 'convenios', output: '', to: 'despedida' },
+    { from: 'endereco', output: '', to: 'despedida' },
+    { from: 'despedida', output: '', to: 'fim' },
   ],
 }
+
+const assembled = (source) => importFlow(JSON.parse(JSON.stringify(finalizeFlow(assembleFlow(source, { now: new Date('2026-01-15T12:00:00.000Z') })).flow)))
+
+function optionDelta(flow) {
+  const ri = flowToRi(flow)
+  const menu = ri.nodes.find((node) => node.type === 'envio_mensagem')
+  return {
+    menu,
+    delta: {
+      name: '',
+      description: '',
+      nodes: [
+        {
+          id: menu.id,
+          type: 'envio_mensagem',
+          config: menu.config.map((entry) => (entry.key === 'options' ? { key: 'options', value: JSON.stringify([...JSON.parse(entry.value), { text: NEW_OPTION }]) } : entry)),
+        },
+        { id: 'boleto', type: 'envio_pergunta', config: [{ key: 'template', value: BOLETO_TEXT }] },
+        { id: 'fim_boleto', type: 'finalizar', config: [] },
+      ],
+      edges: [
+        ...ri.edges.filter((edge) => edge.from === menu.id),
+        { from: menu.id, output: NEW_OPTION, to: 'boleto' },
+        { from: 'boleto', output: '', to: 'fim_boleto' },
+      ],
+    },
+  }
+}
+
+const BASE_FLOW = assembled(SOURCE)
+const { menu: MENU, delta: DELTA } = optionDelta(BASE_FLOW)
+const MENU_ID = MENU.id
 const TEXT = JSON.stringify(DELTA)
 const AFTER_NODES = TEXT.indexOf('"edges"')
 const BASE_STATE = { name: BASE_FLOW.name, nodes: BASE_FLOW.nodes.map((node) => node.id) }
+const MENU_FLOW = assembled(MENU_SOURCE)
+const OPTION_TEXT = JSON.stringify(optionDelta(MENU_FLOW).delta)
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const event = (payload) => `data: ${JSON.stringify(payload)}\n\n`
@@ -118,7 +190,10 @@ async function engineEdit(baseFlow, text, prompt) {
 }
 
 let expected
-const expectedEdit = () => (expected ??= engineEdit(BASE_FLOW, TEXT, PROMPT))
+const expectedEdit = () => (expected ??= engineEdit(BASE_FLOW, TEXT, PLAN))
+
+let option
+const expectedOption = () => (option ??= engineEdit(MENU_FLOW, OPTION_TEXT, OPTION_PLAN))
 
 let refined
 function expectedRefinement() {
@@ -136,7 +211,7 @@ function expectedRefinement() {
       edges: [],
     }
     const text = JSON.stringify(delta)
-    return { text, result: await engineEdit(first, text, REFINE_PROMPT) }
+    return { text, result: await engineEdit(first, text, REFINE_PLAN) }
   })()
   return refined
 }
@@ -220,8 +295,10 @@ const test = base.extend({
     const ids = []
     const ai = {
       calls: [],
+      turns: [],
+      builds: [],
       fallbacks: [],
-      replies: [],
+      unexpected: [],
       hold() {
         const gate = {}
         gate.reached = new Promise((resolve) => {
@@ -233,12 +310,24 @@ const test = base.extend({
         gates.push(gate)
         return gate
       },
+      say(turn, ...holds) {
+        ai.turns.push({ steps: [...holds, JSON.stringify(turn)] })
+      },
+      turnCalls: () => ai.calls.filter((call) => call.kind === 'turn'),
+      buildCalls: () => ai.calls.filter((call) => call.kind === 'build'),
     }
     await page.route((url) => url.hostname === HOST, async (route) => {
       const request = route.request()
-      ai.calls.push({ url: request.url(), body: request.postDataJSON(), headers: request.headers() })
-      const reply = ai.replies.shift() ?? { steps: [TEXT] }
+      const body = request.postDataJSON()
+      const kind = body?.text?.format?.name === INTERVIEW_SCHEMA_NAME ? 'turn' : 'build'
+      ai.calls.push({ kind, url: request.url(), body, headers: request.headers() })
+      const reply = kind === 'turn' ? ai.turns.shift() : ai.builds.shift() ?? { steps: [TEXT] }
+      if (!reply) {
+        ai.unexpected.push(kind)
+        return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Resposta não prevista no teste.', type: 'invalid_request_error' } }) })
+      }
       if (reply.blocked) return route.fulfill({ status: 200, contentType: 'text/event-stream', headers: { 'access-control-allow-origin': 'https://platform.openai.com' }, body: '' })
+      if (reply.status) return route.fulfill({ status: reply.status, contentType: 'application/json', body: JSON.stringify(reply.body) })
       const id = crypto.randomUUID()
       server.sessions.set(id, script(reply.steps))
       ids.push(id)
@@ -251,6 +340,8 @@ const test = base.extend({
     await use(ai)
     for (const gate of gates) gate.open()
     for (const id of ids) server.sessions.delete(id)
+    expect(ai.unexpected, 'chamadas ao provedor sem resposta prevista').toEqual([])
+    expect(ai.calls.every((call) => !JSON.stringify(call.body).includes(KEY)), 'a chave não vai no corpo da requisição').toBe(true)
   },
 })
 
@@ -258,7 +349,16 @@ test.use({ ignoreHTTPSErrors: true })
 
 const trigger = (page) => page.locator('[data-copilot-trigger]')
 const copilot = (page) => page.getByRole('region', { name: 'Copiloto', exact: true })
+const conversation = (panel) => panel.getByRole('log', { name: 'Conversa com o Copiloto' })
+const messages = (panel) => conversation(panel).locator(':scope > div.flex > p, :scope > p')
+const chips = (panel) => panel.getByRole('group', { name: 'Sugestões de resposta' }).getByRole('button')
+const editNowButton = (panel) => panel.getByRole('button', { name: EDIT_NOW_LABEL, exact: true })
 const composer = (panel) => panel.getByLabel('O que você quer mudar no fluxo', { exact: true })
+const sendButton = (panel) => panel.getByRole('button', { name: 'Enviar pedido', exact: true })
+const you = (text) => `Você: ${text}`
+const says = (turn) => `Copiloto: ${typeof turn === 'string' ? turn : turn.message}`
+const inputOf = (call) => JSON.stringify(call.body.input)
+const historyOf = (call) => JSON.stringify(call.body.input.filter((entry) => entry.role === 'user' || entry.role === 'assistant'))
 const stored = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('workflow')))
 const saved = async (page) => {
   const flow = await stored(page)
@@ -267,12 +367,12 @@ const saved = async (page) => {
 const library = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('workflow-library') || '[]').map((entry) => ({ id: entry.id, name: entry.flow.name, nodes: entry.flow.nodes.map((node) => node.id) })))
 const components = (flow) => flow.nodes.filter((node) => node.data.type !== START_TYPE).length
 
-async function openEditor(page) {
+async function openEditor(page, flow = BASE_FLOW) {
   await page.goto('/flow')
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
-  await page.getByLabel('Importar arquivo JSON').setInputFiles({ name: 'base.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(BASE_FLOW)) })
-  await expect(page.getByLabel('Nome do fluxo')).toHaveValue(BASE_FLOW.name)
-  await expect(page.locator('.react-flow__node')).toHaveCount(BASE_FLOW.nodes.length)
+  await page.getByLabel('Importar arquivo JSON').setInputFiles({ name: 'base.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(flow)) })
+  await expect(page.getByLabel('Nome do fluxo')).toHaveValue(flow.name)
+  await expect(page.locator('.react-flow__node')).toHaveCount(flow.nodes.length)
 }
 
 async function openCopilot(page) {
@@ -323,14 +423,16 @@ test('the Copiloto button opens a side panel next to the canvas, keeps it mounte
   await expect(panel.getByRole('button', { name: 'Configurar IA', exact: true })).toHaveAttribute('aria-expanded', 'true')
   await expect(panel.getByLabel('Chave da API da OpenAI')).toBeFocused()
   await expect(panel.getByText('A chave fica só nesta página, não é salva e serve apenas para chamar a API da OpenAI. É a mesma usada no Gerar com IA.')).toBeVisible()
-  const log = panel.getByRole('log', { name: 'Conversa com o Copiloto' })
+  const log = conversation(panel)
   await expect(log).toHaveAttribute('aria-live', 'polite')
   await expect(log.getByText(INTRO)).toBeVisible()
   await expect(log.getByText('Exemplos:', { exact: true })).toBeVisible()
   for (const example of EXAMPLES) await expect(log.getByRole('button', { name: example, exact: true })).toBeVisible()
   await expect(composer(panel)).toHaveAttribute('placeholder', 'O que você quer mudar no fluxo?')
-  await expect(panel.getByRole('button', { name: 'Enviar pedido', exact: true })).toBeDisabled()
+  await expect(sendButton(panel)).toBeDisabled()
   await expect(panel.getByRole('checkbox', { name: 'Preencher todos os campos' })).toBeChecked()
+  await expect(panel.getByRole('group', { name: 'Sugestões de resposta' })).toHaveCount(0)
+  await expect(editNowButton(panel)).toHaveCount(0)
 
   const box = await panel.boundingBox()
   const viewport = page.viewportSize()
@@ -352,7 +454,7 @@ test('the Copiloto button opens a side panel next to the canvas, keeps it mounte
   await log.getByRole('button', { name: EXAMPLES[2], exact: true }).click()
   await expect(composer(panel)).toHaveValue(EXAMPLES[2])
   await expect(composer(panel)).toBeFocused()
-  await expect(panel.getByRole('button', { name: 'Enviar pedido', exact: true })).toBeEnabled()
+  await expect(sendButton(panel)).toBeEnabled()
 
   await button.click()
   await expect(panel).toBeHidden()
@@ -389,12 +491,198 @@ test('Gerar com IA only creates flows: Criar fluxo novo and Conversar com a IA, 
   await expect(dialog.getByRole('radiogroup', { name: 'O que fazer' }).getByRole('radio')).toHaveCount(2)
 })
 
+test('crie uma opcao 8: the Copiloto asks what the new option does before editing, edits with the plan, Aplicar applies it and it asks if anything else is needed', async ({ page, ai }) => {
+  const result = await expectedOption()
+  const final = result.workflow
+  expect(result.changes).toEqual({ added: 2, changed: 1, removed: 0 })
+  const thinking = ai.hold()
+  ai.say(ASK_OPTION, thinking)
+  ai.say(EDIT_OPTION)
+  ai.builds.push({ steps: [OPTION_TEXT] })
+
+  await openEditor(page, MENU_FLOW)
+  const panel = await openCopilot(page)
+  await typeKey(panel)
+  await ask(panel, OPTION_REQUEST)
+  const log = conversation(panel)
+  await thinking.reached
+  await expect(log.getByRole('status')).toHaveText(THINKING)
+  await expect(panel.getByRole('button', { name: 'Parar', exact: true })).toBeVisible()
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST)])
+  await composer(panel).fill('outro pedido')
+  await expect(sendButton(panel)).toBeDisabled()
+  await composer(panel).press('Enter')
+  await expect(composer(panel)).toHaveValue('outro pedido')
+  await composer(panel).fill('')
+  await expect(page.getByText(EDIT_BANNER)).toHaveCount(0)
+  thinking.open()
+
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_OPTION)])
+  await expect(chips(panel)).toHaveText(ASK_OPTION.suggestions)
+  await expect(editNowButton(panel)).toHaveText('Editar agora')
+  await expect(log.getByRole('status')).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'Parar', exact: true })).toHaveCount(0)
+  await expect(page.getByText(EDIT_BANNER)).toHaveCount(0)
+  await expect(page.locator('.react-flow__node')).toHaveCount(MENU_FLOW.nodes.length)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+  const first = ai.turnCalls()[0]
+  expect(first.headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(first.body).toMatchObject({ model: 'gpt-6.1-sol', stream: true })
+  expect(inputOf(first)).toContain('# Resumo do fluxo aberto')
+  expect(inputOf(first)).toContain('Como podemos ajudar?')
+  expect(historyOf(first)).toContain(OPTION_REQUEST)
+
+  await chips(panel).filter({ hasText: 'Pode ser assim' }).click()
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(['2 componentes novos', '1 alterado', '0 removidos'])
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_OPTION), you('Pode ser assim'), says(EDIT_OPTION)])
+  await expect(panel.getByRole('group', { name: 'Sugestões de resposta' })).toHaveCount(0)
+  await expect(editNowButton(panel)).toHaveCount(0)
+  await expect(page.getByText(EDIT_DONE)).toBeVisible()
+  await expect(page.locator('.react-flow')).toContainText(NEW_OPTION)
+  await expect(page.locator('.react-flow')).toContainText(BOLETO_TEXT)
+  expect(ai.turnCalls()).toHaveLength(2)
+  const second = ai.turnCalls()[1]
+  expect(historyOf(second)).toContain(OPTION_REQUEST)
+  expect(historyOf(second)).toContain(ASK_OPTION.message)
+  expect(historyOf(second)).toContain('Pode ser assim')
+  expect(inputOf(second)).toContain('# Resumo do fluxo aberto')
+  expect(ai.buildCalls()).toHaveLength(1)
+  const build = JSON.stringify(ai.buildCalls()[0].body)
+  expect(build).toContain('# Modo de edição')
+  expect(build).toContain(OPTION_PLAN)
+  expect(build).not.toContain(OPTION_REQUEST)
+  expect(ai.buildCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(ai.fallbacks).toEqual([])
+  expect(await saved(page)).toEqual({ name: MENU_FLOW.name, nodes: MENU_FLOW.nodes.map((node) => node.id) })
+
+  await panel.getByText(FULL_REQUEST, { exact: true }).click()
+  await expect(panel.getByText(OPTION_PLAN, { exact: true })).toBeVisible()
+
+  await panel.getByRole('button', { name: 'Aplicar', exact: true }).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_OPTION), you('Pode ser assim'), says(EDIT_OPTION), APPLIED, says(FOLLOW_UP)])
+  await expect(panel.getByText('Aplicada', { exact: true })).toBeVisible()
+  await expect(page.locator('.react-flow__node')).toHaveCount(final.nodes.length)
+  await expect(page.locator('.react-flow')).toContainText(NEW_OPTION)
+  await expect.poll(() => saved(page)).toEqual({ name: MENU_FLOW.name, nodes: final.nodes.map((node) => node.id) })
+  await expect(composer(panel)).toHaveAttribute('placeholder', 'O que você quer mudar no fluxo?')
+  await page.waitForTimeout(300)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(ai.buildCalls()).toHaveLength(1)
+})
+
+test('Editar agora edits right away with what was decided, without another question', async ({ page, ai }) => {
+  const final = (await expectedEdit()).workflow
+  const hold = ai.hold()
+  ai.say(ASK_EDIT)
+  ai.builds.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
+
+  await openEditor(page)
+  const panel = await openCopilot(page)
+  await typeKey(panel)
+  await ask(panel, PROMPT)
+  await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT)])
+  await expect(chips(panel)).toHaveText(ASK_EDIT.suggestions)
+  const editNow = editNowButton(panel)
+  await expect(editNow).toHaveText('Editar agora')
+  await expect(editNow).toHaveAttribute('title', EDIT_NOW_LABEL)
+
+  await editNow.click()
+  await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT), you(EDIT_NOW)])
+  await expect(editNow).toHaveCount(0)
+  await expect(panel.getByRole('group', { name: 'Sugestões de resposta' })).toHaveCount(0)
+  await hold.reached
+  await expect(panel.getByRole('button', { name: 'Parar', exact: true })).toBeVisible()
+  await expect(page.getByText(EDIT_BANNER)).toBeVisible()
+  await expect(page.locator('.react-flow')).toContainText(BOLETO_TEXT)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
+  const build = JSON.stringify(ai.buildCalls()[0].body)
+  expect(build).toContain(PLAN)
+  expect(build).not.toContain(PROMPT)
+  hold.open()
+
+  await proposal(panel)
+  await expect(page.locator('.react-flow__node')).toHaveCount(final.nodes.length)
+  await panel.getByText(FULL_REQUEST, { exact: true }).click()
+  await expect(panel.getByText(PLAN, { exact: true })).toBeVisible()
+  await expect(editNow).toHaveCount(0)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(await saved(page)).toEqual(BASE_STATE)
+})
+
+test('Parar while the Copiloto thinks keeps the open flow and the late answer never shows up', async ({ page, ai }) => {
+  const late = ai.hold()
+  ai.say(ASK_EDIT, late)
+  await openEditor(page)
+  const panel = await openCopilot(page)
+  await typeKey(panel)
+  await ask(panel, PROMPT)
+  await late.reached
+  const log = conversation(panel)
+  await expect(log.getByRole('status')).toHaveText(THINKING)
+  await expect(panel.getByRole('button', { name: 'Aplicar', exact: true })).toHaveCount(0)
+  await panel.getByRole('button', { name: 'Parar', exact: true }).click()
+  await expect(messages(panel)).toHaveText([you(PROMPT), CANCELLED])
+  await expect(log.getByRole('status')).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'Parar', exact: true })).toHaveCount(0)
+  await expect(composer(panel)).toBeFocused()
+  late.open()
+  await page.waitForTimeout(500)
+  await expect(messages(panel)).toHaveText([you(PROMPT), CANCELLED])
+  await expect(log.getByText(ASK_EDIT.message)).toHaveCount(0)
+  await expect(panel.getByRole('group', { name: 'Sugestões de resposta' })).toHaveCount(0)
+  await expect(editNowButton(panel)).toHaveCount(0)
+  await expect(page.locator('.react-flow__node')).toHaveCount(BASE_FLOW.nodes.length)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  ai.say(ASK_EDIT)
+  await ask(panel, PROMPT)
+  await expect(messages(panel)).toHaveText([you(PROMPT), CANCELLED, you(PROMPT), says(ASK_EDIT)])
+  await expect(chips(panel)).toHaveText(ASK_EDIT.suggestions)
+  expect(historyOf(ai.turnCalls()[1])).toContain(CANCELLED)
+  expect(ai.buildCalls()).toHaveLength(0)
+})
+
+test('a key refused on the question marks the key field and Tentar de novo repeats the same turn', async ({ page, ai }) => {
+  ai.turns.push({ status: 401, body: { error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } } })
+  ai.say(ASK_EDIT)
+  await openEditor(page)
+  const panel = await openCopilot(page)
+  await typeKey(panel)
+  await ask(panel, PROMPT)
+
+  const alert = panel.getByRole('alert')
+  await expect(alert).toBeVisible({ timeout: 15000 })
+  await expect(alert).toContainText(KEY_REJECTED)
+  await expect(alert).toContainText(KEY_DETAILS)
+  await expect(alert).not.toContainText(KEY)
+  await expect(panel.getByRole('button', { name: 'Configurar IA', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await expect(panel.getByLabel('Chave da API da OpenAI')).toHaveAttribute('aria-invalid', 'true')
+  await expect(messages(panel)).toHaveText([you(PROMPT)])
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+
+  await alert.getByRole('button', { name: 'Tentar de novo', exact: true }).click()
+  await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT)])
+  await expect(alert).toHaveCount(0)
+  await expect(chips(panel)).toHaveText(ASK_EDIT.suggestions)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(inputOf(ai.turnCalls()[1])).toBe(inputOf(ai.turnCalls()[0]))
+  expect(ai.buildCalls()).toHaveLength(0)
+})
+
 test('an edit through the Copiloto shows live on the canvas, lists the changes and Aplicar is one undoable step in the same Meus fluxos entry', async ({ page, ai }) => {
   const result = await expectedEdit()
   const final = result.workflow
   expect(result.changes).toEqual({ added: 2, changed: 1, removed: 0 })
   const hold = ai.hold()
-  ai.replies.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
+  ai.say(EDIT_TURN)
+  ai.builds.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
 
   await openEditor(page)
   await page.getByRole('button', { name: 'Novo fluxo', exact: true }).click()
@@ -408,9 +696,10 @@ test('an edit through the Copiloto shows live on the canvas, lists the changes a
   const panel = await openCopilot(page)
   await typeKey(panel)
   await ask(panel, PROMPT)
-  const log = panel.getByRole('log', { name: 'Conversa com o Copiloto' })
-  await expect(log.getByText(PROMPT)).toHaveText(`Você: ${PROMPT}`)
+  const log = conversation(panel)
+  await expect(log.getByText(PROMPT)).toHaveText(you(PROMPT))
   await expect(log.getByText(INTRO)).toHaveCount(0)
+  await expect(log.getByText(EDIT_TURN.message)).toHaveText(says(EDIT_TURN))
   await expect(panel.getByRole('button', { name: 'Parar', exact: true })).toBeVisible()
   await expect(log.getByRole('status').first()).toHaveText(/^(Enviando a solicitação|Preparando a edição|Editando o fluxo, rodada 1 de 3)\.$/)
 
@@ -425,8 +714,8 @@ test('an edit through the Copiloto shows live on the canvas, lists the changes a
   expect(await saved(page)).toEqual(BASE_STATE)
 
   hold.open()
-  const chips = await proposal(panel)
-  await expect(chips).toHaveText(['2 componentes novos', '1 alterado', '0 removidos'])
+  const chipsOfChanges = await proposal(panel)
+  await expect(chipsOfChanges).toHaveText(['2 componentes novos', '1 alterado', '0 removidos'])
   await expect(panel.getByRole('heading', { name: 'Edição pronta', exact: true })).toBeVisible()
   await expect(panel.getByText('GPT-6.1 Sol · Esforço equilibrado · 33 tokens', { exact: true })).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Parar', exact: true })).toHaveCount(0)
@@ -435,19 +724,28 @@ test('an edit through the Copiloto shows live on the canvas, lists the changes a
   await expect(nodes).toHaveCount(final.nodes.length)
   await expect(composer(panel)).toHaveAttribute('placeholder', 'Peça um ajuste nesta proposta')
   await expect(panel.getByText(REFINE_HINT, { exact: true })).toBeVisible()
-  expect(ai.calls).toHaveLength(1)
-  const sent = JSON.stringify(ai.calls[0].body)
+  await expect(panel.getByText(PLAN, { exact: true })).toBeHidden()
+  await panel.getByText(FULL_REQUEST, { exact: true }).click()
+  await expect(panel.getByText(PLAN, { exact: true })).toBeVisible()
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
+  const asked = inputOf(ai.turnCalls()[0])
+  expect(asked).toContain('# Resumo do fluxo aberto')
+  expect(asked).toContain(PROMPT)
+  const sent = JSON.stringify(ai.buildCalls()[0].body)
   expect(sent).toContain('# Modo de edição')
   expect(sent).toContain('# Fluxo atual')
-  expect(sent).toContain(PROMPT)
-  expect(sent).not.toContain(KEY)
-  expect(ai.calls[0].headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(sent).toContain(PLAN)
+  expect(sent).not.toContain(PROMPT)
+  expect(ai.turnCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(ai.buildCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
   expect(ai.fallbacks).toEqual([])
   expect(await saved(page)).toEqual(BASE_STATE)
 
   await panel.getByRole('button', { name: 'Aplicar', exact: true }).click()
   await expect(page.getByText('Alterações aplicadas', { exact: true })).toBeVisible()
   await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect(log.getByText(FOLLOW_UP, { exact: false })).toHaveText(says(FOLLOW_UP))
   await expect(panel.getByText('Aplicada', { exact: true })).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Aplicar', exact: true })).toHaveCount(0)
   await expect(page.getByText(EDIT_DONE)).toHaveCount(0)
@@ -478,10 +776,12 @@ test('an edit through the Copiloto shows live on the canvas, lists the changes a
   const undone = await stored(page)
   expect(undone.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data }))).toEqual(BASE_FLOW.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data })))
   expect(undone.edges).toEqual(BASE_FLOW.edges)
+  expect(ai.turnCalls()).toHaveLength(1)
 })
 
 test('Descartar and Parar leave the open flow exactly as it was', async ({ page, ai }) => {
   const final = (await expectedEdit()).workflow
+  ai.say(EDIT_TURN)
   await openEditor(page)
   const panel = await openCopilot(page)
   await typeKey(panel)
@@ -502,7 +802,8 @@ test('Descartar and Parar leave the open flow exactly as it was', async ({ page,
   await expect(composer(panel)).toHaveAttribute('placeholder', 'O que você quer mudar no fluxo?')
 
   const hold = ai.hold()
-  ai.replies.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
+  ai.say(EDIT_TURN)
+  ai.builds.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
   await ask(panel, PROMPT)
   await expect(page.getByText(EDIT_BANNER)).toBeVisible()
   await hold.reached
@@ -514,10 +815,13 @@ test('Descartar and Parar leave the open flow exactly as it was', async ({ page,
   await expect(nodes).toHaveCount(BASE_FLOW.nodes.length)
   await expect(canvas).not.toContainText(BOLETO_TEXT)
   await expect(composer(panel)).toBeFocused()
+  await expect(editNowButton(panel)).toBeVisible()
   hold.open()
   await sleep(300)
   await expect(panel.getByRole('heading', { name: /^Edição pronta/ })).toHaveCount(1)
-  expect(ai.calls).toHaveLength(2)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(ai.buildCalls()).toHaveLength(2)
+  expect(historyOf(ai.turnCalls()[1])).toContain(DISCARDED)
 
   await expect(page.getByRole('button', { name: 'Desfazer', exact: true })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Salvar', exact: true })).toBeEnabled()
@@ -528,10 +832,11 @@ test('Descartar and Parar leave the open flow exactly as it was', async ({ page,
   expect(await library(page)).toEqual([])
 })
 
-test('a refinement sends the proposal as the base and the changes still count from the open flow', async ({ page, ai }) => {
+test('a refinement asks with the proposal on the canvas, sends the proposal as the base and the changes still count from the open flow', async ({ page, ai }) => {
   const first = (await expectedEdit()).workflow
   const second = await expectedRefinement()
   expect(second.result.changes).toEqual({ added: 0, changed: 2, removed: 0 })
+  ai.say(EDIT_TURN)
   await openEditor(page)
   const panel = await openCopilot(page)
   await typeKey(panel)
@@ -541,24 +846,33 @@ test('a refinement sends the proposal as the base and the changes still count fr
   const canvas = page.locator('.react-flow')
   await expect(nodes).toHaveCount(first.nodes.length)
 
-  ai.replies.push({ steps: [second.text] })
+  ai.say(REFINE_TURN)
+  ai.builds.push({ steps: [second.text] })
   await ask(panel, REFINE_PROMPT)
-  const chips = await proposal(panel, 2)
-  await expect(chips).toHaveText(['2 componentes novos', '2 alterados', '0 removidos'])
+  const changes = await proposal(panel, 2)
+  await expect(changes).toHaveText(['2 componentes novos', '2 alterados', '0 removidos'])
   await expect(panel.getByText('Ajustada no pedido seguinte', { exact: true })).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Aplicar', exact: true })).toHaveCount(1)
+  await expect(messages(panel)).toHaveText([you(PROMPT), says(EDIT_TURN), you(REFINE_PROMPT), says(REFINE_TURN)])
   await expect(canvas).toContainText(REFINED_BOLETO)
   await expect(canvas).toContainText(REFINED_FAREWELL)
   await expect(canvas).toContainText(NEW_OPTION)
   await expect(page.getByText(EDIT_DONE)).toBeVisible()
 
-  expect(ai.calls).toHaveLength(2)
-  const firstSent = JSON.stringify(ai.calls[0].body)
-  const refineSent = JSON.stringify(ai.calls[1].body)
+  expect(ai.turnCalls()).toHaveLength(2)
+  const refineTurn = ai.turnCalls()[1]
+  expect(inputOf(ai.turnCalls()[0])).not.toContain(BOLETO_TEXT)
+  expect(inputOf(refineTurn)).toContain('# Resumo do fluxo aberto')
+  expect(inputOf(refineTurn)).toContain(BOLETO_TEXT)
+  expect(historyOf(refineTurn)).toContain('Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.')
+  expect(historyOf(refineTurn)).toContain(REFINE_PROMPT)
+  expect(ai.buildCalls()).toHaveLength(2)
+  const firstSent = JSON.stringify(ai.buildCalls()[0].body)
+  const refineSent = JSON.stringify(ai.buildCalls()[1].body)
   expect(firstSent).not.toContain(BOLETO_TEXT)
   expect(refineSent).toContain(BOLETO_TEXT)
   expect(refineSent).toContain(NEW_OPTION)
-  expect(refineSent).toContain(REFINE_PROMPT)
+  expect(refineSent).toContain(REFINE_PLAN)
   expect(ai.fallbacks).toEqual([])
   expect(await saved(page)).toEqual(BASE_STATE)
 
@@ -579,7 +893,8 @@ test('a refinement sends the proposal as the base and the changes still count fr
 test('closing the panel keeps the edit running off the canvas, then a toast and a badge lead back to the proposal', async ({ page, ai }) => {
   const final = (await expectedEdit()).workflow
   const hold = ai.hold()
-  ai.replies.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
+  ai.say(EDIT_TURN)
+  ai.builds.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
   await openEditor(page)
   const panel = await openCopilot(page)
   await typeKey(panel)
@@ -596,7 +911,7 @@ test('closing the panel keeps the edit running off the canvas, then a toast and 
   hold.open()
   await expect(page.getByText('Edição do Copiloto pronta', { exact: true })).toBeVisible({ timeout: 15000 })
   await expect(page.getByText('Abra o Copiloto para revisar e aplicar.', { exact: true })).toBeVisible()
-  await expect(trigger(page)).toHaveAccessibleName(/^Copiloto.*edição pronta para revisar$/)
+  await expect(trigger(page)).toHaveAccessibleName('Copiloto, edição pronta para revisar')
   await expect(nodes).toHaveCount(BASE_FLOW.nodes.length)
   expect(await saved(page)).toEqual(BASE_STATE)
 
@@ -610,6 +925,33 @@ test('closing the panel keeps the edit running off the canvas, then a toast and 
   await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: final.nodes.map((node) => node.id) })
 })
 
+test('a question that arrives with the panel closed shows a toast and a badge that lead back to it', async ({ page, ai }) => {
+  const late = ai.hold()
+  ai.say(ASK_EDIT, late)
+  await openEditor(page)
+  const panel = await openCopilot(page)
+  await typeKey(panel)
+  await ask(panel, PROMPT)
+  await late.reached
+  await trigger(page).click()
+  await expect(panel).toBeHidden()
+  late.open()
+
+  await expect(page.getByText('O Copiloto tem uma pergunta', { exact: true })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Abra o Copiloto para responder.', { exact: true })).toBeVisible()
+  await expect(trigger(page)).toHaveAccessibleName('Copiloto, pergunta para responder')
+  await expect(page.locator('.react-flow__node')).toHaveCount(BASE_FLOW.nodes.length)
+
+  await trigger(page).click()
+  await expect(panel).toBeVisible()
+  await expect(trigger(page)).toHaveAccessibleName('Copiloto')
+  await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT)])
+  await expect(chips(panel)).toHaveText(ASK_EDIT.suggestions)
+  await expect(editNowButton(panel)).toBeVisible()
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+})
+
 test('with only Início the Copiloto points to Gerar com IA', async ({ page, ai }) => {
   await page.goto('/flow')
   await expect(page.locator('.react-flow__node')).toHaveCount(1)
@@ -617,10 +959,10 @@ test('with only Início the Copiloto points to Gerar com IA', async ({ page, ai 
   await expect(panel.getByText(EMPTY_NOTICE, { exact: true })).toBeVisible()
   await typeKey(panel)
   await composer(panel).fill(EXAMPLES[3])
-  await expect(panel.getByRole('button', { name: 'Enviar pedido', exact: true })).toBeDisabled()
+  await expect(sendButton(panel)).toBeDisabled()
   await composer(panel).press('Enter')
   await expect(composer(panel)).toHaveValue(EXAMPLES[3])
-  await expect(panel.getByRole('log', { name: 'Conversa com o Copiloto' }).getByText(EXAMPLES[3], { exact: true })).toHaveCount(1)
+  await expect(conversation(panel).getByText(EXAMPLES[3], { exact: true })).toHaveCount(1)
   expect(ai.calls).toEqual([])
 
   await panel.getByRole('button', { name: 'Abrir Gerar com IA', exact: true }).click()
@@ -635,7 +977,7 @@ test('with only Início the Copiloto points to Gerar com IA', async ({ page, ai 
   await trigger(page).click()
   await expect(panel).toBeVisible()
   await expect(panel.getByText(EMPTY_NOTICE, { exact: true })).toHaveCount(0)
-  await expect(panel.getByRole('button', { name: 'Enviar pedido', exact: true })).toBeEnabled()
+  await expect(sendButton(panel)).toBeEnabled()
 })
 
 test('Preencher todos os campos sends fill true by default and fill false when unchecked', async ({ page, ai }) => {
@@ -646,13 +988,14 @@ test('Preencher todos os campos sends fill true by default and fill false when u
   await expect(fill).toBeChecked()
   await expect(panel.getByText(FILL_ON, { exact: true })).toBeVisible()
 
-  ai.replies.push({ blocked: true })
+  ai.say(EDIT_TURN)
+  ai.builds.push({ blocked: true })
   await ask(panel, PROMPT)
   const failure = panel.getByText(FALLBACK_ERROR, { exact: true })
   await expect(failure).toBeVisible({ timeout: 15000 })
   await expect(panel.getByRole('button', { name: 'Tentar de novo', exact: true })).toBeVisible()
   expect(ai.fallbacks).toHaveLength(1)
-  expect(ai.fallbacks[0]).toMatchObject({ fill: true, mode: 'edit', size: 'auto', prompt: PROMPT, image: null, effort: 'medium', stream: true })
+  expect(ai.fallbacks[0]).toMatchObject({ fill: true, mode: 'edit', size: 'auto', prompt: PLAN, image: null, effort: 'medium', stream: true })
   expect(ai.fallbacks[0].base.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data }))).toEqual(BASE_FLOW.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data })))
   expect(ai.fallbacks[0].base.edges).toEqual(BASE_FLOW.edges)
   await expect(page.getByText(EDIT_BANNER)).toHaveCount(0)
@@ -660,21 +1003,22 @@ test('Preencher todos os campos sends fill true by default and fill false when u
   await fill.uncheck()
   await expect(panel.getByText(FILL_OFF, { exact: true })).toBeVisible()
   await expect(panel.getByText(FILL_ON, { exact: true })).toHaveCount(0)
-  ai.replies.push({ blocked: true })
+  ai.say(EDIT_TURN)
+  ai.builds.push({ blocked: true })
   await ask(panel, PROMPT)
   await expect.poll(() => ai.fallbacks.length).toBe(2)
-  expect(ai.fallbacks[1]).toMatchObject({ fill: false, mode: 'edit', size: 'auto' })
+  expect(ai.fallbacks[1]).toMatchObject({ fill: false, mode: 'edit', size: 'auto', prompt: PLAN })
   await expect(panel.getByText(FALLBACK_ERROR, { exact: true })).toHaveCount(2)
   await expect(panel.getByRole('button', { name: 'Tentar de novo', exact: true })).toHaveCount(1)
 
   await fill.check()
-  ai.replies.push({ blocked: true })
+  ai.builds.push({ blocked: true })
   await panel.getByRole('button', { name: 'Tentar de novo', exact: true }).click()
   await expect.poll(() => ai.fallbacks.length).toBe(3)
-  expect(ai.fallbacks[2]).toMatchObject({ fill: true, mode: 'edit', prompt: PROMPT })
+  expect(ai.fallbacks[2]).toMatchObject({ fill: true, mode: 'edit', prompt: PLAN })
+  expect(ai.turnCalls()).toHaveLength(2)
   await expect(page.locator('.react-flow__node')).toHaveCount(BASE_FLOW.nodes.length)
   expect(await saved(page)).toEqual(BASE_STATE)
-  expect(ai.calls.every((call) => !JSON.stringify(call.body).includes(KEY))).toBe(true)
 })
 
 test('a key typed in Gerar com IA is reused by the Copiloto and a missing key keeps the request', async ({ page, ai }) => {
@@ -712,8 +1056,11 @@ test('a key typed in Gerar com IA is reused by the Copiloto and a missing key ke
   await expect(panel.getByText('Informe a chave da API da OpenAI.', { exact: true })).toHaveCount(0)
   await settings.click()
   await expect(composer(panel)).toHaveValue(PROMPT)
+  ai.say(EDIT_TURN)
   await composer(panel).press('Enter')
   await proposal(panel)
-  expect(ai.calls).toHaveLength(1)
-  expect(ai.calls[0].headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(ai.turnCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(ai.buildCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
 })

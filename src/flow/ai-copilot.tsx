@@ -54,6 +54,7 @@ import {
   pickEffort,
   plural,
   requestModels,
+  requestTurn,
   stageText,
   type Field,
   type Listing,
@@ -97,7 +98,15 @@ export const COPILOT_EXAMPLES = [
 ] as const
 
 export const COPILOT_INTRO =
-  "O copiloto edita o fluxo aberto a partir do seu pedido. As mudanças aparecem no canvas para você conferir e só valem quando você aplicar. Desfazer (Ctrl+Z) volta ao fluxo anterior."
+  "O copiloto edita o fluxo aberto a partir do seu pedido. Quando faltar alguma informação, como o texto de uma opção ou o destino de uma transferência, ele pergunta antes de mudar. As mudanças aparecem no canvas para você conferir e só valem quando você aplicar. Desfazer (Ctrl+Z) volta ao fluxo anterior."
+
+export const THINKING_TEXT = "Pensando no pedido."
+
+export const ATTENTION_TOASTS: Readonly<Record<CopilotAttention, Parameters<typeof toast>[0]>> = {
+  ready: { title: "Edição do Copiloto pronta", description: "Abra o Copiloto para revisar e aplicar." },
+  failed: { title: "O Copiloto não conseguiu editar o fluxo", description: "Abra o Copiloto para ver o motivo.", variant: "destructive" },
+  question: { title: "O Copiloto tem uma pergunta", description: "Abra o Copiloto para responder." },
+}
 
 const PROVIDER_OPTIONS = PROVIDERS.map((entry) => ({ value: entry.id, label: entry.name }))
 const PLACEHOLDER = "O que você quer mudar no fluxo?"
@@ -105,6 +114,7 @@ const REFINE_PLACEHOLDER = "Peça um ajuste nesta proposta"
 const REFINE_HINT = "O próximo pedido ajusta a proposta mostrada no canvas."
 const EMPTY_NOTICE = "O fluxo aberto só tem o Início. Para criar um fluxo do zero, use Gerar com IA."
 const BUSY_NOTICE = "Aguarde a geração do Gerar com IA terminar."
+const EDIT_NOW_LABEL = "Editar agora com o que já foi decidido"
 
 const iconButton =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
@@ -116,6 +126,8 @@ const warningText = "mt-1 text-[11px] leading-4 text-flow-warning"
 const summaryClass =
   "flex cursor-pointer select-none list-none items-center gap-1.5 rounded-md py-0.5 text-xs font-semibold text-flow-muted-strong transition hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 [&::-webkit-details-marker]:hidden"
 const chevron = "h-3.5 w-3.5 shrink-0 text-flow-muted transition-transform group-open:rotate-90"
+const chipButton =
+  "max-w-full truncate rounded-full border border-flow-accent/40 bg-flow-accent/10 px-2.5 py-1 text-xs font-medium text-flow-accent transition hover:bg-flow-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 disabled:pointer-events-none disabled:opacity-40"
 
 const CHANGE_DOTS = ["bg-flow-success", "bg-flow-accent", "bg-flow-danger"] as const
 
@@ -162,6 +174,32 @@ function SeverityIcon({ severity }: { severity: GenerationIssue["severity"] }) {
       aria-hidden="true"
       className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", severity === "error" ? "text-flow-danger" : "text-flow-warning")}
     />
+  )
+}
+
+function Waiting({ text, time, onStop }: { text: string; time?: string; onStop: () => void }) {
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-flow-border bg-flow-soft px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-flow-muted">
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-flow-accent motion-reduce:animate-none" aria-hidden="true" />
+          <p role="status" className="min-w-0 flex-1 leading-4">
+            {text}
+          </p>
+          {time ? (
+            <span aria-hidden="true" className="shrink-0 tabular-nums">
+              {time}
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-2 flex justify-end">
+          <button type="button" onClick={onStop} className={cn(ui.dangerButton, "h-7")}>
+            <Square className="h-3 w-3" aria-hidden="true" />
+            Parar
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -261,6 +299,18 @@ function ProposalCard({ entryId, proposal, status, meta, applyId, canApply, canD
         </details>
       ) : null}
 
+      {proposal.prompt ? (
+        <details className="group mt-2.5">
+          <summary className={summaryClass}>
+            <ChevronRight className={chevron} aria-hidden="true" />
+            Ver o pedido completo
+          </summary>
+          <p className="mt-2 max-h-48 overflow-y-auto whitespace-pre-line break-words rounded-lg border border-flow-border bg-flow-surface px-2.5 py-2 text-[11px] leading-4 text-flow-fg">
+            {proposal.prompt}
+          </p>
+        </details>
+      ) : null}
+
       <p className="mt-2.5 break-words text-[11px] leading-4 text-flow-muted">{meta}</p>
 
       {pending ? (
@@ -314,7 +364,7 @@ export default function AICopilot({
   const bodyRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const listAbortRef = useRef<AbortController | null>(null)
-  const runningRef = useRef(false)
+  const busyRef = useRef(false)
   const focusSeqRef = useRef(0)
   const openRef = useRef(false)
   const keyRef = useRef("")
@@ -337,13 +387,23 @@ export default function AICopilot({
     preview: (flow, done, fresh) => propsRef.current.onLivePreview(flow, done, "edit", fresh),
     applyEdit: (flow) => propsRef.current.onWorkflowEdited(flow),
     generate: generateFlow,
-    engine: loadEngine,
-    notify: (attention) =>
-      toast(
-        attention === "ready"
-          ? { title: "Edição do Copiloto pronta", description: "Abra o Copiloto para revisar e aplicar." }
-          : { title: "O Copiloto não conseguiu editar o fluxo", description: "Abra o Copiloto para ver o motivo.", variant: "destructive" },
+    turn: ({ history, flow, proposal, settings }, signal) =>
+      requestTurn(
+        {
+          provider: settings.provider,
+          model: settings.model,
+          apiKey: settings.apiKey.trim(),
+          effort: settings.effort,
+          fill: settings.fill,
+          history,
+          flow,
+          scope: "copilot",
+          proposal,
+        },
+        signal,
       ),
+    engine: loadEngine,
+    notify: (attention) => toast(ATTENTION_TOASTS[attention]),
   }
   const latest = useRef(options)
   useEffect(() => {
@@ -354,7 +414,8 @@ export default function AICopilot({
 
   const [store] = useState(() => createCopilot(() => latest.current))
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
-  const { entries, running, pending, fieldErrors, focus } = state
+  const { entries, thinking, running, pending, suggestions, plan, fieldErrors, focus } = state
+  const busy = thinking || running
 
   useEffect(() => () => store.dispose(), [store])
 
@@ -414,10 +475,10 @@ export default function AICopilot({
 
   useEffect(() => {
     const body = bodyRef.current
-    if (!body || !open || (!entries.length && !running)) return
+    if (!body || !open || (!entries.length && !busy)) return
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
     body.scrollTo({ top: body.scrollHeight, behavior: reduced ? "auto" : "smooth" })
-  }, [entries.length, running, open])
+  }, [entries.length, busy, open])
 
   useEffect(() => {
     const opened = open && !openRef.current
@@ -426,8 +487,8 @@ export default function AICopilot({
   }, [open, baseId])
 
   useEffect(() => {
-    const ended = runningRef.current && !running
-    runningRef.current = running
+    const ended = busyRef.current && !busy
+    busyRef.current = busy
     if (focus && focus.seq !== focusSeqRef.current) {
       focusSeqRef.current = focus.seq
       setSettingsOpen(true)
@@ -435,7 +496,7 @@ export default function AICopilot({
       return
     }
     if (ended && open && focusLost()) setFocusTarget(`${baseId}-${pending ? "apply" : "prompt"}`)
-  }, [running, focus, pending, open, baseId])
+  }, [busy, focus, pending, open, baseId])
 
   useEffect(() => {
     if (!focusTarget) return
@@ -544,21 +605,31 @@ export default function AICopilot({
     }
   }
 
-  const submit = (event?: FormEvent<HTMLFormElement>) => {
-    event?.preventDefault()
+  const request = (text: string): boolean => {
     const before = store.getState().focus?.seq
-    if (store.send(draft)) {
-      setDraft("")
+    if (store.send(text)) {
       setSettingsOpen(false)
-      return
+      return true
     }
     handleFocusRequest(before)
     setHasFlow(hasComponents(readFlow()))
+    return false
+  }
+
+  const submit = (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault()
+    if (request(draft)) setDraft("")
   }
 
   const retry = () => {
     const before = store.getState().focus?.seq
     if (!store.retry()) handleFocusRequest(before)
+  }
+
+  const editNow = () => {
+    const before = store.getState().focus?.seq
+    if (store.editNow()) setSettingsOpen(false)
+    else handleFocusRequest(before)
   }
 
   const onPromptKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -592,11 +663,13 @@ export default function AICopilot({
         : ""
   const listingBusy = providerListing?.state === "loading"
   const hasPending = Boolean(pending)
-  const notice = dialogBusy ? BUSY_NOTICE : !hasFlow && !hasPending && !running ? EMPTY_NOTICE : ""
-  const canSend = !running && !dialogBusy && (hasFlow || hasPending) && draft.trim().length > 0
+  const notice = dialogBusy ? BUSY_NOTICE : !hasFlow && !hasPending && !busy ? EMPTY_NOTICE : ""
+  const canSend = !busy && !dialogBusy && (hasFlow || hasPending) && draft.trim().length > 0
+  const canAnswer = !busy && !dialogBusy
+  const canEditNow = !busy && Boolean(plan)
   const summary = `${info.vendor} · ${currentModelName} · Esforço ${EFFORT_OPTIONS[effort].label.toLowerCase()}`
   const elapsed = state.startedAt ? Math.max(0, Math.floor((clockNow - state.startedAt) / 1000)) : 0
-  const empty = entries.length === 0 && !running
+  const empty = entries.length === 0 && !busy
 
   const renderEntry = (entry: CopilotEntry) => {
     if (entry.kind === "user") {
@@ -604,6 +677,16 @@ export default function AICopilot({
         <div key={entry.id} className="flex justify-end">
           <p className="max-w-[85%] whitespace-pre-line break-words rounded-2xl rounded-br-md bg-flow-accent-strong px-3 py-2 text-sm leading-relaxed text-white">
             <span className="sr-only">Você: </span>
+            {entry.text}
+          </p>
+        </div>
+      )
+    }
+    if (entry.kind === "assistant") {
+      return (
+        <div key={entry.id} className="flex justify-start">
+          <p className="max-w-[85%] whitespace-pre-line break-words rounded-2xl rounded-bl-md border border-flow-border bg-flow-soft px-3 py-2 text-sm leading-relaxed text-flow-fg">
+            <span className="sr-only">Copiloto: </span>
             {entry.text}
           </p>
         </div>
@@ -624,7 +707,7 @@ export default function AICopilot({
       )
     }
     if (entry.kind === "error") {
-      const retryable = state.retry === entry.id && !running
+      const retryable = state.retry === entry.id && !busy
       return (
         <div key={entry.id} role="alert" className="rounded-xl border border-flow-danger/40 bg-flow-danger/10 px-3 py-2.5">
           <div className="flex items-start gap-2">
@@ -663,8 +746,8 @@ export default function AICopilot({
         status={entry.status}
         meta={proposalMeta(entry.proposal)}
         applyId={idFor("apply")}
-        canApply={isPending && !running && !dialogBusy}
-        canDiscard={isPending && !running}
+        canApply={isPending && !busy && !dialogBusy}
+        canDiscard={isPending && !busy}
         onApply={() => store.apply()}
         onDiscard={() => store.discard()}
       />
@@ -902,29 +985,38 @@ export default function AICopilot({
 
           {entries.map(renderEntry)}
 
-          {running ? (
-            <div className="flex justify-start">
-              <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-flow-border bg-flow-soft px-3 py-2">
-                <div className="flex items-center gap-2 text-xs text-flow-muted">
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-flow-accent motion-reduce:animate-none" aria-hidden="true" />
-                  <p role="status" className="min-w-0 flex-1 leading-4">
-                    {stageText(state.progress, true)}
-                  </p>
-                  <span aria-hidden="true" className="shrink-0 tabular-nums">
-                    {clock(elapsed)}
-                  </span>
-                </div>
-                <div className="mt-2 flex justify-end">
-                  <button type="button" onClick={store.cancel} className={cn(ui.dangerButton, "h-7")}>
-                    <Square className="h-3 w-3" aria-hidden="true" />
-                    Parar
-                  </button>
-                </div>
-              </div>
-            </div>
+          {busy ? (
+            <Waiting text={running ? stageText(state.progress, true) : THINKING_TEXT} time={running ? clock(elapsed) : undefined} onStop={store.cancel} />
           ) : null}
         </div>
       </div>
+
+      {suggestions.length > 0 || canEditNow ? (
+        <div className="flex shrink-0 items-start gap-2 border-t border-flow-border px-3 py-2">
+          {suggestions.length > 0 ? (
+            <div role="group" aria-label="Sugestões de resposta" className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+              {suggestions.map((chip) => (
+                <button key={chip} type="button" disabled={!canAnswer} onClick={() => request(chip)} className={chipButton}>
+                  {chip}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {canEditNow ? (
+            <button
+              type="button"
+              onClick={editNow}
+              disabled={dialogBusy}
+              aria-label={EDIT_NOW_LABEL}
+              title={EDIT_NOW_LABEL}
+              className={cn(ui.accentButton, "ml-auto h-7 px-2.5")}
+            >
+              <WandSparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Editar agora
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <form onSubmit={submit} className="shrink-0 space-y-2 border-t border-flow-border px-3 py-3">
         <label className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-0.5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30">

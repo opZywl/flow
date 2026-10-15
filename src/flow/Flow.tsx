@@ -52,6 +52,12 @@ const IDLE_MESSAGE = "Nenhuma prévia ativa. Clique em Iniciar prévia para test
 const CHANGED_MESSAGE = "O fluxo foi alterado. Clique em Iniciar prévia para testar a versão atual."
 const INACTIVE_REPLY = "A prévia está inativa. Clique em Iniciar prévia para testar o fluxo atual."
 
+const COPILOT_ATTENTION: Readonly<Record<CopilotAttention, string>> = {
+  ready: ", edição pronta para revisar",
+  failed: ", edição não concluída",
+  question: ", pergunta para responder",
+}
+
 const ghostButton =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
 
@@ -556,17 +562,15 @@ function FlowHeader({ botOpen, capturing, hasBackground, copilotId, copilotOpen,
           onFocus={warmCopilot}
           aria-expanded={copilotOpen}
           aria-controls={copilotMounted ? copilotId : undefined}
+          aria-label={copilotAttention ? `Copiloto${COPILOT_ATTENTION[copilotAttention]}` : "Copiloto"}
           data-copilot-trigger=""
           title="Copiloto"
           className={cn(ui.button, "relative px-2 md:px-3", copilotOpen && ui.toolButtonActive)}
         >
           <WandSparkles className="h-4 w-4" aria-hidden />
-          <span className="sr-only md:not-sr-only">Copiloto</span>
+          <span className="hidden md:inline">Copiloto</span>
           {copilotAttention ? (
-            <>
-              <span aria-hidden className={cn("absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full ring-2 ring-flow-menu", copilotAttention === "failed" ? "bg-flow-danger" : "bg-flow-accent")} />
-              <span className="sr-only">{copilotAttention === "failed" ? ", edição não concluída" : ", edição pronta para revisar"}</span>
-            </>
+            <span aria-hidden className={cn("absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full ring-2 ring-flow-menu", copilotAttention === "failed" ? "bg-flow-danger" : "bg-flow-accent")} />
           ) : null}
         </button>
         <span aria-hidden className={cn(ui.divider, "hidden sm:block")} />
