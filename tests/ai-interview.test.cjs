@@ -10,7 +10,7 @@ globalThis.fetch = async () => {
 }
 
 const { zodSchema } = require('ai')
-const { interviewTurn, interviewSystemPrompt, interviewFlowSummary, interviewSchema, settleTurn, INTERVIEW_SCHEMA_NAME, SUGGESTION_LIMITS } = require('../lib/atendimento/ai/interview.ts')
+const { interviewTurn, interviewSystemPrompt, copilotSystemPrompt, interviewMessages, interviewFlowSummary, interviewSchema, settleTurn, INTERVIEW_SCHEMA_NAME, SUGGESTION_LIMITS } = require('../lib/atendimento/ai/interview.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
 const { componentCatalog, START_TYPE, NOTE_TYPE } = require('../lib/atendimento/catalog.ts')
 const { newNode, importFlow } = require('../lib/atendimento/format.ts')
@@ -413,4 +413,135 @@ test('o resumo do fluxo traz componentes, textos e conexões e fica compacto com
   const note = newNode('note', { x: 0, y: 0 }, '999')
   note.data.data.text = 'Lembrete.'
   assert.ok(interviewFlowSummary({ ...FLOW, nodes: [...FLOW.nodes, note] }).includes('(Nota)'))
+})
+
+const COPILOT_REQUEST = [{ role: 'user', text: 'crie uma opcao 8' }]
+const COPILOT_FLOW_MISSING = 'Abra um fluxo com componentes para o Copiloto editar.'
+const COPILOT_OPENED = 'O fluxo resumido abaixo está aberto no editor, e cada pedido do usuário é uma mudança nesse fluxo.'
+const PROPOSAL_NOTICE = 'Há uma proposta em revisão no canvas, ainda não aplicada. O resumo abaixo já inclui essa proposta, e o pedido seguinte ajusta a proposta.'
+const BUILDER_FILL = 'Preenchimento ligado: na montagem, nomes cadastrados, IDs e URLs que o usuário não informar recebem valores provisórios, e o editor avisa cada um para ele trocar. Pergunte por esses valores só quando o usuário quiser informar e siga sem eles quando ele preferir.'
+const COPILOT_FILL = 'Preenchimento ligado: IDs e URLs que o usuário não informar recebem valores provisórios na edição, e o editor avisa cada um para ele trocar. Os nomes de departamento, tag e fluxo de destino entram na proposta que você confirma com o usuário.'
+const PLAIN_FILL = 'Preenchimento desligado: nomes cadastrados, IDs e URLs que o usuário não informar ficam vazios para ele completar no editor. Ao tratar de transferências e integrações, pergunte o nome do departamento cadastrado e a URL da API, e aceite que ele complete depois.'
+
+const copilotInput = (provider, extra = {}) => input(provider, { history: COPILOT_REQUEST, flow: FLOW, scope: 'copilot', ...extra })
+const partText = (content) => (typeof content === 'string' ? content : content.map((part) => part.text).join(''))
+const lastLine = (text) => text.split('\n').pop()
+
+test('o Copiloto usa o prompt e a situação dele, e a conversa de montagem continua com o prompt e a situação de antes', () => {
+  const builder = interviewMessages({ history: COPILOT_REQUEST, flow: FLOW })
+  assert.equal(builder.length, 3)
+  assert.equal(builder[0].content, interviewSystemPrompt())
+  assert.equal(builder[1].content, `# Situação atual\nHá um fluxo aberto no editor, resumido abaixo. Cada pedido vira uma mudança nesse fluxo: quando o pedido estiver completo, devolva edit.\n\n# Resumo do fluxo aberto\n${interviewFlowSummary(FLOW)}\n\n${BUILDER_FILL}`)
+  for (const scope of ['builder', 'Copilot', 'copiloto', undefined]) assert.deepEqual(interviewMessages({ history: COPILOT_REQUEST, flow: FLOW, scope, proposal: true }), builder, String(scope))
+  assert.ok(!/copiloto|Proposta pronta no canvas/i.test(interviewSystemPrompt()))
+  assert.equal(lastLine(interviewMessages({ history: COPILOT_REQUEST, flow: FLOW, fill: false })[1].content), PLAIN_FILL)
+
+  const copilot = interviewMessages({ history: COPILOT_REQUEST, flow: FLOW, scope: 'copilot' })
+  assert.equal(copilot[0].content, copilotSystemPrompt())
+  assert.notEqual(copilotSystemPrompt(), interviewSystemPrompt())
+  assert.equal(copilot[1].content, `# Situação atual\n${COPILOT_OPENED}\n\n# Resumo do fluxo aberto\n${interviewFlowSummary(FLOW)}\n\n${COPILOT_FILL}`)
+  assert.deepEqual(copilot.slice(2), [{ role: 'user', content: 'crie uma opcao 8' }])
+  assert.equal(lastLine(interviewMessages({ history: COPILOT_REQUEST, flow: FLOW, scope: 'copilot', fill: false })[1].content), PLAIN_FILL)
+})
+
+test('a situação do Copiloto avisa que o resumo já inclui a proposta em revisão só com proposal true', () => {
+  const state = (proposal) => interviewMessages({ history: COPILOT_REQUEST, flow: FLOW, scope: 'copilot', proposal })[1].content
+  assert.ok(state(true).startsWith(`# Situação atual\n${COPILOT_OPENED}\n${PROPOSAL_NOTICE}\n\n# Resumo do fluxo aberto\n${interviewFlowSummary(FLOW)}`))
+  assert.ok(!state(false).includes('proposta em revisão'))
+  for (const proposal of [undefined, null, 'true', 1, {}]) assert.equal(state(proposal), state(false), String(proposal))
+})
+
+test('no Copiloto, generate vira edit, as falas padrão tratam da mudança no fluxo e só ask traz sugestões', async () => {
+  const plan = 'No menu Como podemos ajudar?, acrescente a opção 3 Falar com atendente, que transfere para o departamento Atendimento.'
+  for (const provider of PROVIDERS) {
+    calls.length = 0
+    const result = await interviewTurn(copilotInput(provider), hooks(() => reply[provider](JSON.stringify({ message: '', suggestions: ['Pode ser assim'], action: 'generate', plan }))))
+    assert.equal(result.ok, true, provider)
+    assert.deepEqual(result.turn, { message: 'Vou aplicar essa mudança no fluxo.', suggestions: [], action: 'edit', plan }, provider)
+    const body = bodyText(calls[0])
+    assert.ok(body.includes('Você é o copiloto que edita um fluxo de atendimento'), provider)
+    assert.ok(body.includes(COPILOT_OPENED), provider)
+    assert.ok(body.includes('Segunda via do boleto'), provider)
+    assert.ok(!body.includes('Como conduzir a conversa'), provider)
+  }
+  const copilot = { hasFlow: false, history: COPILOT_REQUEST, scope: 'copilot' }
+  const builder = { hasFlow: false, history: COPILOT_REQUEST }
+  assert.equal(settleTurn({ message: 'Vou montar.', suggestions: [], action: 'generate', plan: 'P' }, copilot).action, 'edit')
+  assert.equal(settleTurn({ message: 'Vou mudar.', suggestions: [], action: 'edit', plan: 'P' }, copilot).action, 'edit')
+  assert.equal(settleTurn({ message: 'Vou montar.', suggestions: [], action: 'generate', plan: 'P' }, builder).action, 'generate')
+  assert.deepEqual(settleTurn({ message: '', suggestions: ['Pode ser assim', 'Pode fazer assim'], action: 'ask', plan: 'P' }, copilot), { message: 'O que você quer mudar no fluxo?', suggestions: ['Pode ser assim', 'Pode fazer assim'], action: 'ask', plan: 'P' })
+  assert.deepEqual(settleTurn({ message: '', suggestions: ['Outra'], action: 'edit', plan: '' }, copilot), { message: 'Vou aplicar essa mudança no fluxo.', suggestions: [], action: 'edit', plan: 'crie uma opcao 8' })
+  assert.deepEqual(settleTurn({ message: '', suggestions: ['Outra'], action: 'finish', plan: '' }, copilot), { message: 'Combinado. Quando precisar de outro ajuste, é só escrever aqui.', suggestions: [], action: 'finish', plan: '' })
+  assert.equal(settleTurn({ message: '', suggestions: [], action: 'ask', plan: '' }, builder).message, 'Me conte como você quer que o atendimento funcione.')
+  assert.deepEqual(settleTurn({ message: 'Vou mudar.', suggestions: ['Outra'], action: 'edit', plan: 'P' }, { ...builder, hasFlow: true }).suggestions, ['Outra'])
+})
+
+test('o Copiloto sem fluxo com componentes é recusado no campo base, sem chamar o provedor', async () => {
+  const empty = { ...FLOW, nodes: FLOW.nodes.filter((node) => node.data.type === START_TYPE), edges: [] }
+  const note = newNode('note', { x: 0, y: 0 }, '999')
+  note.data.data.text = 'Lembrete.'
+  const missing = { ok: false, failure: { success: false, code: 'invalid_request', error: COPILOT_FLOW_MISSING, field: 'base' } }
+  for (const flow of [undefined, null, empty, { ...empty, nodes: [...empty.nodes, note] }]) {
+    assert.deepEqual(await interviewTurn(copilotInput('openai', { flow }), hooks(() => reply.openai(JSON.stringify(ASK)))), missing)
+    assert.throws(() => interviewMessages({ history: COPILOT_REQUEST, flow, scope: 'copilot' }), { message: COPILOT_FLOW_MISSING })
+  }
+  const broken = await interviewTurn(copilotInput('openai', { flow: { nodes: 'x' } }), hooks(() => reply.openai(JSON.stringify(ASK))))
+  assert.deepEqual([broken.failure.field, broken.failure.error], ['base', 'Não foi possível ler o fluxo aberto. Confira o fluxo e tente de novo.'])
+  const silent = await interviewTurn(copilotInput('openai', { history: [] }), hooks(() => reply.openai(JSON.stringify(ASK))))
+  assert.deepEqual([silent.failure.field, silent.failure.error], ['prompt', 'Escreva o que você precisa no atendimento.'])
+  assert.equal(calls.length, 0)
+  const unknown = await interviewTurn(input('openai', { flow: empty, scope: 'outro' }), hooks(() => reply.openai(JSON.stringify(ASK))))
+  assert.equal(unknown.ok, true)
+  assert.ok(bodyText(calls[0]).includes('Não há fluxo aberto no editor'))
+})
+
+test('o prompt do Copiloto segue as regras da casa: pergunta antes de editar, propõe com sugestões e escreve em forma positiva', () => {
+  const prompt = copilotSystemPrompt()
+  assert.equal(prompt, copilotSystemPrompt())
+  assert.ok(!/[—–!]/.test(prompt), 'travessão ou exclamação no prompt')
+  assert.ok(!/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(prompt), 'emoji no prompt')
+  assert.ok(!/\b(Nunca|Não use|Evite)\b/.test(prompt), 'regra em forma negativa')
+  assert.ok(!/\b(nunca|jamais|evite|proibido)\b|\bnão (faça|use|invente|edite|pergunte|escreva|mude|coloque|repita|deixe|devolva|crie|altere|remova|responda|aplique)\b/i.test(prompt), 'regra em forma negativa')
+  assert.match(prompt, /^Você é o copiloto que edita um fluxo de atendimento por WhatsApp já aberto no editor da plataforma de Atendimento\./)
+  assert.match(prompt, /a partir do pedido que você escreve em plan/)
+  assert.match(prompt, /pergunte antes de editar/)
+  assert.match(prompt, /Pergunte propondo/)
+  assert.match(prompt, /de 2 a 5 sugestões/)
+  assert.match(prompt, /Faça uma pergunta por mensagem/)
+  assert.match(prompt, /Atualize plan em toda resposta/)
+  assert.match(prompt, /Português do Brasil, cordial e direto/)
+  assert.ok(prompt.includes('Vou colocar a opção 8 no menu Como podemos ajudar. Pensei em Falar com atendente, que transfere para o departamento Atendimento. Fica assim ou quer outro texto e outro destino?'))
+  for (const answer of ['Pode ser assim', 'Pode fazer assim', 'Pode editar agora com o que já foi decidido.']) assert.ok(prompt.includes(answer), answer)
+  for (const decision of ['o texto de uma opção nova', 'quando mais de um serve', 'o departamento de uma transferência', 'o horário de atendimento e o que acontece fora dele', 'os dados a coletar', 'a URL e o retorno de uma integração', 'ficam sem caminho', 'conte o que o fluxo faz hoje']) assert.ok(prompt.includes(decision), decision)
+  for (const action of ['- ask:', '- edit:', '- finish:']) assert.ok(prompt.includes(action), action)
+  assert.ok(!prompt.includes('- generate:'))
+  for (const text of ['Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.', 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.', 'Proposta descartada. O fluxo aberto não mudou.', 'Pedido cancelado. O fluxo aberto não mudou.', 'Precisa mudar mais alguma coisa no fluxo?', 'Aplicar']) assert.ok(prompt.includes(text), text)
+  const listed = componentCatalog.filter((definition) => ![START_TYPE, NOTE_TYPE].includes(definition.nativeType ?? definition.id))
+  for (const definition of listed) assert.ok(prompt.includes(`- ${definition.label}`), definition.label)
+  assert.ok(prompt.length < 16000, String(prompt.length))
+})
+
+test('interviewMessages traz exatamente o que o provedor recebe no turno do Copiloto', async () => {
+  const history = [
+    { role: 'user', text: 'crie uma opcao 8' },
+    { role: 'assistant', text: 'Vou acrescentar a opção 8 Falar com atendente, que transfere para o departamento Atendimento.' },
+    { role: 'assistant', text: 'Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.' },
+    { role: 'user', text: 'troque o texto da opção 8 para Atendimento humano' },
+  ]
+  const expected = interviewMessages({ history, flow: FLOW, scope: 'copilot', proposal: true })
+  assert.deepEqual(expected.map((message) => message.role), ['system', 'system', 'user', 'assistant', 'user'])
+  assert.equal(expected[3].content, `${history[1].text}\n\n${history[2].text}`)
+  assert.ok(expected[1].content.includes(PROPOSAL_NOTICE))
+  let result = await interviewTurn(input('openai', { history, flow: FLOW, scope: 'copilot', proposal: true }), hooks(() => reply.openai(JSON.stringify(ASK))))
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls[0].body.input.map((message) => [message.role, partText(message.content)]), expected.map((message) => [message.role === 'system' ? 'developer' : message.role, message.content]))
+  calls.length = 0
+  result = await interviewTurn(input('anthropic', { history, flow: FLOW, scope: 'copilot', proposal: true }), hooks(() => reply.anthropic(JSON.stringify(ASK))))
+  assert.equal(result.ok, true)
+  const { system, messages } = calls[0].body
+  assert.deepEqual(system.map((part) => part.text), [expected[0].content, expected[1].content])
+  assert.deepEqual(system[0].cache_control, { type: 'ephemeral' })
+  assert.deepEqual(messages.map((message) => [message.role, partText(message.content)]), expected.slice(2).map((message) => [message.role, message.content]))
+  const cached = { anthropic: { cacheControl: { type: 'ephemeral' } } }
+  assert.deepEqual(interviewMessages({ history, flow: FLOW, scope: 'copilot', proposal: true }, cached), [{ ...expected[0], providerOptions: cached }, ...expected.slice(1)])
 })

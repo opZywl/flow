@@ -4,7 +4,7 @@ import { z } from "zod"
 import { NOTE_TYPE, START_ID, START_TYPE, categories, componentCatalog, getComponentLabel } from "../catalog"
 import { importFlow } from "../format"
 import type { AtendimentoFlow } from "../types"
-import { LIMITS } from "./contracts"
+import { DEFAULT_FILL, LIMITS } from "./contracts"
 import type { Effort, GenerateFailure } from "./contracts"
 import { flowToRi } from "./edit"
 import { guideOf } from "./guide"
@@ -51,6 +51,8 @@ export interface InterviewHooks {
 
 export type InterviewResult = { ok: true; turn: InterviewTurn } | { ok: false; failure: GenerateFailure }
 
+export type InterviewMessagesInput = Pick<InterviewInput, "history" | "flow" | "fill" | "scope" | "proposal">
+
 export const INTERVIEW_ACTIONS: readonly InterviewAction[] = ["ask", "generate", "edit", "finish"]
 
 export const INTERVIEW_SCHEMA_NAME = "turno_conversa"
@@ -74,6 +76,7 @@ const VALIDATION_PROMPT = "Conversa para montar um fluxo de atendimento."
 const HISTORY_EMPTY = "Escreva o que você precisa no atendimento."
 const HISTORY_INVALID = "Não foi possível ler a conversa."
 const FLOW_INVALID = "Não foi possível ler o fluxo aberto. Confira o fluxo e tente de novo."
+const COPILOT_FLOW_MISSING = "Abra um fluxo com componentes para o Copiloto editar."
 const CONTINUE = "Continue a conversa a partir do último registro."
 const FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action e plan."
 const OMITTED = "Mensagens anteriores da conversa foram resumidas no plano."
@@ -83,6 +86,13 @@ const UNKNOWN = "Não foi possível continuar a conversa."
 const DEFAULT_MESSAGES: Readonly<Record<InterviewAction, string>> = {
   ask: "Me conte como você quer que o atendimento funcione.",
   generate: "Vou montar o fluxo com o que combinamos.",
+  edit: "Vou aplicar essa mudança no fluxo.",
+  finish: "Combinado. Quando precisar de outro ajuste, é só escrever aqui.",
+}
+
+const COPILOT_MESSAGES: Readonly<Record<InterviewAction, string>> = {
+  ask: "O que você quer mudar no fluxo?",
+  generate: "Vou aplicar essa mudança no fluxo.",
   edit: "Vou aplicar essa mudança no fluxo.",
   finish: "Combinado. Quando precisar de outro ajuste, é só escrever aqui.",
 }
@@ -213,6 +223,72 @@ export function interviewSystemPrompt(): string {
   return cachedPrompt
 }
 
+const COPILOT_LINES = [
+  "Você é o copiloto que edita um fluxo de atendimento por WhatsApp já aberto no editor da plataforma de Atendimento. Você confere cada pedido do usuário com o resumo do fluxo, pergunta o que faltar propondo a resposta mais provável e edita quando a mudança está clara. Outro sistema aplica a mudança a partir do pedido que você escreve em plan e mostra o resultado no canvas como proposta.",
+  "",
+  "# Como decidir",
+  "1. Leia o pedido junto com o resumo do fluxo e identifique o que criar, alterar ou remover, em que ponto do fluxo, com quais textos e para onde vai cada saída.",
+  "2. Quando o pedido diz o que fazer e o resumo mostra onde, devolva edit, como nestes pedidos:",
+  "- Troque a mensagem de boas-vindas por Olá, tudo bem?",
+  "- Na opção Segunda via, envie o link https://lucas-lima.xyz/boleto antes de encerrar.",
+  "3. Quando falta uma decisão que muda o resultado, pergunte antes de editar. Estas decisões pedem confirmação:",
+  "- o texto de uma opção nova e o que acontece quando o contato escolhe essa opção;",
+  "- o menu ou o ponto do fluxo, quando mais de um serve;",
+  "- o departamento de uma transferência;",
+  "- o horário de atendimento e o que acontece fora dele;",
+  "- os dados a coletar e como validar cada um;",
+  "- a URL e o retorno de uma integração;",
+  "- o que fazer com os componentes que ficam sem caminho quando o pedido remove uma opção;",
+  "- o pedido que o fluxo já atende do jeito pedido: conte o que o fluxo faz hoje e confirme a mudança.",
+  "",
+  "# Como perguntar",
+  "1. Pergunte propondo: use o resumo do fluxo para sugerir a resposta mais provável e peça confirmação. Exemplo para o pedido crie uma opção 8, em um menu com 7 opções: Vou colocar a opção 8 no menu Como podemos ajudar. Pensei em Falar com atendente, que transfere para o departamento Atendimento. Fica assim ou quer outro texto e outro destino?",
+  "2. Faça uma pergunta por mensagem, sobre um assunto, no fim de uma mensagem com até 3 frases.",
+  "3. Cada pergunta traz de 2 a 5 sugestões em suggestions: respostas curtas, prontas para clicar, com até 60 caracteres, escritas como o usuário responderia. Inclua uma para aceitar a proposta, como Pode ser assim, e uma para editar já com a proposta, como Pode fazer assim.",
+  "4. Quando o usuário aceita ou deixa a escolha com você, adote a sua proposta: devolva edit quando a mudança fica clara, ou pergunte sobre o próximo assunto do pedido que ainda está em aberto.",
+  "5. Quando o usuário pede para fazer já, devolva edit com o que já foi decidido e as suas propostas no que faltar. Pedem isso respostas como Pode fazer assim e a mensagem Pode editar agora com o que já foi decidido.",
+  "6. Quando a resposta traz um pedido novo, junte esse pedido ao que está em andamento e pergunte o que faltar sobre ele.",
+  "",
+  "# Proposta em revisão",
+  "1. Quando a situação atual indica uma proposta em revisão, o resumo já inclui a proposta, e o pedido seguinte ajusta essa proposta: plan traz só o ajuste.",
+  "2. O usuário aplica ou descarta a proposta com os botões Aplicar e Descartar, no cartão da proposta. Quando ele pede para aplicar ou descartar, devolva finish e lembre em uma frase que basta clicar em Aplicar ou em Descartar no cartão.",
+  "",
+  "# Plano",
+  "1. plan traz o pedido de mudança completo, escrito como um cliente pede a quem edita o fluxo: o que criar, alterar ou remover, citando os componentes pelo texto ou pelo nome que aparecem no resumo, os textos novos, as opções na ordem e o destino de cada saída.",
+  "2. Atualize plan em toda resposta, inclusive nas perguntas, com as decisões tomadas e as suas propostas para o que falta.",
+  "3. plan descreve só a mudança desta conversa que ainda falta fazer no fluxo do resumo, e todo o resto do fluxo continua como está. As mudanças já aplicadas e a proposta em revisão já aparecem no resumo.",
+  "",
+  "# Ações",
+  "Nesta conversa, as ações são ask, edit e finish.",
+  "- ask: falta uma decisão. message traz a proposta e a pergunta, e suggestions traz as respostas sugeridas.",
+  "- edit: a mudança está clara. message diz em uma frase o que vai mudar, suggestions fica vazio e plan traz o pedido de mudança completo.",
+  "- finish: o usuário já tem o que precisa. message traz uma despedida curta e suggestions fica vazio.",
+  "",
+  "# Registros da interface",
+  "A interface escreve no histórico, como falas suas, o que acontece com cada pedido:",
+  "- proposta pronta no canvas, com a contagem das mudanças: Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.",
+  "- proposta aplicada ao fluxo aberto: Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.",
+  "- proposta descartada: Proposta descartada. O fluxo aberto não mudou.",
+  "- pedido cancelado antes de a proposta ficar pronta: Pedido cancelado. O fluxo aberto não mudou.",
+  "- pergunta feita depois de aplicar: Precisa mudar mais alguma coisa no fluxo?",
+  "A resposta a essa pergunta traz um pedido novo, que segue as regras acima, ou encerra a conversa com finish.",
+  "",
+  "# Estilo",
+  "1. Português do Brasil, cordial e direto, tratando o usuário por você.",
+  "2. Escreva só com letras, números e a pontuação comum: ponto final, vírgula, dois-pontos e ponto de interrogação na pergunta.",
+  "3. Fale do atendimento com as palavras do usuário: menu, opção, mensagem, transferência, horário. Os nomes de componente servem para você planejar.",
+  "",
+  "# Componentes da plataforma",
+  "Use esta lista para entender os componentes do resumo e propor as etapas que a plataforma oferece.",
+]
+
+let cachedCopilotPrompt: string | undefined
+
+export function copilotSystemPrompt(): string {
+  if (cachedCopilotPrompt === undefined) cachedCopilotPrompt = [...COPILOT_LINES, componentSection()].join("\n")
+  return cachedCopilotPrompt
+}
+
 function weekDays(days: unknown): string {
   if (!Array.isArray(days)) return ""
   return days.map((day) => WEEK_DAYS[asText(day)] ?? asText(day)).filter(Boolean).join(",")
@@ -293,6 +369,17 @@ function stateText(flow: AtendimentoFlow | null, fill: boolean): string {
     lines.push("Não há fluxo aberto no editor. Quando o plano estiver completo ou o usuário pedir para montar, devolva generate.")
   }
   lines.push("", fillLine(fill))
+  return lines.join("\n")
+}
+
+const COPILOT_OPENED = "O fluxo resumido abaixo está aberto no editor, e cada pedido do usuário é uma mudança nesse fluxo."
+const COPILOT_PROPOSAL = "Há uma proposta em revisão no canvas, ainda não aplicada. O resumo abaixo já inclui essa proposta, e o pedido seguinte ajusta a proposta."
+const COPILOT_FILL = "Preenchimento ligado: IDs e URLs que o usuário não informar recebem valores provisórios na edição, e o editor avisa cada um para ele trocar. Os nomes de departamento, tag e fluxo de destino entram na proposta que você confirma com o usuário."
+
+function copilotStateText(flow: AtendimentoFlow, fill: boolean, proposal: boolean): string {
+  const lines = ["# Situação atual", COPILOT_OPENED]
+  if (proposal) lines.push(COPILOT_PROPOSAL)
+  lines.push("", "# Resumo do fluxo aberto", interviewFlowSummary(flow), "", fill ? COPILOT_FILL : fillLine(false))
   return lines.join("\n")
 }
 
@@ -400,19 +487,70 @@ function userText(messages: readonly InterviewMessage[], last: boolean): string 
   return last ? users[users.length - 1] ?? "" : users.join("\n")
 }
 
-export function settleTurn(raw: InterviewTurn, context: { hasFlow: boolean; history: readonly InterviewMessage[] }): InterviewTurn {
+export function settleTurn(raw: InterviewTurn, context: { hasFlow: boolean; history: readonly InterviewMessage[]; scope?: InterviewScope }): InterviewTurn {
+  const copilot = context.scope === "copilot"
   let action = raw.action
-  if (action === "generate" && context.hasFlow) action = "edit"
-  else if (action === "edit" && !context.hasFlow) action = "generate"
+  if (action === "generate" && (copilot || context.hasFlow)) action = "edit"
+  else if (action === "edit" && !copilot && !context.hasFlow) action = "generate"
   let plan = clipPlan(raw.plan)
   if ((action === "generate" || action === "edit") && !plan) plan = clipPlan(userText(context.history, action === "edit"))
-  const message = tidy(raw.message) || DEFAULT_MESSAGES[action]
-  const suggestions = action === "finish" ? [] : cleanSuggestions(raw.suggestions)
+  const message = tidy(raw.message) || (copilot ? COPILOT_MESSAGES : DEFAULT_MESSAGES)[action]
+  const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : cleanSuggestions(raw.suggestions)
   return { message, suggestions, action, plan }
 }
 
 function reject(error: string, field?: GenerateFailure["field"]): { ok: false; failure: GenerateFailure } {
   return { ok: false, failure: { success: false, code: "invalid_request", error, ...(field ? { field } : {}) } }
+}
+
+interface InterviewContext {
+  history: InterviewMessage[]
+  flow: AtendimentoFlow | null
+  fill: boolean
+  scope: InterviewScope
+  proposal: boolean
+}
+
+type ContextCheck = { ok: true; context: InterviewContext } | { ok: false; failure: GenerateFailure }
+
+type SystemOptions = ModelSetup["systemOptions"]
+
+function readContext(input: InterviewMessagesInput, fill: boolean): ContextCheck {
+  const history = cleanHistory(input.history)
+  if (!history) return reject(HISTORY_INVALID, "prompt")
+  if (!history.some((message) => message.role === "user")) return reject(HISTORY_EMPTY, "prompt")
+  let flow: AtendimentoFlow | null = null
+  if (input.flow !== undefined && input.flow !== null) {
+    try {
+      const opened = importFlow(input.flow)
+      flow = hasComponents(opened) ? opened : null
+    } catch {
+      return reject(FLOW_INVALID, "base")
+    }
+  }
+  const scope: InterviewScope = input.scope === "copilot" ? "copilot" : "builder"
+  if (scope === "copilot" && !flow) return reject(COPILOT_FLOW_MISSING, "base")
+  return { ok: true, context: { history, flow, fill, scope, proposal: input.proposal === true } }
+}
+
+function systemTexts({ flow, fill, scope, proposal }: InterviewContext): [string, string] {
+  if (scope === "copilot" && flow) return [copilotSystemPrompt(), copilotStateText(flow, fill, proposal)]
+  return [interviewSystemPrompt(), stateText(flow, fill)]
+}
+
+function contextMessages(context: InterviewContext, systemOptions?: SystemOptions): ModelMessage[] {
+  const [prompt, state] = systemTexts(context)
+  return [
+    { role: "system", content: prompt, ...(systemOptions ? { providerOptions: systemOptions } : {}) },
+    { role: "system", content: state },
+    ...conversation(trimHistory(context.history)),
+  ]
+}
+
+export function interviewMessages(input: InterviewMessagesInput, systemOptions?: SystemOptions): ModelMessage[] {
+  const read = readContext(input, input.fill ?? DEFAULT_FILL)
+  if (!read.ok) throw new Error(read.failure.error)
+  return contextMessages(read.context, systemOptions)
 }
 
 interface TurnAttempt {
@@ -504,29 +642,15 @@ export async function interviewTurn(input: InterviewInput, hooks: InterviewHooks
     const checked = parseGenerationRequest({ provider: input.provider, model: input.model, apiKey: input.apiKey, effort: input.effort, fill: input.fill, prompt: VALIDATION_PROMPT })
     if (!checked.ok) return { ok: false, failure: checked.failure }
     const resolved = checked.request.input
-    const history = cleanHistory(input.history)
-    if (!history) return reject(HISTORY_INVALID, "prompt")
-    if (!history.some((message) => message.role === "user")) return reject(HISTORY_EMPTY, "prompt")
-    let flow: AtendimentoFlow | null = null
-    if (input.flow !== undefined && input.flow !== null) {
-      try {
-        const opened = importFlow(input.flow)
-        flow = hasComponents(opened) ? opened : null
-      } catch {
-        return reject(FLOW_INVALID, "base")
-      }
-    }
+    const read = readContext(input, resolved.fill)
+    if (!read.ok) return { ok: false, failure: read.failure }
+    const { context } = read
     if (hooks.signal.aborted) return { ok: false, failure: { success: false, code: "aborted", error: ABORTED } }
     const setup = createSetup(resolved, { transport: hooks.transport, signal: hooks.signal, fetch: hooks.fetch })
-    const trimmed = trimHistory(history)
-    const messages: ModelMessage[] = [
-      { role: "system", content: interviewSystemPrompt(), ...(setup.systemOptions ? { providerOptions: setup.systemOptions } : {}) },
-      { role: "system", content: stateText(flow, resolved.fill) },
-      ...conversation(trimmed),
-    ]
+    const messages = contextMessages(context, setup.systemOptions)
     try {
       const raw = await converse(setup, messages, hooks)
-      return { ok: true, turn: settleTurn(raw, { hasFlow: flow !== null, history }) }
+      return { ok: true, turn: settleTurn(raw, { hasFlow: context.flow !== null, history: context.history, scope: context.scope }) }
     } catch (error) {
       return { ok: false, failure: interviewFailure(describeFailure(error, resolved.provider, resolved.apiKey, { client: hooks.signal })) }
     }
