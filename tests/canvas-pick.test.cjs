@@ -320,7 +320,7 @@ test('a pick open to any component asks on the canvas to click any component, an
   assert.match(open, /Selecione o componente no canvas\./)
   const status = /role="status"[^>]*>([^<]+)</.exec(open)
   assert.ok(status)
-  assert.equal(status[1], 'Clique em qualquer componente do fluxo.')
+  assert.equal(status[1], 'Clique em qualquer componente com saída.')
   assert.match(status[1], PT_TEXT)
   assert.match(open, /<button[^>]*disabled=""[^>]*>Confirmar<\/button>/)
   assert.doesNotMatch(open, /aria-label="(Anterior|Próximo)"[^>]*disabled=""/)

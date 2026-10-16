@@ -2,7 +2,7 @@ require('../../scripts/register-typescript.cjs')
 const { test: base, expect } = require('@playwright/test')
 const crypto = require('node:crypto')
 const https = require('node:https')
-const { importFlow, newNode } = require('../../lib/atendimento/format.ts')
+const { importFlow, newNode, outputHandles } = require('../../lib/atendimento/format.ts')
 const { NOTE_TYPE, START_ID, START_TYPE, getComponentLabel } = require('../../lib/atendimento/catalog.ts')
 const { assembleFlow, finalizeFlow } = require('../../lib/atendimento/ai/assemble.ts')
 const { countChanges, flowToRi } = require('../../lib/atendimento/ai/edit.ts')
@@ -230,9 +230,11 @@ const NOTED_FLOW = (() => {
 const NOTED_IDS = idsOf(NOTED_FLOW)
 const NOTED_STATE = { name: NOTED_FLOW.name, nodes: NOTED_IDS }
 const COMPONENTS = NOTED_IDS.filter((id) => id !== NOTE)
+const OUTLETS = COMPONENTS.filter((id) => outputHandles(NOTED_FLOW.nodes.find((node) => node.id === id)).length > 0)
+const ENDS = COMPONENTS.filter((id) => !OUTLETS.includes(id))
 const ANY_LABEL = 'o componente que vem antes do aviso'
-const ANY_STATUS = 'Clique em qualquer componente do fluxo.'
-const ANY_LIST = `Selecione ${ANY_LABEL} no canvas ou na lista e confirme. Você pode escolher qualquer componente do fluxo, inclusive o ${START_KIND}.`
+const ANY_STATUS = 'Clique em qualquer componente com saída.'
+const ANY_LIST = `Selecione ${ANY_LABEL} no canvas ou na lista e confirme. Você pode escolher qualquer componente com saída, inclusive o ${START_KIND}.`
 const PLACE_REQUEST = 'adicione uma mensagem de aviso'
 const PLACE_DRAFT = `Acrescente a mensagem ${NOTICE_TEXT} logo depois do componente que o usuário selecionar no canvas, e o caminho segue como antes.`
 const AFTER_CHOICE = 'Logo depois do selecionado'
@@ -1445,7 +1447,8 @@ test('adicione uma mensagem de aviso without a position: the whole canvas is off
   expect(result.changes).toEqual({ added: 1, changed: 0, removed: 0 })
   const final = result.workflow
   const notice = idOf(final, NOTICE_TEXT)
-  const candidates = marks(COMPONENTS, 'candidate')
+  const candidates = marks(OUTLETS, 'candidate')
+  expect(ENDS.length, 'o fluxo do teste tem componentes sem saída').toBeGreaterThan(0)
   const chosen = youPicked(START_KIND, '', START)
   const panel = await start(page, NOTED_FLOW)
   ai.say(ASK_PLACE)
@@ -1463,8 +1466,9 @@ test('adicione uma mensagem de aviso without a position: the whole canvas is off
   await expect(page.locator('.react-flow__edge.opacity-30'), 'nenhuma conexão fica esmaecida').toHaveCount(0)
   await expect(selection(panel)).toContainText(ANY_LIST)
   const listed = selection(panel).getByRole('list').getByRole('button')
-  await expect(listed, 'a lista traz todos os componentes do fluxo').toHaveCount(COMPONENTS.length)
-  expect((await listed.allTextContents()).map((text) => text.match(/\bID (\S+)$/)?.[1]).sort()).toEqual([...COMPONENTS].sort())
+  await expect(listed, 'a lista traz os componentes com saída').toHaveCount(OUTLETS.length)
+  expect((await listed.allTextContents()).map((text) => text.match(/\bID (\S+)$/)?.[1]).sort()).toEqual([...OUTLETS].sort())
+  for (const id of ENDS) await expect(markOf(page, id), 'componente sem saída fica fora da seleção').toHaveAttribute('data-pick', 'dimmed')
   await expect(selection(panel)).not.toContainText(NOTE_TEXT)
   await expect(chips(panel), 'a pergunta propõe logo depois e sugere logo antes do selecionado').toHaveText([AFTER_CHOICE, BEFORE_CHOICE])
   await expect(editNowOffered(panel)).toHaveCount(0)
@@ -1532,7 +1536,7 @@ test('in a whole canvas selection, the suggestion to place it before carries the
   ai.say(ASK_PLACE)
   await ask(panel, PLACE_REQUEST)
   await expect(banner(page)).toBeVisible()
-  await expectMarks(page, NOTED_IDS, marks(COMPONENTS, 'candidate'))
+  await expectMarks(page, NOTED_IDS, marks(OUTLETS, 'candidate'))
   await expect(chips(panel)).toHaveText([AFTER_CHOICE, BEFORE_CHOICE])
   await settle(page)
   await nodeAt(page, PAYMENTS).click()

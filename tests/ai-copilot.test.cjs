@@ -2772,7 +2772,8 @@ const CPF_AFTER = applyEdit(BASE, { name: '', description: '', nodes: [CPF_NODE]
 const UNTITLED = 'Preencha a mensagem do menu.'
 const COUNT_ISSUE = { severity: 'error', scope: 'ia', message: 'O menu Como podemos ajudar? ficou com 3 opções, e o pedido pede 2.', nodeId: MENU_NODE.id }
 const anyPicked = (pick = {}, plan = ANY_READY) => ({ ok: true, turn: { action: 'ask', message: ANY_QUESTION, suggestions: ANY_CHIPS, plan, pick: { label: 'o componente', candidates: [], ready: true, any: true, ...pick } } })
-const offered = (flow) => copilot.flowOrder(flow).map((node) => ({ id: node.id, text: nodeSubject(node) }))
+const offered = (flow) => copilot.anchors(flow).map((node) => ({ id: node.id, text: nodeSubject(node) }))
+const OUTLETS = [START, WELCOME, MENU_NODE, FAREWELL]
 const untitled = (flow) => ({ ...flow, nodes: flow.nodes.map((node) => (node.id === MENU_NODE.id ? { ...node, data: { ...node.data, data: { ...node.data.data, title: '' } } } : node)) })
 
 function cardOf(extra = {}) {
@@ -2813,28 +2814,30 @@ test('flowOrder lists the components from Iniciar Fluxo along the outputs in ord
   assert.deepEqual(ids(headless), headless.nodes.map((node) => node.id))
 })
 
-test('a pick with any true takes every component of the flow as a candidate, Iniciar Fluxo included and the notes left out, whatever candidates come listed', () => {
+test('a pick with any true takes every component with an output as a candidate, Iniciar Fluxo included, the notes and the components without an output left out, whatever candidates come listed', () => {
   const all = { label: 'o componente', candidates: [], ready: true, any: true }
   assert.deepEqual(copilot.readPick(all, NOTED), { label: 'o componente', candidates: offered(BASE), selected: null, ready: true, any: true })
   assert.equal(copilot.readPick(all, NOTED).candidates[0].text, START_SUBJECT)
+  assert.deepEqual(copilot.readPick(all, NOTED).candidates.map((candidate) => candidate.id), OUTLETS.map((node) => node.id))
+  assert.ok(![AGENDA.id, END.id].some((id) => copilot.readPick(all, NOTED).candidates.some((candidate) => candidate.id === id)), 'Transferir para Departamento e Encerrar Conversa não têm saída')
   assert.deepEqual(copilot.readPick({ ...all, candidates: [FAREWELL.id, NOTE.id, 'nao_existe'] }, NOTED).candidates, offered(BASE))
   assert.deepEqual(copilot.readPick({ ...all, candidates: undefined, ready: false, label: '' }, BASE), { label: copilot.PICK_LABEL, candidates: offered(BASE), selected: null, ready: false, any: true })
   assert.equal(copilot.readPick(all, BLANK), null)
   assert.equal(copilot.readPick(all, NOTES_ONLY), null)
-  assert.deepEqual(copilot.readPick(all, STARTED).candidates.map((candidate) => candidate.id), copilot.flowOrder(STARTED).map((node) => node.id))
-  assert.equal(copilot.readPick(all, STARTED).candidates.length, 3)
+  assert.deepEqual(copilot.readPick(all, STARTED).candidates.map((candidate) => candidate.id), copilot.anchors(STARTED).map((node) => node.id))
+  assert.ok(copilot.anchors(STARTED).length < copilot.flowOrder(STARTED).length)
   assert.equal(copilot.readPick({ ...all, any: 'true' }, BASE), null)
   assert.equal(copilot.readPick({ ...all, any: 'true', candidates: [WELCOME.id, FAREWELL.id] }, BASE).any, false)
   assert.notEqual(copilot.pickKey(copilot.readPick(all, BASE)), copilot.pickKey({ ...copilot.readPick(all, BASE), any: false }))
 })
 
-test('an any pick lists the whole flow, and Iniciar Fluxo confirmed on a ready pick edits right away with the focus on it, and an insertion right after it counts as a change there', async () => {
+test('an any pick lists the components with an output, and Iniciar Fluxo confirmed on a ready pick edits right away with the focus on it, and an insertion right after it counts as a change there', async () => {
   const { store, env } = harness({ turns: [anyPicked()], outcomes: [received(CPF_FIRST)] })
   store.send(ANY_REQUEST)
   let state = await settled(store)
   assert.deepEqual(texts(state), [`user:${ANY_REQUEST}`, `assistant:${ANY_QUESTION}`])
   assert.deepEqual(state.pick, { label: 'o componente', candidates: offered(BASE), selected: null, ready: true, any: true })
-  assert.deepEqual(state.pick.candidates.map((candidate) => candidate.id), PATH.map((node) => node.id))
+  assert.deepEqual(state.pick.candidates.map((candidate) => candidate.id), OUTLETS.map((node) => node.id))
   assert.equal(state.plan, ANY_READY)
   assert.deepEqual(state.suggestions, ANY_CHIPS)
   assert.equal(env.requests.length, 0)
@@ -2903,14 +2906,14 @@ test('an any pick confirmed on a message asks the AI with that selection and kee
   await settled(listed.store)
 })
 
-test('linkPick shows an any pick on the canvas with every component as candidate and tells the canvas the pick is open to any component', async () => {
+test('linkPick shows an any pick on the canvas with every component with an output as candidate and tells the canvas the pick is open to any component', async () => {
   const { store, env } = harness({ flow: NOTED, turns: [anyPicked({ ready: false }, ANY_DRAFT), asked('Qual texto você quer na pergunta de CPF?', [], ANY_DRAFT)] })
   const canvas = fakeCanvas()
   const unlink = copilot.linkPick(store, canvas)
   store.send(ANY_REQUEST)
   await settled(store)
   await tick()
-  assert.deepEqual(canvas.calls, [['start', 'o componente', PATH.map((node) => node.id), null]])
+  assert.deepEqual(canvas.calls, [['start', 'o componente', OUTLETS.map((node) => node.id), null]])
   assert.equal(canvas.request.any, true)
   assert.equal(canvas.request.candidates.includes(NOTE.id), false)
   canvas.request.onSelect(START.id)
@@ -2932,13 +2935,13 @@ test('linkPick shows an any pick on the canvas with every component as candidate
   off()
 })
 
-test('the pick box of an any pick says that any component of the flow can be chosen and lists them all from Iniciar Fluxo', () => {
+test('the pick box of an any pick says that any component with an output can be chosen and lists them from Iniciar Fluxo', () => {
   const React = require('react')
   const { renderToStaticMarkup } = require('react-dom/server')
   const panel = loadPanel()
-  assert.equal(panel.ANY_PICK_NOTE, 'Você pode escolher qualquer componente do fluxo, inclusive o Iniciar Fluxo.')
-  assert.equal(panel.pickHint('o componente', true, false, true), 'Selecione o componente no canvas ou na lista e confirme. Você pode escolher qualquer componente do fluxo, inclusive o Iniciar Fluxo.')
-  assert.equal(panel.pickHint('o componente', false, false, true), 'Selecione o componente na lista e confirme. Você pode escolher qualquer componente do fluxo, inclusive o Iniciar Fluxo.')
+  assert.equal(panel.ANY_PICK_NOTE, 'Você pode escolher qualquer componente com saída, inclusive o Iniciar Fluxo.')
+  assert.equal(panel.pickHint('o componente', true, false, true), 'Selecione o componente no canvas ou na lista e confirme. Você pode escolher qualquer componente com saída, inclusive o Iniciar Fluxo.')
+  assert.equal(panel.pickHint('o componente', false, false, true), 'Selecione o componente na lista e confirme. Você pode escolher qualquer componente com saída, inclusive o Iniciar Fluxo.')
   assert.equal(panel.pickHint('o componente', true, true, true), 'Aguarde a geração do Gerar com IA terminar para selecionar o componente.')
   for (const onCanvas of [true, false]) for (const blocked of [true, false]) assert.match(panel.pickHint(copilot.PICK_LABEL, onCanvas, blocked, true), PT_TEXT)
   const pick = copilot.readPick({ label: 'o componente', candidates: [], ready: true, any: true }, NOTED)
@@ -2947,7 +2950,7 @@ test('the pick box of an any pick says that any component of the flow can be cho
   let html = render()
   assert.ok(html.includes(panel.pickHint('o componente', true, false, true)))
   const buttons = markupButtons(html)
-  assert.deepEqual(buttons.map((button) => button.text), [...PATH.map((node) => nodeSubject(node)), 'Cancelar seleção', 'Confirmar seleção'])
+  assert.deepEqual(buttons.map((button) => button.text), [...OUTLETS.map((node) => nodeSubject(node)), 'Cancelar seleção', 'Confirmar seleção'])
   assert.equal(buttons[0].text, START_SUBJECT)
   assert.ok(!html.includes(nodeSubject(NOTE)))
   assert.doesNotMatch(html, /[!—–]/)

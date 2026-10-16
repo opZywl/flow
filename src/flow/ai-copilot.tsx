@@ -133,7 +133,7 @@ export const PICK_OTHER_LABEL = "Escreva outra resposta"
 export const PICK_OTHER_PLACEHOLDER = "Explique melhor ou peça outra coisa, como: crie as duas opções no menu principal."
 export const PICK_OTHER_SEND = "Enviar resposta"
 export const pickOtherWith = (subject: string) => `A seleção vai junto: ${subject}.`
-export const ANY_PICK_NOTE = `Você pode escolher qualquer componente do fluxo, inclusive o ${getComponentLabel(START_TYPE)}.`
+export const ANY_PICK_NOTE = `Você pode escolher qualquer componente com saída, inclusive o ${getComponentLabel(START_TYPE)}.`
 
 const iconButton =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"

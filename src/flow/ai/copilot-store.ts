@@ -368,6 +368,10 @@ export function flowOrder(flow: AtendimentoFlow): AtendimentoNode[] {
   })
 }
 
+export function anchors(flow: AtendimentoFlow): AtendimentoNode[] {
+  return flowOrder(flow).filter((node) => outputHandles(node).length > 0)
+}
+
 function listedCandidates(items: readonly unknown[], flow: AtendimentoFlow): CopilotPickCandidate[] {
   const nodes = new Map(flow.nodes.map((node) => [node.id, node]))
   const candidates: CopilotPickCandidate[] = []
@@ -385,7 +389,7 @@ export function readPick(value: unknown, flow: AtendimentoFlow): CopilotPick | n
   const any = value.any === true
   const listed = Array.isArray(value.candidates) ? value.candidates : null
   if (!any && !listed) return null
-  const candidates = any ? flowOrder(flow).map((node) => ({ id: node.id, text: nodeSubject(node) })) : listedCandidates(listed ?? [], flow)
+  const candidates = any ? anchors(flow).map((node) => ({ id: node.id, text: nodeSubject(node) })) : listedCandidates(listed ?? [], flow)
   return candidates.length < 2 ? null : { label: pickLabel(value.label), candidates, selected: null, ready: value.ready === true, any }
 }
 

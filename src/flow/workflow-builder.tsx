@@ -124,7 +124,7 @@ const LOCKED_EDGE = { selectable: false, deletable: false, focusable: false, upd
 const PICK_EDGE = { ...LOCKED_EDGE, className: "opacity-30 transition-opacity" }
 const PICK_FALLBACK_LABEL = "o componente"
 const PICK_HINT = "Enter ou Espaço seleciona o componente. Enter no selecionado ou duplo clique confirma."
-const PICK_STATUS = { listed: "Clique em um dos componentes destacados.", any: "Clique em qualquer componente do fluxo." } as const
+const PICK_STATUS = { listed: "Clique em um dos componentes destacados.", any: "Clique em qualquer componente com saída." } as const
 const LAYER_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]'
 const CANVAS_HINTS: ReadonlyArray<readonly [string, string]> = [
   ['[id^="react-flow__node-desc-"]', "Pressione Enter ou Espaço para selecionar o componente. Depois, use as setas para movê-lo, Delete para removê-lo e Esc para cancelar."],

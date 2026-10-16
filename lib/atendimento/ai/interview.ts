@@ -2,7 +2,7 @@ import { NoObjectGeneratedError, streamObject } from "ai"
 import type { ModelMessage } from "ai"
 import { z } from "zod"
 import { NOTE_TYPE, START_ID, START_TYPE, categories, componentCatalog, getComponentLabel } from "../catalog"
-import { importFlow } from "../format"
+import { importFlow, outputHandles } from "../format"
 import type { AtendimentoFlow } from "../types"
 import { DEFAULT_FILL, LIMITS, RI_LIMITS } from "./contracts"
 import type { Effort, GenerateFailure } from "./contracts"
@@ -43,6 +43,7 @@ export interface SettleContext {
   history: readonly InterviewMessage[]
   scope?: InterviewScope
   ids?: Iterable<string>
+  anchors?: Iterable<string>
   texts?: ReadonlyMap<string, string>
 }
 
@@ -92,7 +93,7 @@ export const copilotSchema: z.ZodType<InterviewTurn> = z.object({
   pick: z
     .object({
       label: z.string().describe("O que o usuário seleciona no canvas, com o artigo, como o menu de opções ou a mensagem"),
-      any: z.boolean().describe("true quando o pedido cria um componente sem dizer o ponto do fluxo: o usuário seleciona qualquer componente, o Início inclusive, e candidates fica vazio; false quando candidates traz os componentes que servem"),
+      any: z.boolean().describe("true quando o pedido cria um componente sem dizer o ponto do fluxo: o usuário seleciona qualquer componente com saída, o Início inclusive, e candidates fica vazio; false quando candidates traz os componentes que servem"),
       candidates: z.array(z.string()).describe("IDs do resumo do fluxo de todos os componentes que servem para o pedido; vazio com any true"),
       ready: z.boolean().describe("true quando plan já descreve a mudança inteira e só falta saber qual componente, com plan escrito para o componente que o usuário selecionar; false quando ainda falta outra decisão"),
     })
@@ -316,7 +317,7 @@ const COPILOT_LINES = [
   "2. O usuário aplica ou descarta a proposta com os botões Aplicar e Descartar, no cartão da proposta. Quando ele pede para aplicar ou descartar, devolva finish e lembre em uma frase que basta clicar em Aplicar ou em Descartar no cartão.",
   "",
   "# Componente novo sem ponto no fluxo",
-  "1. Quando o pedido cria um componente para o caminho do atendimento, como uma mensagem, uma tag ou um menu, sem dizer o ponto do fluxo, antes ou depois de qual componente, peça para o usuário selecionar no canvas o componente que fica antes do novo, mesmo quando um ponto parece o mais provável: devolva ask com pick, com any true e candidates vazio. Todos os componentes do fluxo servem para essa seleção, o Início inclusive. A opção nova de um menu entra no menu, e o caminho dela segue dessa opção.",
+  "1. Quando o pedido cria um componente para o caminho do atendimento, como uma mensagem, uma tag ou um menu, sem dizer o ponto do fluxo, antes ou depois de qual componente, peça para o usuário selecionar no canvas o componente que fica antes do novo, mesmo quando um ponto parece o mais provável: devolva ask com pick, com any true e candidates vazio. Servem para essa seleção os componentes que têm saída, o Início inclusive, porque o componente novo se liga à saída do selecionado. A opção nova de um menu entra no menu, e o caminho dela segue dessa opção.",
   "2. Nessa pergunta, message traz a sua proposta para o componente novo, diz que ele entra logo depois do componente selecionado, ou logo antes dele, se o usuário preferir, e termina perguntando o ponto, como: Pensei na mensagem Obrigado pelo contato, volte sempre. Ela entra logo depois do componente que você selecionar, ou logo antes dele, se preferir. Depois de qual componente ela entra?",
   "3. Em pick, label diz o que selecionar, como o componente que vem antes da mensagem nova. ready fica true quando plan já descreve o componente novo inteiro, escrito para entrar logo depois do componente que o usuário selecionar, e a interface edita logo que ele confirma a seleção de um componente com uma saída; quando ainda falta outra decisão sobre o componente novo, ready fica false. suggestions traz Logo depois do selecionado e Logo antes do selecionado.",
   "4. A mensagem que começa com Selecionei no canvas traz o componente escolhido: o componente novo entra logo depois dele, na saída dele, e o caminho segue como antes. Com Logo antes do selecionado na resposta, ele entra logo antes, na entrada dele, e com o Início escolhido, ele entra logo depois do Início. Quando o componente escolhido tem mais de uma saída, como um menu, pergunte em qual saída o componente novo entra, propondo a mais provável. Cite em plan o ID do componente escolhido e devolva edit quando o pedido fica completo.",
@@ -656,9 +657,9 @@ function pickLabel(value: unknown): string {
   return ARTICLES.has(first.toLowerCase()) ? `${first.toLowerCase()}${label.slice(first.length)}` : label
 }
 
-function settlePick(value: unknown, ids: readonly string[], plan: string): InterviewPick | null {
+function settlePick(value: unknown, ids: readonly string[], plan: string, anchors: readonly string[] = ids): InterviewPick | null {
   if (!isRecord(value)) return null
-  if (value.any === true) return new Set(ids.filter((id) => typeof id === "string" && id.trim())).size < PICK_LIMITS.min ? null : { label: pickLabel(value.label), candidates: [], ready: value.ready === true && plan !== "", any: true }
+  if (value.any === true) return new Set(anchors.filter((id) => typeof id === "string" && id.trim())).size < PICK_LIMITS.min ? null : { label: pickLabel(value.label), candidates: [], ready: value.ready === true && plan !== "", any: true }
   if (!Array.isArray(value.candidates)) return null
   const resolve = idResolver(ids)
   const candidates: string[] = []
@@ -720,7 +721,7 @@ export function settleTurn(raw: InterviewTurn, context: SettleContext): Intervie
   let plan = clipPlan(raw.plan)
   if ((action === "generate" || action === "edit") && !plan && !copilot) plan = clipPlan(userText(context.history, action === "edit"))
   let said = tidy(raw.message)
-  const offered = copilot && action !== "finish" ? settlePick(raw.pick, ids, plan) : null
+  const offered = copilot && action !== "finish" ? settlePick(raw.pick, ids, plan, context.anchors === undefined ? ids : [...context.anchors]) : null
   if (offered && action === "edit" && !(offered.any ? ids : offered.candidates).some((id) => citesId(plan, id))) {
     action = "ask"
     if (!asksSelection(said) && !said.endsWith("?")) said = ""
@@ -900,8 +901,9 @@ export async function interviewTurn(input: InterviewInput, hooks: InterviewHooks
     try {
       const raw = await converse(setup, messages, hooks, context.scope === "copilot" ? COPILOT_FORMAT : BUILDER_FORMAT)
       const ids = context.flow ? context.flow.nodes.filter((node) => node.data.type !== NOTE_TYPE).map((node) => node.id) : []
+      const anchors = context.flow ? context.flow.nodes.filter((node) => node.data.type !== NOTE_TYPE && outputHandles(node).length > 0).map((node) => node.id) : []
       const texts = context.scope === "copilot" && context.flow ? componentTexts(context.flow) : undefined
-      return { ok: true, turn: settleTurn(raw, { hasFlow: context.flow !== null, history: context.history, scope: context.scope, ids, texts }) }
+      return { ok: true, turn: settleTurn(raw, { hasFlow: context.flow !== null, history: context.history, scope: context.scope, ids, anchors, texts }) }
     } catch (error) {
       return { ok: false, failure: interviewFailure(describeFailure(error, resolved.provider, resolved.apiKey, { client: hooks.signal })) }
     }
