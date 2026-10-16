@@ -127,17 +127,18 @@ const freshEdges = (from, options) => [
 ]
 
 function replaceDelta(options) {
-  return { name: '', description: '', nodes: [menuDelta(options), ...freshNodes(options)], edges: freshEdges(MENU, options) }
+  return { name: '', description: '', nodes: [menuDelta(options), ...freshNodes(options)], edges: freshEdges(MENU, options), remove: [] }
 }
 
 const REPLACE_TEXT = JSON.stringify(replaceDelta(FRESH))
 const NINE_TEXT = JSON.stringify(replaceDelta([...FRESH, EXTRA]))
-const FIX_TEXT = JSON.stringify({ name: '', description: '', nodes: [menuDelta(FRESH)], edges: NEW_OPTIONS.map((text, index) => ({ from: MENU, output: text, to: `opcao_${index + 1}` })) })
+const FIX_TEXT = JSON.stringify({ name: '', description: '', nodes: [menuDelta(FRESH)], edges: NEW_OPTIONS.map((text, index) => ({ from: MENU, output: text, to: `opcao_${index + 1}` })), remove: [] })
 const OVER_TEXT = JSON.stringify({
   name: '',
   description: '',
   nodes: [menuDelta([...CURRENT, ...FRESH]), ...freshNodes(FRESH)],
   edges: [...OLD_EDGES, ...freshEdges(MENU, FRESH)],
+  remove: [],
 })
 const SPLIT_TEXT = JSON.stringify({
   name: '',
@@ -147,6 +148,7 @@ const SPLIT_TEXT = JSON.stringify({
     { id: 'menu_mais', type: 'envio_mensagem', config: [{ key: 'title', value: MORE_TITLE }, { key: 'options', value: JSON.stringify(NEW_OPTIONS.map((text) => ({ text }))) }] },
   ],
   edges: [...OLD_EDGES, { from: MENU, output: MORE_OPTION, to: 'menu_mais' }, ...NEW_OPTIONS.map((text, index) => ({ from: 'menu_mais', output: text, to: `opcao_${index + 1}` }))],
+  remove: [],
 })
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
