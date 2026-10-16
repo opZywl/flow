@@ -2975,7 +2975,7 @@ test('a proposal that breaks the JSON format cannot be applied, focus goes back 
   const summary = copilot.proposalSummary(proposal)
   assert.equal(summary, `Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos. ${copilot.FAULTS_HEAD} ID ${MENU_NODE.id}: ${UNTITLED}`)
   store.send('Corrija o que falta')
-  state = await settled(store)
+  await settled(store)
   assert.equal(env.turns[1].proposal, true)
   assert.deepEqual(env.turns[1].history.at(-2), { role: 'assistant', text: `${OPTION_EDIT}\n\n${summary}` })
   assert.equal(store.discard(), true)
@@ -3013,7 +3013,7 @@ test('a proposal that breaks the JSON format cannot be applied, focus goes back 
 test('a proposal that differs from the request, like a menu with more options than asked, shows each point in the open, stays applicable and the next turn hears it', async () => {
   const { store, env } = harness({ turns: [edited(OPTION_PLAN, OPTION_EDIT), asked('Quer que eu deixe o menu só com as 2 opções pedidas?', ['Pode deixar'], OPTION_PLAN)], outcomes: [received(FIRST, { issues: [COUNT_ISSUE, ISSUE] })] })
   store.send(OPTION_REQUEST)
-  let state = await settled(store)
+  const state = await settled(store)
   const proposal = proposals(state)[0].proposal
   assert.deepEqual(proposal.unmet, [COUNT_ISSUE])
   assert.deepEqual(proposal.broken, [])
@@ -3024,7 +3024,7 @@ test('a proposal that differs from the request, like a menu with more options th
   const summary = copilot.proposalSummary(proposal)
   assert.equal(summary, `Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos. ${copilot.FAULTS_HEAD} ID ${MENU_NODE.id}: ${COUNT_ISSUE.message}`)
   store.send('O que ficou diferente?')
-  state = await settled(store)
+  await settled(store)
   assert.deepEqual(env.turns[1].history.at(-2), { role: 'assistant', text: `${OPTION_EDIT}\n\n${summary}` })
   assert.equal(store.apply(), true)
   const loose = { ...COUNT_ISSUE, nodeId: undefined, message: 'A pesquisa de satisfação ficou com 4 perguntas, e o pedido pede 3' }
