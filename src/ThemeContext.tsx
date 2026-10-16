@@ -199,10 +199,7 @@ export const HomeThemeProvider: React.FC<ThemeProviderProps> = ({ children }) =>
             root.style.setProperty("--glow-blur", `${glowThickness}px`)
             root.style.setProperty("--glow-spread", `${glowThickness / 2}px`)
 
-            const glowStyle = glowEnabled
-                ? `0 0 ${glowThickness}px var(--glow-color), 0 0 ${glowThickness * 2}px var(--glow-color-light)`
-                : "none"
-            root.style.setProperty("--title-glow", glowStyle)
+            root.style.setProperty("--title-glow", `0 0 ${glowThickness}px var(--glow-color), 0 0 ${glowThickness * 2}px var(--glow-color-light)`)
 
             if (glowAnimation) {
                 root.style.setProperty("--glow-animation", "glow-pulse 2s ease-in-out infinite alternate")

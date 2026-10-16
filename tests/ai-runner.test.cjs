@@ -146,10 +146,6 @@ function hanging(provider, call, text = JSON.stringify(RI), fraction = 0.8) {
   })()
 }
 
-function messagesOf(call) {
-  return JSON.stringify(call.body)
-}
-
 function assertNoKey(value, key) {
   assert.equal(JSON.stringify(value).includes(key), false, 'a chave apareceu no resultado')
 }

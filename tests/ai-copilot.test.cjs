@@ -495,7 +495,7 @@ test('Editar agora checks the key first and keeps the plan for later', async () 
   assert.equal(state.entries.length, 2)
   env.settings = { ...env.settings, apiKey: KEY }
   assert.equal(store.editNow(), true)
-  state = await settled(store)
+  await settled(store)
   assert.equal(env.requests[0].request.prompt, OPTION_PLAN)
 })
 
@@ -711,7 +711,7 @@ test('Aplicar with the open flow unchanged applies the proposal once, leaves a n
   assert.equal(env.applied.length, 1)
 
   store.send('Agora troque a despedida')
-  state = await settled(store)
+  await settled(store)
   assert.equal(env.turns[1].flow, env.flow)
   assert.equal(env.turns[1].proposal, false)
   assert.deepEqual(env.turns[1].history, [
@@ -1328,7 +1328,7 @@ test('the panel renders the empty conversation, the examples, the composer and t
 })
 
 const markupButtons = (html) =>
-  [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/g)].map((match) => ({ attrs: match[1], text: match[2].replace(/<[^>]+>/g, ''), disabled: / disabled=""/.test(match[1]) }))
+  [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/g)].map((match) => ({ attrs: match[1], text: match[2].replace(/<[^>]*>/g, '').replace(/</g, ''), disabled: / disabled=""/.test(match[1]) }))
 
 test('a candidate names the component, a short main text and the ID', () => {
   assert.equal(nodeSubject(FAREWELL), `Enviar Mensagem “Obrigado pelo contato. Até logo.” · ID ${FAREWELL.id}`)
@@ -2261,7 +2261,7 @@ test('Editar agora runs on the flow the question saw: a content change ends with
   await settled(moved.store)
   moved.env.flow = MOVED
   assert.equal(moved.store.editNow(), true)
-  state = await settled(moved.store)
+  await settled(moved.store)
   assert.equal(moved.env.requests[0].request.base, MOVED)
   assert.equal(moved.env.requests[0].request.prompt, OPTION_PLAN)
 })
@@ -2490,7 +2490,7 @@ test('linkPick starts the canvas pick again when the confirm on the canvas is re
   env.settings = { ...env.settings, apiKey: KEY }
   leave(canvas).onConfirm(FAREWELL.id)
   assert.equal(store.getState().thinking, true)
-  state = await settled(store)
+  await settled(store)
   assert.deepEqual(env.turns[1].history.at(-1), { role: 'user', text: choice(FAREWELL) })
   await tick()
   assert.equal(canvas.calls.filter((call) => call[0] === 'start').length, 2)
