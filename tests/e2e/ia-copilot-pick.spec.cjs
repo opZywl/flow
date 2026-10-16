@@ -7,6 +7,7 @@ const { getComponentLabel } = require('../../lib/atendimento/catalog.ts')
 const { assembleFlow, finalizeFlow } = require('../../lib/atendimento/ai/assemble.ts')
 const { countChanges, flowToRi } = require('../../lib/atendimento/ai/edit.ts')
 const { INTERVIEW_SCHEMA_NAME } = require('../../lib/atendimento/ai/interview.ts')
+const { PICK_MIN_WIDTH } = require('../../src/flow/canvas-frame.ts')
 
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
 const HOST = 'api.openai.com'
@@ -16,6 +17,12 @@ const FOLLOW_UP = 'Precisa mudar mais alguma coisa no fluxo?'
 const EDIT_DONE = 'Edição pronta. Aplique ou descarte no Copiloto.'
 const FULL_REQUEST = 'Ver o pedido completo'
 const PICK_CANCELLED = 'Seleção cancelada. Você pode responder por texto.'
+const OUTDATED = 'O fluxo aberto mudou depois deste pedido. Peça de novo para editar a versão atual.'
+const FOCUS_MISSED = 'A edição não mudou o componente que você selecionou. Confira se a mudança ficou no lugar certo antes de aplicar.'
+const EDIT_NOW_LABEL = 'Editar agora com o que já foi decidido'
+const QUESTION_WAITING = 'Copiloto, pergunta para responder'
+const COPILOT_WIDTH = 384
+const NARROW = { width: COPILOT_WIDTH + PICK_MIN_WIDTH - 24, height: 1000 }
 const PICKED = 'Selecionei no canvas'
 const MENU_LABEL = 'o menu de opções'
 const MESSAGE_LABEL = 'a mensagem'
@@ -60,7 +67,23 @@ const assembled = (source) => importFlow(JSON.parse(JSON.stringify(finalizeFlow(
 const idOf = (flow, text) => flowToRi(flow).nodes.find((node) => node.config.some((entry) => entry.value === text)).id
 const idsOf = (flow) => flow.nodes.map((node) => node.id)
 
+const OTHER_SOURCE = {
+  name: 'Atendimento Suporte Exemplo',
+  description: 'Saudação, horário e transferência para o suporte',
+  nodes: [
+    { id: 'saudacao', type: 'envio_pergunta', config: [{ key: 'template', value: 'Olá, #NAME. Você está no suporte da Loja Exemplo.' }] },
+    { id: 'horario', type: 'envio_pergunta', config: [{ key: 'template', value: 'O suporte atende de segunda a sexta, das 8h às 18h.' }] },
+    { id: 'suporte', type: 'departamentos', config: [{ key: 'name', value: 'Suporte' }, { key: 'departamento', value: 'suporte' }] },
+  ],
+  edges: [
+    { from: 'inicio', output: '', to: 'saudacao' },
+    { from: 'saudacao', output: '', to: 'horario' },
+    { from: 'horario', output: '', to: 'suporte' },
+  ],
+}
+
 const BASE_FLOW = assembled(SOURCE)
+const OTHER_FLOW = assembled(OTHER_SOURCE)
 const BASE_STATE = { name: BASE_FLOW.name, nodes: idsOf(BASE_FLOW) }
 const NODE_IDS = BASE_STATE.nodes
 const MAIN_MENU = idOf(BASE_FLOW, MAIN_TITLE)
@@ -126,6 +149,13 @@ const MAIN_REQUEST = 'crie a opção Segunda via no menu principal'
 const MAIN_PLAN = `No menu ${MAIN_TITLE} ID ${MAIN_MENU}, acrescente a opção Segunda via, que envia o link https://boletos.exemplo.com.br e encerra o atendimento.`
 const EDIT_MAIN = { message: 'Vou acrescentar a opção Segunda via no menu principal.', suggestions: [], action: 'edit', plan: MAIN_PLAN, pick: null }
 const REFINE_REQUEST = 'coloque um aviso atrás do Enviar Mensagem'
+const refineAsk = (boleto) => ({
+  message: 'A proposta tem cinco mensagens. Selecione no canvas a mensagem que vem antes do aviso.',
+  suggestions: [],
+  action: 'ask',
+  plan: `Na proposta, acrescente a mensagem ${NOTICE_TEXT} logo depois da mensagem que o usuário escolher.`,
+  pick: { label: MESSAGE_LABEL, candidates: [...MESSAGES, boleto] },
+})
 
 function optionDelta(flow, menuId) {
   const ri = flowToRi(flow)
@@ -349,15 +379,66 @@ const nodes = (page) => page.locator('.react-flow__node')
 const nodeAt = (page, id) => page.locator(`.react-flow__node[data-id="${id}"]`)
 const markOf = (page, id) => page.locator(`.react-flow__node[data-id="${id}"][data-pick], .react-flow__node[data-id="${id}"] [data-pick]`).first()
 const marked = (page) => page.locator('.react-flow [data-pick="candidate"], .react-flow [data-pick="dimmed"], .react-flow [data-pick="selected"]')
+const focusMarks = (page) => page.locator('.react-flow [data-pick-focus]')
 const banner = (page) => page.getByRole('region', { name: 'Seleção no canvas', exact: true })
 const bannerButton = (page, name) => banner(page).getByRole('button', { name, exact: true })
 const bannerStatus = (page) => banner(page).getByRole('status')
+const chosenStatus = (kind, snippet, id) => new RegExp(`^Selecionado: ${escape(kind)}\\b.*${escape(snippet)}.* · ID ${escape(id)}$`)
 const HINT = 'Clique em um dos componentes destacados.'
 const selection = (panel) => panel.getByRole('region', { name: 'Seleção do componente', exact: true })
 const confirmChoice = (panel) => selection(panel).getByRole('button', { name: 'Confirmar seleção', exact: true })
 const removeButtons = (page) => page.getByRole('button', { name: /^Remover .+, ID \S+$/ })
 const transformOf = (page, id) => nodeAt(page, id).evaluate((element) => element.style.transform)
 const marks = (ids, mark) => Object.fromEntries(ids.map((id) => [id, mark]))
+const applyButton = (panel) => panel.getByRole('button', { name: 'Aplicar', exact: true })
+const editNowOffered = (panel) => panel.getByRole('button', { name: EDIT_NOW_LABEL, exact: true, disabled: false })
+const backgroundButton = (page) => page.getByRole('button', { name: 'Imagem de fundo', exact: true })
+const backgroundMenu = (page) => page.getByRole('group', { name: 'Opções da imagem de fundo', exact: true })
+const libraryToggle = (page) => page.getByRole('button', { name: 'Componentes', exact: true })
+const componentLibrary = (page) => page.getByLabel('Biblioteca de componentes')
+
+async function importFile(page, flow, name) {
+  await page.getByLabel('Importar arquivo JSON').setInputFiles({ name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(flow)) })
+  await expect(page.getByLabel('Nome do fluxo')).toHaveValue(flow.name)
+  await expect(nodes(page)).toHaveCount(flow.nodes.length)
+}
+
+const framing = (page, ids) => page.evaluate((wanted) => {
+  const area = document.querySelector('.react-flow').getBoundingClientRect()
+  const zoom = new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a
+  const bounds = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity }
+  for (const node of document.querySelectorAll('.react-flow__node')) {
+    const { e: x, f: y } = new DOMMatrixReadOnly(getComputedStyle(node).transform)
+    bounds.left = Math.min(bounds.left, x)
+    bounds.top = Math.min(bounds.top, y)
+    bounds.right = Math.max(bounds.right, x + node.offsetWidth)
+    bounds.bottom = Math.max(bounds.bottom, y + node.offsetHeight)
+  }
+  const whole = Math.min(1, area.width / ((bounds.right - bounds.left) * 1.15), area.height / ((bounds.bottom - bounds.top) * 1.15))
+  const inside = wanted.every((id) => {
+    const box = document.querySelector(`.react-flow__node[data-id="${id}"]`)?.getBoundingClientRect()
+    return Boolean(box) && box.left >= area.left && box.top >= area.top && box.right <= area.right && box.bottom <= area.bottom
+  })
+  return { inside, closer: zoom > whole * 1.2 }
+}, ids)
+
+const insideCanvas = async (page, ids) => (await framing(page, ids)).inside
+
+async function expectChosen(page, panel, candidates, id, kind) {
+  await expectMarks(page, NODE_IDS, { ...marks(candidates, 'candidate'), [id]: 'selected' })
+  await expect(markOf(page, id)).toHaveAttribute('aria-pressed', 'true')
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(kind, SNIPPETS[id], id))
+  await expect(choice(panel, id, SNIPPETS[id])).toHaveAttribute('aria-pressed', 'true')
+  await expect(bannerButton(page, 'Confirmar')).toBeEnabled()
+  await expect.poll(() => insideCanvas(page, [id]), { message: `o componente ${id} aparece no canvas` }).toBe(true)
+}
+
+async function expectFramed(page, ids) {
+  await expect(async () => {
+    await settle(page)
+    expect(await framing(page, ids)).toEqual({ inside: true, closer: true })
+  }, 'a câmera fica no componente escolhido, com a edição ao lado, em vez de mostrar o fluxo inteiro').toPass({ timeout: 10000 })
+}
 
 function choice(panel, id, snippet) {
   const buttons = selection(panel).getByRole('button')
@@ -457,14 +538,14 @@ async function typeKey(panel) {
   await panel.getByLabel('Chave da API da OpenAI').fill(KEY)
 }
 
-async function start(page, flow = BASE_FLOW) {
+async function start(page, flow = BASE_FLOW, { library = false } = {}) {
   await page.goto('/flow')
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
-  await page.getByLabel('Importar arquivo JSON').setInputFiles({ name: 'base.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(flow)) })
-  await expect(page.getByLabel('Nome do fluxo')).toHaveValue(flow.name)
-  await expect(nodes(page)).toHaveCount(flow.nodes.length)
-  await page.getByRole('button', { name: 'Componentes', exact: true }).click()
-  await expect(page.getByLabel('Biblioteca de componentes')).toHaveCount(0)
+  await importFile(page, flow, 'base.json')
+  if (!library) {
+    await libraryToggle(page).click()
+    await expect(componentLibrary(page)).toHaveCount(0)
+  }
   const panel = await openCopilot(page)
   await typeKey(panel)
   await fitCanvas(page)
@@ -485,7 +566,7 @@ async function proposal(panel, count = 1) {
   return panel.getByRole('list', { name: 'Mudanças no fluxo aberto' }).nth(count - 1).getByRole('listitem')
 }
 
-test('crie a opção Segunda via with two menus: the canvas outlines both menus, Confirmar sends the chosen one and the edit lands on that menu', async ({ page, ai }) => {
+test('crie a opção Segunda via with two menus: the canvas outlines both menus, Confirmar sends the chosen one, the camera stays on it and the edit lands on that menu', async ({ page, ai }) => {
   const result = await expectedOption()
   expect(result.changes).toEqual({ added: 2, changed: 1, removed: 0 })
   const final = result.workflow
@@ -507,7 +588,9 @@ test('crie a opção Segunda via with two menus: the canvas outlines both menus,
     await expect(markOf(page, id), `candidato ${id}`).toHaveAttribute('aria-label', new RegExp(`^${escape(MENU_KIND)}, .+, ID ${escape(id)}$`))
   }
   await expect(selection(panel)).toBeVisible()
+  await expect(selection(panel)).toContainText(`Selecione ${MENU_LABEL} no canvas ou na lista e confirme.`)
   await expect(confirmChoice(panel)).toBeDisabled()
+  await expect(editNowOffered(panel), 'Editar agora espera a seleção').toHaveCount(0)
   expect(ai.turnCalls()).toHaveLength(1)
   expect(ai.buildCalls()).toHaveLength(0)
   await settle(page)
@@ -515,11 +598,11 @@ test('crie a opção Segunda via with two menus: the canvas outlines both menus,
   await nodeAt(page, MAIN_MENU).click()
   await expectMarks(page, NODE_IDS, { [MAIN_MENU]: 'selected', [FINANCE_MENU]: 'candidate' })
   await expect(markOf(page, MAIN_MENU)).toHaveAttribute('aria-pressed', 'true')
-  await expect(bannerStatus(page)).toHaveText(`Selecionado: ${MENU_KIND} · ID ${MAIN_MENU}`)
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MENU_KIND, SNIPPETS[MAIN_MENU], MAIN_MENU))
   await expect(bannerButton(page, 'Confirmar')).toBeEnabled()
   await nodeAt(page, FINANCE_MENU).click()
   await expectMarks(page, NODE_IDS, { [MAIN_MENU]: 'candidate', [FINANCE_MENU]: 'selected' })
-  await expect(bannerStatus(page)).toHaveText(`Selecionado: ${MENU_KIND} · ID ${FINANCE_MENU}`)
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
   await expect(bannerButton(page, 'Confirmar')).toBeEnabled()
   await expect(selection(panel).getByRole('button', { pressed: true })).toHaveText(new RegExp(`· ID ${escape(FINANCE_MENU)}$`))
   await expect(confirmChoice(panel)).toBeEnabled()
@@ -537,6 +620,11 @@ test('crie a opção Segunda via with two menus: the canvas outlines both menus,
   await expect(page.getByText(EDIT_DONE)).toBeVisible()
   await expect(canvas(page)).toContainText(BOLETO_TEXT)
   await expect(nodes(page)).toHaveCount(final.nodes.length)
+  await expectFramed(page, [FINANCE_MENU, boleto])
+  await expect(focusMarks(page)).toHaveCount(1)
+  await expect(nodeAt(page, FINANCE_MENU).locator('[data-pick-focus]'), 'o menu escolhido continua marcado na prévia').toHaveCount(1)
+  await expect(panel.getByRole('heading', { name: 'Edição pronta', exact: true })).toBeVisible()
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
 
   expect(ai.turnCalls()).toHaveLength(2)
   const second = ai.turnCalls()[1]
@@ -566,6 +654,7 @@ test('crie a opção Segunda via with two menus: the canvas outlines both menus,
   expect(JSON.stringify(after.nodes.find((node) => node.id === FINANCE_MENU).data)).toContain(NEW_OPTION)
   expect(JSON.stringify(after.nodes.find((node) => node.id === MAIN_MENU).data)).not.toContain(NEW_OPTION)
   await expect(marked(page)).toHaveCount(0)
+  await expect(focusMarks(page)).toHaveCount(0)
   expect(ai.turnCalls()).toHaveLength(2)
 })
 
@@ -592,7 +681,7 @@ test('Seleção do componente lists the candidates, stays in sync with the canva
   await choice(panel, PAYMENTS, SNIPPETS[PAYMENTS]).click()
   await expect(choice(panel, PAYMENTS, SNIPPETS[PAYMENTS])).toHaveAttribute('aria-pressed', 'true')
   await expectMarks(page, NODE_IDS, { ...candidates, [PAYMENTS]: 'selected' })
-  await expect(bannerStatus(page)).toHaveText(`Selecionado: ${MESSAGE_KIND} · ID ${PAYMENTS}`)
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
   await expect(bannerButton(page, 'Confirmar')).toBeEnabled()
   await expect(confirmChoice(panel)).toBeEnabled()
 
@@ -733,7 +822,7 @@ test('while picking, editing is locked: the config panel closes, candidates do n
     await expect(markOf(page, dimmed.id)).toHaveAttribute('data-pick', 'dimmed')
   }
   await expectMarks(page, NODE_IDS, { [MAIN_MENU]: 'candidate', [FINANCE_MENU]: 'selected' })
-  await expect(bannerStatus(page)).toHaveText(`Selecionado: ${MENU_KIND} · ID ${FINANCE_MENU}`)
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
   await expect(page.getByLabel(CONFIG)).toBeHidden()
 
   await markOf(page, MAIN_MENU).focus()
@@ -814,13 +903,7 @@ test('with a proposal on the canvas, the pick runs on the preview, a component t
   const refineText = JSON.stringify(noticeDelta(first.workflow, boleto))
   const second = await engineEdit(first.workflow, refineText, refinePlan)
   const notice = idOf(second.workflow, NOTICE_TEXT)
-  const askRefine = {
-    message: 'A proposta tem cinco mensagens. Selecione no canvas a mensagem que vem antes do aviso.',
-    suggestions: [],
-    action: 'ask',
-    plan: `Na proposta, acrescente a mensagem ${NOTICE_TEXT} logo depois da mensagem que o usuário escolher.`,
-    pick: { label: MESSAGE_LABEL, candidates: options },
-  }
+  const askRefine = refineAsk(boleto)
   const editRefine = { message: 'Vou colocar o aviso logo depois da mensagem da segunda via.', suggestions: [], action: 'edit', plan: refinePlan, pick: null }
 
   const panel = await start(page)
@@ -845,7 +928,7 @@ test('with a proposal on the canvas, the pick runs on the preview, a component t
   await settle(page)
   await nodeAt(page, boleto).click()
   await expectMarks(page, shown, { ...candidates, [boleto]: 'selected' })
-  await expect(bannerStatus(page)).toHaveText(`Selecionado: ${MESSAGE_KIND} · ID ${boleto}`)
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MESSAGE_KIND, 'Acesse a segunda via', boleto))
   ai.say(editRefine)
   ai.builds.push({ steps: [refineText] })
   await bannerButton(page, 'Confirmar').click()
@@ -874,4 +957,332 @@ test('with a proposal on the canvas, the pick runs on the preview, a component t
   const applied = await stored(page)
   expect(applied.edges.some((edge) => edge.source === boleto && edge.target === notice), 'o aviso entra depois da mensagem que só existia na proposta').toBe(true)
   await expect(marked(page)).toHaveCount(0)
+})
+
+test('while a selection is open, Editar agora is not offered and Aplicar waits, and after Cancelar seleção the earlier proposal applies', async ({ page, ai }) => {
+  const first = await expectedMain()
+  const boleto = idOf(first.workflow, BOLETO_TEXT)
+  const askRefine = refineAsk(boleto)
+  const panel = await start(page)
+  ai.say(EDIT_MAIN)
+  ai.builds.push({ steps: [MAIN_TEXT] })
+  await ask(panel, MAIN_REQUEST)
+  await proposal(panel)
+  await expect(applyButton(panel)).toBeEnabled()
+
+  ai.say(askRefine)
+  await ask(panel, REFINE_REQUEST)
+  await expect(messages(panel)).toHaveText([you(MAIN_REQUEST), says(EDIT_MAIN), you(REFINE_REQUEST), says(askRefine)])
+  await expect(banner(page)).toBeVisible()
+  await expect(selection(panel)).toBeVisible()
+  await expect(applyButton(panel), 'Aplicar espera a seleção terminar').toBeDisabled()
+  await expect(editNowOffered(panel), 'Editar agora sem o componente escolhido').toHaveCount(0)
+
+  await settle(page)
+  await nodeAt(page, boleto).click()
+  await expect(markOf(page, boleto)).toHaveAttribute('data-pick', 'selected')
+  await expect(bannerButton(page, 'Confirmar')).toBeEnabled()
+  await expect(confirmChoice(panel)).toBeEnabled()
+  await expect(applyButton(panel)).toBeDisabled()
+  await expect(editNowOffered(panel)).toHaveCount(0)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  await selection(panel).getByRole('button', { name: 'Cancelar seleção', exact: true }).click()
+  await expectPickOver(page, panel)
+  await expect(messages(panel)).toHaveText([you(MAIN_REQUEST), says(EDIT_MAIN), you(REFINE_REQUEST), says(askRefine), PICK_CANCELLED])
+  await expect(composer(panel)).toBeFocused()
+  await expect(editNowOffered(panel), 'o plano que dependia da seleção não vira edição').toHaveCount(0)
+  await expect(applyButton(panel)).toBeEnabled()
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: idsOf(first.workflow) })
+  const applied = await stored(page)
+  expect(applied.edges.some((edge) => edge.source === MAIN_MENU && edge.target === boleto)).toBe(true)
+  expect(applied.nodes.some((node) => JSON.stringify(node.data).includes(NOTICE_TEXT)), 'o aviso da seleção cancelada não entra').toBe(false)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(ai.buildCalls()).toHaveLength(1)
+})
+
+test('a selection left open when the panel closes comes back on the same flow and is dropped with a note when the panel reopens on another flow', async ({ page, ai }) => {
+  await watchPicks(page)
+  const panel = await start(page)
+  ai.say(ASK_MENU)
+  await ask(panel, OPTION_REQUEST)
+  await expect(banner(page)).toBeVisible()
+  await settle(page)
+  await nodeAt(page, FINANCE_MENU).click()
+  await expectMarks(page, NODE_IDS, { [MAIN_MENU]: 'candidate', [FINANCE_MENU]: 'selected' })
+
+  await trigger(page).click()
+  await expect(panel).toBeHidden()
+  await expect(banner(page)).toHaveCount(0)
+  await expect(marked(page)).toHaveCount(0)
+  await expect(trigger(page), 'o botão lembra a seleção pendente').toHaveAccessibleName(QUESTION_WAITING)
+  await trigger(page).click()
+  await expect(panel).toBeVisible()
+  await expect(trigger(page)).toHaveAccessibleName('Copiloto')
+  await expect(banner(page)).toBeVisible()
+  await expectMarks(page, NODE_IDS, { [MAIN_MENU]: 'candidate', [FINANCE_MENU]: 'selected' })
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
+  await expect(choice(panel, FINANCE_MENU, SNIPPETS[FINANCE_MENU])).toHaveAttribute('aria-pressed', 'true')
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_MENU)])
+
+  await trigger(page).click()
+  await expect(panel).toBeHidden()
+  await expect(banner(page)).toHaveCount(0)
+  await expect(trigger(page)).toHaveAccessibleName(QUESTION_WAITING)
+  await importFile(page, OTHER_FLOW, 'outro.json')
+  await page.evaluate(() => {
+    window.__pickSeen = false
+  })
+  await trigger(page).click()
+  await expect(panel).toBeVisible()
+  await expect(trigger(page)).toHaveAccessibleName('Copiloto')
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_MENU), OUTDATED])
+  await frames(page)
+  await expectPickOver(page, panel)
+  expect(await pickSeen(page), 'o canvas não seleciona componentes do outro fluxo').toBe(false)
+  await expect(nodes(page)).toHaveCount(OTHER_FLOW.nodes.length)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+})
+
+test('the banner names the selected component with its text, Anterior and Próximo walk through the candidates and Enter on the selected one confirms', async ({ page, ai }) => {
+  const result = await expectedNotice()
+  const panel = await start(page)
+  ai.say(ASK_MESSAGE)
+  await ask(panel, NOTICE_REQUEST)
+  await expect(banner(page)).toBeVisible()
+  await expectMarks(page, NODE_IDS, marks(MESSAGES, 'candidate'))
+  await expect(bannerStatus(page)).toHaveText(HINT)
+  await expect(bannerButton(page, 'Anterior')).toBeEnabled()
+  await expect(bannerButton(page, 'Próximo')).toBeEnabled()
+  await expect(bannerButton(page, 'Confirmar')).toBeDisabled()
+
+  const walk = [
+    ['Próximo', WELCOME],
+    ['Próximo', PAYMENTS],
+    ['Próximo', INVOICES],
+    ['Próximo', FAREWELL],
+    ['Próximo', WELCOME],
+    ['Anterior', FAREWELL],
+    ['Anterior', INVOICES],
+    ['Anterior', PAYMENTS],
+  ]
+  for (const [step, id] of walk) {
+    await bannerButton(page, step).click()
+    await expectChosen(page, panel, MESSAGES, id, MESSAGE_KIND)
+  }
+  expect(ai.turnCalls()).toHaveLength(1)
+
+  await settle(page)
+  await markOf(page, INVOICES).focus()
+  await page.keyboard.press('Enter')
+  await expectChosen(page, panel, MESSAGES, INVOICES, MESSAGE_KIND)
+  await markOf(page, PAYMENTS).focus()
+  await page.keyboard.press('Enter')
+  await expectChosen(page, panel, MESSAGES, PAYMENTS, MESSAGE_KIND)
+  await expect(banner(page)).toBeVisible()
+  expect(ai.turnCalls(), 'Enter num candidato só seleciona').toHaveLength(1)
+
+  ai.say(EDIT_NOTICE)
+  ai.builds.push({ steps: [NOTICE_DELTA] })
+  await expect(markOf(page, PAYMENTS)).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expectPickOver(page, panel)
+  const sent = youPicked(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel)).toHaveText([you(NOTICE_REQUEST), says(ASK_MESSAGE), sent, says(EDIT_NOTICE)])
+  await expect(canvas(page)).toContainText(NOTICE_TEXT)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(lastUser(ai.turnCalls()[1])).toMatch(picked(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(JSON.stringify(ai.buildCalls()[0].body)).toContain(NOTICE_PLAN)
+})
+
+test('an answer typed with a candidate selected goes to the AI with the selection, so the choice is not lost', async ({ page, ai }) => {
+  const result = await expectedOption()
+  const typed = 'Pode usar o link do boleto'
+  const panel = await start(page)
+  ai.say(ASK_MENU)
+  await ask(panel, OPTION_REQUEST)
+  await expect(banner(page)).toBeVisible()
+  await settle(page)
+  await nodeAt(page, FINANCE_MENU).click()
+  await expect(markOf(page, FINANCE_MENU)).toHaveAttribute('data-pick', 'selected')
+
+  ai.say(EDIT_OPTION)
+  ai.builds.push({ steps: [OPTION_TEXT] })
+  await ask(panel, typed)
+  await expectPickOver(page, panel)
+  const chosen = youPicked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_MENU), chosen, you(typed), says(EDIT_OPTION)])
+  expect(ai.turnCalls()).toHaveLength(2)
+  const second = lastUser(ai.turnCalls()[1])
+  expect(second, 'a resposta digitada leva o componente selecionado').toMatch(picked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
+  expect(second).toContain(typed)
+  expect(ai.buildCalls()).toHaveLength(1)
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
+})
+
+test('a double click on a candidate selects and confirms it in one gesture', async ({ page, ai }) => {
+  const result = await expectedOption()
+  const panel = await start(page)
+  ai.say(ASK_MENU)
+  await ask(panel, OPTION_REQUEST)
+  await expectMarks(page, NODE_IDS, marks(MENUS, 'candidate'))
+  await settle(page)
+
+  ai.say(EDIT_OPTION)
+  ai.builds.push({ steps: [OPTION_TEXT] })
+  await nodeAt(page, FINANCE_MENU).dblclick()
+  await expectPickOver(page, panel)
+  const chosen = youPicked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_MENU), chosen, says(EDIT_OPTION)])
+  await expect(nodes(page)).toHaveCount(result.workflow.nodes.length)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(lastUser(ai.turnCalls()[1])).toMatch(picked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(JSON.stringify(ai.buildCalls()[0].body)).toContain(OPTION_PLAN)
+})
+
+test('Esc on the open Imagem de fundo menu closes only the menu and the selection stays until the next Esc', async ({ page, ai }) => {
+  const panel = await start(page)
+  ai.say(ASK_MENU)
+  await ask(panel, OPTION_REQUEST)
+  await expect(banner(page)).toBeVisible()
+  await settle(page)
+  await nodeAt(page, MAIN_MENU).click()
+  await expectMarks(page, NODE_IDS, { [MAIN_MENU]: 'selected', [FINANCE_MENU]: 'candidate' })
+
+  await backgroundButton(page).click()
+  await expect(backgroundMenu(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(backgroundMenu(page)).toHaveCount(0)
+  await expect(backgroundButton(page)).toBeFocused()
+  await expect(backgroundButton(page)).toHaveAttribute('aria-expanded', 'false')
+  await expect(banner(page)).toBeVisible()
+  await expectMarks(page, NODE_IDS, { [MAIN_MENU]: 'selected', [FINANCE_MENU]: 'candidate' })
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MENU_KIND, SNIPPETS[MAIN_MENU], MAIN_MENU))
+  await expect(bannerButton(page, 'Confirmar')).toBeEnabled()
+  await expect(selection(panel)).toBeVisible()
+  await expect(choice(panel, MAIN_MENU, SNIPPETS[MAIN_MENU])).toHaveAttribute('aria-pressed', 'true')
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_MENU)])
+
+  await page.keyboard.press('Escape')
+  await expectPickOver(page, panel)
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_MENU), PICK_CANCELLED])
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+})
+
+test('the component library steps aside while picking and comes back when the selection ends, with the chosen menu still in view', async ({ page, ai }) => {
+  const result = await expectedOption()
+  const boleto = idOf(result.workflow, BOLETO_TEXT)
+  const panel = await start(page, BASE_FLOW, { library: true })
+  await expect(componentLibrary(page)).toBeVisible()
+  ai.say(ASK_MENU)
+  await ask(panel, OPTION_REQUEST)
+  await expectMarks(page, NODE_IDS, marks(MENUS, 'candidate'))
+  await expect(componentLibrary(page), 'a biblioteca sai durante a seleção').toHaveCount(0)
+  await expect(libraryToggle(page)).toBeDisabled()
+  await bannerButton(page, 'Cancelar').click()
+  await expectPickOver(page, panel)
+  await expect(componentLibrary(page), 'a biblioteca volta depois de Cancelar').toBeVisible()
+  await expect(libraryToggle(page)).toBeEnabled()
+
+  ai.say(ASK_MENU)
+  await ask(panel, 'Prefiro escolher o menu')
+  await expectMarks(page, NODE_IDS, marks(MENUS, 'candidate'))
+  await expect(componentLibrary(page)).toHaveCount(0)
+  await settle(page)
+  await nodeAt(page, FINANCE_MENU).click()
+  await expect(markOf(page, FINANCE_MENU)).toHaveAttribute('data-pick', 'selected')
+  ai.say(EDIT_OPTION)
+  ai.builds.push({ steps: [OPTION_TEXT] })
+  await bannerButton(page, 'Confirmar').click()
+  await expectPickOver(page, panel)
+  await expect(componentLibrary(page), 'a biblioteca volta depois de Confirmar').toBeVisible()
+  await expect.poll(() => insideCanvas(page, [FINANCE_MENU]), { message: 'o menu escolhido continua à vista' }).toBe(true)
+  await proposal(panel)
+  await expectFramed(page, [FINANCE_MENU, boleto])
+  expect(ai.turnCalls()).toHaveLength(3)
+  expect(lastUser(ai.turnCalls()[2])).toMatch(picked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
+  expect(ai.buildCalls()).toHaveLength(1)
+})
+
+test('when the canvas is too narrow for the selection, it stays in the panel list and the canvas never enters pick mode', async ({ page, ai }) => {
+  const result = await expectedOption()
+  await page.setViewportSize(NARROW)
+  await watchPicks(page)
+  const panel = await start(page)
+  ai.say(ASK_MENU)
+  await ask(panel, OPTION_REQUEST)
+
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_MENU)])
+  await expect(selection(panel)).toBeVisible()
+  await expect(selection(panel)).toContainText(`Selecione ${MENU_LABEL} na lista e confirme.`)
+  await frames(page)
+  await expect(banner(page)).toHaveCount(0)
+  await expect(marked(page)).toHaveCount(0)
+  expect(await pickSeen(page), 'o canvas estreito não entra no modo de seleção').toBe(false)
+  for (const id of MENUS) await expect(choice(panel, id, SNIPPETS[id]), `opção do componente ${id} no painel`).toHaveCount(1)
+  await expect(confirmChoice(panel)).toBeDisabled()
+  await expect(editNowOffered(panel)).toHaveCount(0)
+
+  await choice(panel, FINANCE_MENU, SNIPPETS[FINANCE_MENU]).click()
+  await expect(choice(panel, FINANCE_MENU, SNIPPETS[FINANCE_MENU])).toHaveAttribute('aria-pressed', 'true')
+  await expect(choice(panel, MAIN_MENU, SNIPPETS[MAIN_MENU])).toHaveAttribute('aria-pressed', 'false')
+  await expect(confirmChoice(panel)).toBeEnabled()
+  await expect(banner(page)).toHaveCount(0)
+  expect(await pickSeen(page)).toBe(false)
+
+  ai.say(EDIT_OPTION)
+  ai.builds.push({ steps: [OPTION_TEXT] })
+  await confirmChoice(panel).click()
+  await expect(selection(panel)).toBeHidden()
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_MENU), youPicked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU), says(EDIT_OPTION)])
+  await expect(nodes(page)).toHaveCount(result.workflow.nodes.length)
+  expect(await pickSeen(page)).toBe(false)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(lastUser(ai.turnCalls()[1])).toMatch(picked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
+  expect(ai.buildCalls()).toHaveLength(1)
+})
+
+test('a proposal that leaves the selected component unchanged warns before Aplicar', async ({ page, ai }) => {
+  const result = await expectedMain()
+  expect(result.changes).toEqual({ added: 2, changed: 1, removed: 0 })
+  const panel = await start(page)
+  ai.say(ASK_MENU)
+  await ask(panel, OPTION_REQUEST)
+  await expect(banner(page)).toBeVisible()
+  await settle(page)
+  await nodeAt(page, FINANCE_MENU).click()
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
+
+  ai.say(EDIT_OPTION)
+  ai.builds.push({ steps: [MAIN_TEXT] })
+  await bannerButton(page, 'Confirmar').click()
+  await expectPickOver(page, panel)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(panel.getByRole('heading', { name: 'Edição pronta com 1 pendência', exact: true })).toBeVisible()
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true }), 'o aviso aparece sem abrir as pendências').toBeVisible()
+  await panel.getByText('Ver pendências (1)', { exact: true }).click()
+  await expect(panel.getByRole('listitem').filter({ hasText: FOCUS_MISSED })).toHaveText(new RegExp(`${escape(MENU_KIND)} · ID ${escape(FINANCE_MENU)}: ${escape(FOCUS_MISSED)}$`))
+  await expect(applyButton(panel)).toBeEnabled()
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(lastUser(ai.turnCalls()[1])).toMatch(picked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(JSON.stringify(ai.buildCalls()[0].body)).toContain(OPTION_PLAN)
+  expect(await saved(page)).toEqual(BASE_STATE)
 })

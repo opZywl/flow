@@ -16,6 +16,7 @@ import type { CopilotAttention } from "./ai/copilot-store"
 import EraDialog from "./era-dialog"
 import WorkflowBuilder, { type PreviewKind, type WorkflowActions } from "./workflow-builder"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
+import { PICK_MIN_WIDTH } from "./canvas-frame"
 import type { CanvasPick } from "./pick"
 import { ui } from "./ui"
 
@@ -23,7 +24,7 @@ const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: fa
 const AICopilot = dynamic(() => import("./ai-copilot"), { ssr: false })
 
 type LivePreviewProps = {
-  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean) => void
+  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean, focus?: string | null) => void
   getCurrentFlow: () => AtendimentoFlow | null
   onWorkflowEdited: (workflow: AtendimentoFlow) => boolean
 }
@@ -45,7 +46,7 @@ const HEADER_HEIGHT = 56
 const BOT_GAP = 16
 const COPILOT_WIDTH = 384
 const WIDE_QUERY = "(min-width: 1024px)"
-const SIDE_BY_SIDE_QUERY = "(min-width: 640px)"
+const CANVAS_PICK_QUERY = `(min-width: ${COPILOT_WIDTH + PICK_MIN_WIDTH}px)`
 const SEARCH_LIMIT = 50
 const IMAGE_TIMEOUT = 15000
 
@@ -449,15 +450,16 @@ function BackgroundMenu({ hasImage, capturing, onChange, onSave, onReset }: { ha
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      event.preventDefault()
       setOpen(false)
       triggerRef.current?.focus()
     }
     window.addEventListener("pointerdown", onPointer)
-    window.addEventListener("keydown", onKey)
+    window.addEventListener("keydown", onKey, true)
     return () => {
       window.removeEventListener("pointerdown", onPointer)
-      window.removeEventListener("keydown", onKey)
+      window.removeEventListener("keydown", onKey, true)
     }
   }, [open])
 
@@ -955,7 +957,7 @@ function FlowLayout() {
   const capturingRef = useRef(false)
   const copilotId = useId()
   const wide = useMediaQuery(WIDE_QUERY)
-  const sideBySide = useMediaQuery(SIDE_BY_SIDE_QUERY)
+  const canvasRoom = useMediaQuery(CANVAS_PICK_QUERY)
 
   useEffect(() => {
     try {
@@ -1015,8 +1017,8 @@ function FlowLayout() {
     return false
   }, [])
 
-  const handleLivePreview = useCallback((flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean) => {
-    actionsRef.current?.previewWorkflow(flow, done, kind, fresh)
+  const handleLivePreview = useCallback((flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean, focus?: string | null) => {
+    actionsRef.current?.previewWorkflow(flow, done, kind, fresh, focus)
   }, [])
 
   const getCurrentFlow = useCallback(() => actionsRef.current?.getFlow() ?? null, [])
@@ -1127,7 +1129,7 @@ function FlowLayout() {
             onOpenGenerate={openAI}
             dialogBusy={dialogBusy}
             onAttentionChange={setCopilotAttention}
-            pick={sideBySide ? canvasPick : undefined}
+            pick={canvasRoom ? canvasPick : undefined}
           />
         )}
       </div>

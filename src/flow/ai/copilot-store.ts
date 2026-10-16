@@ -66,14 +66,16 @@ export interface CopilotTurnInput {
   settings: CopilotSettings
 }
 
-export type CopilotTurn = (input: CopilotTurnInput, signal: AbortSignal) => Promise<InterviewTurnResult>
+export type CopilotPartial = (turn: Partial<InterviewTurn>) => void
+
+export type CopilotTurn = (input: CopilotTurnInput, signal: AbortSignal, onPartial?: CopilotPartial) => Promise<InterviewTurnResult>
 
 export type CopilotAttention = "ready" | "failed" | "question"
 
 export interface CopilotOptions {
   settings: CopilotSettings
   getFlow: () => AtendimentoFlow | null | undefined
-  preview: (flow: AtendimentoFlow | null, done: boolean, fresh?: boolean) => void
+  preview: (flow: AtendimentoFlow | null, done: boolean, fresh?: boolean, focus?: string | null) => void
   applyEdit: (flow: AtendimentoFlow) => boolean
   generate: CopilotGenerate
   turn: CopilotTurn
@@ -104,6 +106,8 @@ export interface CopilotProposal {
   model: string
   effort: Effort
   fill: boolean
+  focus: string | null
+  missed: boolean
 }
 
 export type CopilotEntry =
@@ -132,6 +136,7 @@ export interface CopilotPick {
 export interface CopilotState {
   entries: CopilotEntry[]
   thinking: boolean
+  incoming: string
   running: boolean
   refining: boolean
   progress: GenerationProgress | null
@@ -151,7 +156,7 @@ export interface CopilotState {
 export interface CopilotStore {
   getState: () => CopilotState
   subscribe: (listener: () => void) => () => void
-  send: (text: string) => boolean
+  send: (text: string, withSelection?: boolean) => boolean
   editNow: () => boolean
   selectPick: (id: string | null) => boolean
   confirmPick: () => boolean
@@ -182,6 +187,11 @@ interface Target {
 interface Job extends Target {
   prompt: string
   settings: CopilotSettings
+  focus: string | null
+}
+
+interface Choice extends CopilotPickCandidate {
+  rivals: string[]
 }
 
 interface Run {
@@ -207,6 +217,7 @@ export const SILENT_TURN = "A IA não respondeu desta vez."
 export const PICK_PREFIX = "Selecionei no canvas:"
 export const PICK_CANCELLED = "Seleção cancelada. Você pode responder por texto."
 export const PICK_LABEL = "o componente"
+export const FOCUS_MISSED = "A edição não mudou o componente que você selecionou. Confira se a mudança ficou no lugar certo antes de aplicar."
 
 export const STATUS_LABELS: Readonly<Record<Exclude<ProposalStatus, "pending">, string>> = {
   applied: "Aplicada",
@@ -225,6 +236,7 @@ export const SETTINGS_FIELDS: readonly Field[] = ["provider", "apiKey", "model",
 const INITIAL_STATE: CopilotState = {
   entries: [],
   thinking: false,
+  incoming: "",
   running: false,
   refining: false,
   progress: null,
@@ -345,11 +357,30 @@ function countOf(diff: FlowDiff): GenerationChanges {
   return { added: diff.added.length, changed: diff.changed.length, removed: diff.removed.length }
 }
 
+export function citesId(text: string, id: string): boolean {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`\\bID\\s*[:#]?\\s*${escaped}(?![\\p{L}\\p{N}_])`, "iu").test(text)
+}
+
+function inbound(flow: AtendimentoFlow, id: string): string {
+  return flow.edges
+    .filter((edge) => edge.target === id)
+    .map((edge) => `${edge.source}>${edge.sourceHandle}`)
+    .sort()
+    .join("|")
+}
+
+export function touches(diff: FlowDiff, before: AtendimentoFlow, after: AtendimentoFlow, id: string): boolean {
+  return diff.changed.includes(id) || diff.removed.includes(id) || inbound(before, id) !== inbound(after, id)
+}
+
 export function createCopilot(read: () => CopilotOptions): CopilotStore {
   let state = INITIAL_STATE
   let run: Run | null = null
   let asking: AbortController | null = null
   let planned: Target | null = null
+  let chosen: Choice | null = null
+  let parked = ""
   let shown = false
   let sequence = 0
   let focusSequence = 0
@@ -389,9 +420,9 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     }
   }
 
-  const show = (flow: AtendimentoFlow, done: boolean, fresh = true) => {
+  const show = (flow: AtendimentoFlow, done: boolean, fresh = true, focus: string | null = null) => {
     try {
-      read().preview(flow, done, fresh)
+      read().preview(flow, done, fresh, focus)
       shown = true
     } catch {
       return
@@ -435,6 +466,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
 
   const forget = (): Partial<CopilotState> => {
     planned = null
+    chosen = null
+    parked = ""
     const failed = state.retry ? state.entries.find((entry) => entry.id === state.retry) : undefined
     const edit = failed?.kind === "error" && !failed.turn && Boolean(failed.prompt)
     return { plan: "", suggestions: [], pick: null, ...(edit ? { retry: null } : {}) }
@@ -461,7 +494,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       return
     }
     const proposal = pendingProposal()
-    if (proposal) show(proposal.flow, true)
+    if (proposal) show(proposal.flow, true, true, proposal.focus)
     else hide()
   }
 
@@ -472,7 +505,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       return
     }
     if (run) {
-      show(run.live ?? run.job.base, false)
+      show(run.live ?? run.job.base, false, true, run.job.focus)
       return
     }
     const proposal = pendingProposal()
@@ -481,7 +514,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       dropStale()
       return
     }
-    show(proposal.flow, true)
+    show(proposal.flow, true, true, proposal.focus)
   }
 
   const requestOf = (job: Job): GenerateRequest => ({
@@ -522,21 +555,46 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
   }
 
   const lastRequest = (): string => {
-    for (let index = state.entries.length - 1; index >= 0; index--) {
-      const entry = state.entries[index]
-      if (entry.kind === "user") return entry.text
-    }
+    const history = copilotHistory(state.entries)
+    for (let index = history.length - 1; index >= 0; index--) if (history[index].role === "user") return history[index].text
     return ""
   }
 
-  const fallbackPrompt = (): string => {
-    const plan = state.plan.trim()
-    const reply = lastRequest().trim()
+  const join = (head: string, tail: string): string => {
+    const plan = head.trim()
+    const reply = tail.trim()
     if (!plan) return clip(reply, LIMITS.prompt)
     if (!reply || plan.includes(reply)) return clip(plan, LIMITS.prompt)
     const room = LIMITS.prompt - reply.length - 2
     return room > 0 ? `${clip(plan, room).trimEnd()}\n\n${reply}` : clip(reply, LIMITS.prompt)
   }
+
+  const fallbackPrompt = (): string => join(state.plan || parked, lastRequest())
+
+  const unanswered = (): string => {
+    for (let index = state.entries.length - 1; index >= 0; index--) {
+      const entry = state.entries[index]
+      if (entry.kind === "assistant" || entry.kind === "proposal") return ""
+      if (entry.kind === "user" && entry.text.startsWith(PICK_PREFIX)) return entry.text
+    }
+    return ""
+  }
+
+  const choiceEntry = (candidate: CopilotPickCandidate): CopilotEntry => ({ id: nextId(), kind: "user", text: `${PICK_PREFIX} ${candidate.text}` })
+
+  const choiceOf = (pick: CopilotPick): Choice | null => {
+    const candidate = pick.candidates.find((item) => item.id === pick.selected)
+    return candidate ? { ...candidate, rivals: pick.candidates.filter((item) => item !== candidate).map((item) => item.id) } : null
+  }
+
+  const focusFor = (prompt: string, flow: AtendimentoFlow): string | null => {
+    const choice = chosen
+    if (!choice || !flow.nodes.some((node) => node.id === choice.id)) return null
+    if (!citesId(prompt, choice.id) && choice.rivals.some((id) => citesId(prompt, id))) return null
+    return choice.id
+  }
+
+  const jobFor = (found: Target, prompt: string, settings: CopilotSettings): Job => ({ ...found, prompt, settings, focus: focusFor(prompt, found.base) })
 
   const expire = (found: Target, patch: Partial<CopilotState> = {}) => {
     const unseen = !state.visible
@@ -577,6 +635,16 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     current.feed?.stop()
   }
 
+  const missedFocus = (engine: Engine | null | undefined, job: Job, flow: AtendimentoFlow, diff: FlowDiff | null): boolean => {
+    if (!engine || !job.focus) return false
+    try {
+      const own = diff && job.base === job.original ? diff : engine.diffFlows(job.base, flow)
+      return !touches(own, job.base, flow, job.focus)
+    } catch {
+      return false
+    }
+  }
+
   const succeed = (current: Run, received: Received, engine: Engine | null | undefined) => {
     finishRun(current)
     const { job } = current
@@ -588,6 +656,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
         diff = null
       }
     }
+    const missed = missedFocus(engine, job, received.flow, diff)
+    const warned: GenerationIssue[] = missed && job.focus ? [{ severity: "warning", scope: "ia", message: FOCUS_MISSED, nodeId: job.focus }] : []
     const changes = diff ? countOf(diff) : job.refines ? null : received.changes ?? null
     const before = new Map(job.original.nodes.map((node) => [node.id, node]))
     const removed = (diff?.removed ?? []).flatMap((id) => {
@@ -605,7 +675,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       original: job.original,
       base: job.base,
       prompt: job.prompt,
-      issues: mergeIssues(received.issues, blocking),
+      issues: mergeIssues([...warned, ...received.issues], blocking),
       blocking: blocking.length,
       changes,
       diff,
@@ -617,6 +687,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       model: received.model || job.settings.model,
       effort: job.settings.effort,
       fill: job.settings.fill,
+      focus: job.focus,
+      missed,
     }
     const id = nextId()
     const entries = job.refines ? mark(job.refines, "refined") : state.entries
@@ -631,7 +703,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       startedAt: null,
       ...(unseen ? { attention: "ready" as const } : {}),
     })
-    if (active()) show(received.flow, true)
+    if (active()) show(received.flow, true, true, job.focus)
     else hide()
     if (unseen) notify("ready")
   }
@@ -662,7 +734,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
           (flow) => {
             if (!alive(current)) return
             current.live = flow
-            if (active()) show(flow, false, false)
+            if (active()) show(flow, false, false, current.job.focus)
           },
           read().interval ?? PREVIEW_INTERVAL_MS,
         )
@@ -696,8 +768,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
   const start = (job: Job, entries: CopilotEntry[] = state.entries, patch: Partial<CopilotState> = {}) => {
     const current: Run = { job, controller: new AbortController(), feed: null, live: null }
     run = current
-    set({ entries, thinking: false, running: true, refining: job.refines !== null, progress: null, startedAt: now(), retry: null, suggestions: [], pick: null, ...patch })
-    if (active()) show(job.base, false)
+    set({ entries, thinking: false, incoming: "", running: true, refining: job.refines !== null, progress: null, startedAt: now(), retry: null, suggestions: [], pick: null, ...patch })
+    if (active()) show(job.base, false, true, job.focus)
     void execute(current)
   }
 
@@ -705,7 +777,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
 
   const misheard = (controller: AbortController, rejection: Rejection) => {
     if (asking === controller) asking = null
-    const unseen = report(rejection, { turn: true }, { thinking: false })
+    const unseen = report(rejection, { turn: true }, { thinking: false, incoming: "" })
     if (unseen) notify("failed")
   }
 
@@ -714,31 +786,33 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     const message = typeof turn.message === "string" ? turn.message.trim() : ""
     const entries = message ? [...state.entries, said(message)] : state.entries
     if (turn.action === "finish") {
-      set({ entries, thinking: false, ...forget() })
+      set({ entries, thinking: false, incoming: "", ...forget() })
       return
     }
     const base = current(found)
     if (!base) {
-      expire(found, { thinking: false })
+      expire(found, { thinking: false, incoming: "" })
       return
     }
     planned = base
     const given = typeof turn.plan === "string" ? turn.plan.trim() : ""
+    if (given) parked = ""
     if (turn.action === "edit" || turn.action === "generate") {
       const prompt = given || fallbackPrompt()
       if (prompt && state.blocked) {
-        set({ entries: [...entries, note(COPILOT_TEXT.paused, "muted")], thinking: false, suggestions: [], pick: null, plan: prompt })
+        set({ entries: [...entries, note(COPILOT_TEXT.paused, "muted")], thinking: false, incoming: "", suggestions: [], pick: null, plan: prompt })
         return
       }
       const settings = prompt ? checkSettings() : null
-      if (settings) start({ ...base, prompt, settings }, entries, { plan: prompt })
-      else set({ entries, thinking: false, suggestions: [], pick: null, plan: prompt || state.plan })
+      if (settings) start(jobFor(base, prompt, settings), entries, { plan: prompt })
+      else set({ entries, thinking: false, incoming: "", suggestions: [], pick: null, plan: prompt || state.plan })
       return
     }
     const unseen = !state.visible
     set({
       entries,
       thinking: false,
+      incoming: "",
       suggestions: chipsOf(turn.suggestions),
       plan: given || state.plan,
       pick: readPick(turn.pick, base.base),
@@ -747,10 +821,16 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     if (unseen) notify("question")
   }
 
+  const overheard = (controller: AbortController): CopilotPartial => (partial) => {
+    if (!heard(controller) || typeof partial.message !== "string") return
+    const text = partial.message.trim()
+    if (text !== state.incoming) set({ incoming: text })
+  }
+
   async function converse(controller: AbortController, input: CopilotTurnInput, found: Target): Promise<void> {
     let result: InterviewTurnResult | null | undefined
     try {
-      result = await read().turn(input, controller.signal)
+      result = await read().turn(input, controller.signal, overheard(controller))
     } catch {
       if (heard(controller)) misheard(controller, { code: "network", failure: CONNECTION_FAILURE })
       return
@@ -765,7 +845,11 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     asking = controller
     const kept = planned ? current(planned) : null
     planned = kept
-    set({ entries, thinking: true, suggestions: [], retry: null, pick: null, ...(kept ? {} : { plan: "" }) })
+    if (!kept) {
+      chosen = null
+      parked = ""
+    }
+    set({ entries, thinking: true, incoming: "", suggestions: [], retry: null, pick: null, ...(kept ? {} : { plan: "" }) })
     void converse(controller, { history: copilotHistory(entries), flow: found.base, proposal: found.refines !== null, settings }, found)
   }
 
@@ -786,10 +870,14 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
         listeners.delete(listener)
       }
     },
-    send(text) {
+    send(text, withSelection = true) {
       const prompt = text.trim()
       if (!prompt || prompt.length > LIMITS.prompt || busy() || state.blocked) return false
-      return listen(() => [...state.entries, { id: nextId(), kind: "user", text: prompt }])
+      const choice = withSelection && state.pick && planned && current(planned) ? choiceOf(state.pick) : null
+      return listen(() => {
+        if (choice) chosen = choice
+        return [...state.entries, ...(choice ? [choiceEntry(choice)] : []), { id: nextId(), kind: "user", text: prompt }]
+      })
     },
     editNow() {
       const found = planned
@@ -802,7 +890,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
         return false
       }
       planned = base
-      start({ ...base, prompt: state.plan, settings }, [...state.entries, { id: nextId(), kind: "user", text: EDIT_NOW_TEXT }])
+      start(jobFor(base, join(state.plan, unanswered()), settings), [...state.entries, { id: nextId(), kind: "user", text: EDIT_NOW_TEXT }])
       return true
     },
     selectPick(id) {
@@ -814,8 +902,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     confirmPick() {
       const pick = state.pick
       if (!pick || busy() || state.blocked) return false
-      const chosen = pick.candidates.find((candidate) => candidate.id === pick.selected)
-      if (!chosen) return false
+      const choice = choiceOf(pick)
+      if (!choice) return false
       const found = planned
       if (!found) {
         set({ pick: null })
@@ -828,12 +916,14 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
         expire(found)
         return false
       }
-      think(settings, base, [...state.entries, { id: nextId(), kind: "user", text: `${PICK_PREFIX} ${chosen.text}` }])
+      chosen = choice
+      think(settings, base, [...state.entries, choiceEntry(choice)])
       return true
     },
     cancelPick() {
       if (!state.pick) return false
-      set({ pick: null, entries: [...state.entries, note(PICK_CANCELLED, "muted")] })
+      parked = state.plan || parked
+      set({ pick: null, plan: "", entries: [...state.entries, note(PICK_CANCELLED, "muted")] })
       return true
     },
     cancel() {
@@ -841,7 +931,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       if (controller) {
         asking = null
         controller.abort()
-        set({ thinking: false, pick: null, entries: [...state.entries, note(COPILOT_TEXT.cancelled, "muted")] })
+        set({ thinking: false, incoming: "", pick: null, entries: [...state.entries, note(COPILOT_TEXT.cancelled, "muted")] })
         return
       }
       const current = run
@@ -917,13 +1007,13 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
         return false
       }
       planned = base
-      start({ ...base, prompt: entry.prompt, settings }, without())
+      start(jobFor(base, entry.prompt, settings), without())
       return true
     },
     setVisible(visible) {
       if (visible === state.visible) return
       if (!visible) {
-        set({ visible: false })
+        set({ visible: false, ...(state.pick ? { attention: "question" as const } : {}) })
         hide()
         return
       }
@@ -954,12 +1044,14 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       const current = run
       asking = null
       run = null
+      chosen = null
+      parked = ""
       controller?.abort()
       if (current) {
         current.controller.abort()
         current.feed?.stop()
       }
-      if (controller || current || state.pick) set({ thinking: false, running: false, refining: false, progress: null, startedAt: null, pick: null })
+      if (controller || current || state.pick) set({ thinking: false, incoming: "", running: false, refining: false, progress: null, startedAt: null, pick: null })
       hide()
     },
   }
@@ -970,6 +1062,7 @@ export function linkPick(store: CopilotStore, canvas: CanvasPick, hooks: PickLin
   let shown = ""
   let refused = ""
   let selected: string | null = null
+  let reachable: ReadonlySet<string> = new Set()
   let session = 0
   let queued = false
   let closed = false
@@ -1013,7 +1106,8 @@ export function linkPick(store: CopilotStore, canvas: CanvasPick, hooks: PickLin
     if (shown) {
       if (pick.selected !== selected) {
         selected = pick.selected
-        attempt(() => canvas.select(selected))
+        const target = selected !== null && reachable.has(selected) ? selected : null
+        attempt(() => canvas.select(target))
       }
       return
     }
@@ -1054,7 +1148,7 @@ export function linkPick(store: CopilotStore, canvas: CanvasPick, hooks: PickLin
     } catch {
       found = []
     }
-    const reached = new Set(Array.isArray(found) ? found.filter((id) => typeof id === "string" && known.includes(id)) : [])
+    const reached = new Set<string>(Array.isArray(found) ? found.filter((id): id is string => typeof id === "string" && known.includes(id)) : [])
     if (reached.size < 2) {
       session += 1
       attempt(() => canvas.end())
@@ -1063,6 +1157,7 @@ export function linkPick(store: CopilotStore, canvas: CanvasPick, hooks: PickLin
       return
     }
     shown = key
+    reachable = reached
     selected = pick.selected
     hooks.listOnly?.("")
   }

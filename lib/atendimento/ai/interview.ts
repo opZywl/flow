@@ -41,6 +41,7 @@ export interface SettleContext {
   history: readonly InterviewMessage[]
   scope?: InterviewScope
   ids?: Iterable<string>
+  texts?: ReadonlyMap<string, string>
 }
 
 export interface InterviewInput {
@@ -110,6 +111,7 @@ const FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda
 const COPILOT_FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action, plan e pick."
 const PICK_FALLBACK = "o componente"
 const PICK_LOST = "Em qual componente você quer fazer essa mudança? Escreva o texto que aparece nele."
+const PICK_MESSAGE = "Mais de um componente serve para esse pedido. Em qual deles você quer fazer a mudança?"
 const PICK_KEYS = ["pick", "selecao", "seleção", "selection"]
 const PICK_LABEL_KEYS = ["label", "rotulo", "rótulo"]
 const PICK_CANDIDATE_KEYS = ["candidates", "candidatos", "ids"]
@@ -268,6 +270,7 @@ const COPILOT_LINES = [
   "- Na opção Segunda via, envie o link https://lucas-lima.xyz/boleto antes de encerrar.",
   "3. Quando falta uma decisão que muda o resultado, pergunte antes de editar. Estas decisões pedem confirmação:",
   "- o texto de uma opção nova e o que acontece quando o contato escolhe essa opção;",
+  "- o texto novo de uma mensagem, quando o pedido diz só qual mensagem trocar, como em troque a mensagem de boas-vindas;",
   "- o menu, o componente ou o ponto do fluxo, quando mais de um serve: peça para o usuário selecionar no canvas;",
   "- o departamento de uma transferência;",
   "- o horário de atendimento e o que acontece fora dele;",
@@ -275,22 +278,25 @@ const COPILOT_LINES = [
   "- a URL e o retorno de uma integração;",
   "- o que fazer com os componentes que ficam sem caminho quando o pedido remove uma opção;",
   "- o pedido que o fluxo já atende: conte o que o fluxo faz hoje, com os textos do resumo, proponha manter como está e pergunte se ele quer mudar algum ponto, como o departamento da transferência.",
+  "4. No pedido com atrás de ou depois de um componente, o componente novo entra logo depois dele, na saída dele, e o caminho segue como antes. No pedido com antes de um componente, o componente novo entra logo antes dele, na entrada dele.",
+  "5. Componentes do mesmo tipo e com os mesmos textos no resumo são cópias de um mesmo passo, uma em cada caminho. Conte as cópias como um só componente: o pedido sobre esse passo muda todas as cópias, com o ID de cada uma em plan, e muda só uma quando o pedido aponta o caminho dela, como a despedida da opção Planos.",
   "",
   "# Como perguntar",
-  "1. Pergunte propondo: use o resumo do fluxo para sugerir a resposta mais provável e peça confirmação. Exemplo para o pedido crie uma opção 8, em um menu com 7 opções: Vou colocar a opção 8 no menu Como podemos ajudar. Pensei em Falar com atendente, que transfere para o departamento Atendimento. Fica assim ou quer outro texto e outro destino?",
+  "1. Pergunte propondo: use o resumo do fluxo para sugerir a resposta mais provável e peça confirmação. Exemplo para o pedido crie uma opção 8, num fluxo com um só menu, de 7 opções: Vou colocar a opção 8 no menu Como podemos ajudar. Pensei em Falar com atendente, que transfere para o departamento Atendimento. Fica assim ou quer outro texto e outro destino?",
   "2. Faça uma pergunta por mensagem, sobre um assunto, no fim de uma mensagem com até 3 frases.",
-  "3. Cada pergunta traz de 2 a 5 sugestões em suggestions: respostas curtas, prontas para clicar, com até 60 caracteres, escritas como o usuário responderia. A primeira aceita a proposta, como Pode ser assim, e as outras trazem alternativas concretas tiradas do resumo, como outro departamento que o fluxo já usa. Quando o pedido ainda tem outro assunto em aberto depois desta pergunta, inclua também uma para editar já com as suas propostas no que falta, como Pode editar agora.",
+  "3. Cada pergunta traz de 2 a 5 sugestões em suggestions: respostas curtas, prontas para clicar, com até 60 caracteres, escritas como o usuário responderia. A primeira aceita a proposta, como Pode ser assim, e as outras trazem alternativas concretas tiradas do resumo, como outro departamento que o fluxo já usa. Quando o pedido ainda tem outro assunto em aberto depois desta pergunta, inclua também uma para editar já com as suas propostas no que falta, como Pode editar agora. A pergunta da seleção no canvas traz as sugestões descritas na seção dela.",
   "4. Quando o usuário aceita ou deixa a escolha com você, adote a sua proposta: devolva edit quando a mudança fica clara, ou pergunte sobre o próximo assunto do pedido que ainda está em aberto.",
   "5. Quando o usuário pede para fazer já, devolva edit com o que já foi decidido e as suas propostas no que faltar. Pedem isso respostas como Pode editar agora e a mensagem Pode editar agora com o que já foi decidido.",
   "6. Quando a resposta traz um pedido novo, junte esse pedido ao que está em andamento e pergunte o que faltar sobre ele.",
   "",
   "# Seleção no canvas",
-  "1. Quando o pedido cita um componente sem dizer qual e o resumo mostra mais de um que serve, como dois menus de opções ou várias mensagens, peça para o usuário selecionar o componente no canvas, mesmo quando um deles parece o mais provável pelo assunto: devolva ask com pick.",
+  "1. Quando o pedido cita um componente sem dizer qual e o resumo mostra mais de um que serve, como dois menus de opções ou várias mensagens, peça para o usuário selecionar o componente no canvas, mesmo quando um deles parece o mais provável pelo assunto: devolva ask com pick. Peça a seleção na primeira pergunta do pedido.",
   "2. Em pick, label diz o que selecionar, com o artigo, como o menu de opções ou a mensagem, e candidates traz o ID, como aparece no resumo, de cada componente que serve para o pedido.",
-  "3. message conta em uma frase que mais de um componente serve e pede para selecionar o certo no canvas e clicar em Confirmar. Nessa pergunta, suggestions traz atalhos em texto, um para cada candidato, com o texto dele, como No menu Como podemos ajudar, e só esses atalhos.",
-  "4. Quando só um componente do resumo serve, use esse componente direto. Nas outras respostas, pick fica null.",
-  "5. A mensagem do usuário que começa com Selecionei no canvas traz o componente selecionado e o ID dele. Siga o pedido nesse componente: cite em plan o ID e o texto dele e devolva edit quando o pedido fica completo com essa escolha; pergunte só o que ainda faltar.",
-  "6. Depois de Seleção cancelada, o usuário responde por texto: use o componente que o texto indica, ou peça a seleção de novo quando o texto ainda serve para mais de um.",
+  "3. A interface destaca os candidatos para o usuário selecionar um e confirmar. message conta que mais de um componente serve, traz a sua proposta para o resto do pedido e termina perguntando qual deles, como: O fluxo tem dois menus de opções. Pensei na opção Segunda via com o link do boleto, seguindo para a despedida. Em qual menu ela entra?",
+  "4. Nessa pergunta, suggestions traz atalhos em texto, um para cada candidato, com o texto dele, como No menu Como podemos ajudar, e só esses atalhos. Com mais de 5 candidatos, suggestions fica vazio.",
+  "5. Quando só um componente do resumo serve, use esse componente direto. Nas outras respostas, pick fica null.",
+  "6. A mensagem do usuário que começa com Selecionei no canvas, ou o atalho que aponta um candidato, traz o componente escolhido e aceita a proposta da pergunta. Siga o pedido com esse componente: cite em plan o ID e o texto dele e devolva edit quando o pedido fica completo com essa escolha; pergunte só o que ainda faltar.",
+  "7. Depois de Seleção cancelada, o usuário responde por texto: use o componente que o texto indica, com o ID dele em plan, ou peça a seleção de novo quando o texto ainda serve para mais de um.",
   "",
   "# Proposta em revisão",
   "1. Quando a situação atual indica uma proposta em revisão, o resumo já inclui a proposta, e o pedido seguinte ajusta essa proposta: plan traz só o ajuste.",
@@ -354,14 +360,20 @@ function readable(value: string): string {
   return list.map(itemText).filter((text) => text.trim()).join(", ")
 }
 
-function brief(node: RiNode): string {
+function marked(text: string): string {
+  const full = text.replace(/\s+/g, " ").trim()
+  const cut = shorten(full, PART_LIMIT)
+  return cut.length < full.length ? `${cut.replace(/[\s,;:.]+$/, "")}…` : cut
+}
+
+function brief(node: RiNode, mark = false): string {
   const config = new Map(node.config.map((entry) => [entry.key, entry.value]))
   const keys = [...new Set([...(guideOf(node.type)?.required ?? []), ...PREFERRED_KEYS])]
   const parts: string[] = []
   for (const key of keys) {
     const value = config.get(key)
     if (!value) continue
-    const text = shorten(readable(value), PART_LIMIT)
+    const text = mark ? marked(readable(value)) : shorten(readable(value), PART_LIMIT)
     if (!text) continue
     parts.push(key === "options" ? `opções: ${text}` : key === "targetNodeId" ? `volta para ${text}` : quote(text))
     if (parts.length >= 2) break
@@ -369,7 +381,11 @@ function brief(node: RiNode): string {
   return parts.join(" ")
 }
 
-function summaryLines(ri: RiFlow, detailed: boolean): string[] {
+function componentTexts(flow: AtendimentoFlow): Map<string, string> {
+  return new Map(flowToRi(flow).nodes.map((node) => [node.id, brief(node, true)]))
+}
+
+function summaryLines(ri: RiFlow, detailed: boolean, mark: boolean): string[] {
   const outgoing = new Map<string, string[]>()
   for (const edge of ri.edges) {
     const target = edge.output.trim() ? `${edge.output.trim()} -> ${edge.to}` : `-> ${edge.to}`
@@ -381,7 +397,7 @@ function summaryLines(ri: RiFlow, detailed: boolean): string[] {
   }
   const lines = [`- ${START_ID} (${getComponentLabel(START_TYPE)})${exits(START_ID)}`]
   for (const node of ri.nodes) {
-    const detail = detailed ? brief(node) : ""
+    const detail = detailed ? brief(node, mark) : ""
     lines.push(`- ${node.id} (${getComponentLabel(node.type)})${detail ? ` ${detail}` : ""}${exits(node.id)}`)
   }
   return lines
@@ -391,12 +407,12 @@ function hasComponents(flow: AtendimentoFlow): boolean {
   return flow.nodes.some((node) => node.data.type !== START_TYPE && node.data.type !== NOTE_TYPE)
 }
 
-export function interviewFlowSummary(flow: AtendimentoFlow): string {
+export function interviewFlowSummary(flow: AtendimentoFlow, mark = false): string {
   const ri = flowToRi(flow)
   const head = [`Nome: ${flow.name || "sem nome"}`, `Componentes: ${ri.nodes.length}`, "Cada linha: id (componente) textos principais | saídas e destinos."]
-  const detailed = [...head, ...summaryLines(ri, true)].join("\n")
+  const detailed = [...head, ...summaryLines(ri, true, mark)].join("\n")
   if (detailed.length <= SUMMARY_LIMIT) return detailed
-  return [...head, ...summaryLines(ri, false)].join("\n")
+  return [...head, ...summaryLines(ri, false, mark)].join("\n")
 }
 
 function fillLine(fill: boolean): string {
@@ -423,7 +439,7 @@ const COPILOT_FILL = "Preenchimento ligado: IDs e URLs que o usuário não infor
 function copilotStateText(flow: AtendimentoFlow, fill: boolean, proposal: boolean): string {
   const lines = ["# Situação atual", COPILOT_OPENED]
   if (proposal) lines.push(COPILOT_PROPOSAL)
-  lines.push("", "# Resumo do fluxo aberto", interviewFlowSummary(flow), "", fill ? COPILOT_FILL : fillLine(false))
+  lines.push("", "# Resumo do fluxo aberto", interviewFlowSummary(flow, true), "", fill ? COPILOT_FILL : fillLine(false))
   return lines.join("\n")
 }
 
@@ -474,7 +490,7 @@ function tidy(text: string): string {
     .trim()
 }
 
-function cleanSuggestions(values: readonly string[]): string[] {
+function cleanSuggestions(values: readonly string[], limit: number = SUGGESTION_LIMITS.max): string[] {
   const seen = new Set<string>()
   const list: string[] = []
   for (const value of values) {
@@ -483,7 +499,7 @@ function cleanSuggestions(values: readonly string[]): string[] {
     if (!key || seen.has(key)) continue
     seen.add(key)
     list.push(text)
-    if (list.length >= SUGGESTION_LIMITS.max) break
+    if (list.length >= limit) break
   }
   return list
 }
@@ -571,7 +587,7 @@ function idResolver(ids: Iterable<string> | undefined): (value: string) => strin
     if (tagged && known.has(tagged)) return tagged
     const found = folded.get(foldText(bare))
     if (found) return found
-    const head = bare.replace(/^[-#\s]+/, "").split(/[\s(]/)[0]
+    const head = bare.replace(/^[-#\s]+/, "").split(/[\s(]/)[0].replace(/[.,;:]+$/, "")
     return known.has(head) ? head : folded.get(foldText(head)) ?? undefined
   }
 }
@@ -603,10 +619,40 @@ function wantedPick(value: unknown): boolean {
   return isRecord(value) && Array.isArray(value.candidates) && value.candidates.some((entry) => asText(entry).trim() !== "")
 }
 
+function asksSelection(text: string): boolean {
+  return (/\b(selecione|selecionar|escolha|escolher|clique)\b/i.test(text) && /\bcanvas\b/i.test(text)) || (/\bselecione\b/i.test(text) && /\bconfirm(e|ar)\b/i.test(text))
+}
+
+function citesId(plan: string, id: string): boolean {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`\\b[Ii][Dd][Ss]?(?!\\p{L})\\s*[:#]?\\s*(?:[^\\s,;:.()]+\\s*(?:,|\\be\\b|\\bou\\b)\\s*)*${escaped}(?![\\p{L}\\p{N}_-])`, "u").test(plan)
+}
+
+function wordsOf(text: string): Set<string> {
+  return new Set(foldText(text).split(/[^a-z0-9]+/).filter((word) => word.length > 2))
+}
+
+function pickSuggestions(values: readonly string[], candidates: readonly string[], texts: ReadonlyMap<string, string> | undefined): string[] {
+  if (!texts || candidates.length > SUGGESTION_LIMITS.max) return []
+  const own = candidates.map((id) => wordsOf(texts.get(id) ?? ""))
+  const marks = own.map((words, index) => [...words].filter((word) => own.every((other, at) => at === index || !other.has(word))))
+  const best: { chip: string; score: number }[] = []
+  for (const chip of cleanSuggestions(values, Number.POSITIVE_INFINITY)) {
+    const said = wordsOf(chip)
+    const scores = marks.map((words) => words.filter((word) => said.has(word)).length)
+    const hits = scores.flatMap((score, index) => (score > 0 ? [index] : []))
+    if (hits.length !== 1) continue
+    const [index] = hits
+    if ((best[index]?.score ?? 0) < scores[index]) best[index] = { chip, score: scores[index] }
+  }
+  const chips = candidates.map((_, index) => best[index]?.chip ?? "")
+  return chips.every(Boolean) ? chips : []
+}
+
 function settleMessage(said: string, fallback: string, selection: InterviewPick | null, lost: boolean): string {
   if (lost && (!said || /canvas|selecion|confirmar/i.test(said))) return PICK_LOST
   if (said) return said
-  return selection ? `Selecione ${selection.label} no canvas e clique em Confirmar.` : fallback
+  return selection ? PICK_MESSAGE : fallback
 }
 
 export function settleTurn(raw: InterviewTurn, context: SettleContext): InterviewTurn {
@@ -616,11 +662,16 @@ export function settleTurn(raw: InterviewTurn, context: SettleContext): Intervie
   else if (action === "edit" && !copilot && !context.hasFlow) action = "generate"
   let plan = clipPlan(raw.plan)
   if ((action === "generate" || action === "edit") && !plan && !copilot) plan = clipPlan(userText(context.history, action === "edit"))
-  const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : cleanSuggestions(raw.suggestions)
-  const asking = copilot && action === "ask"
-  const selection = asking ? settlePick(raw.pick, context.ids) : null
-  const lost = asking && !selection && wantedPick(raw.pick)
-  const message = settleMessage(tidy(raw.message), (copilot ? COPILOT_MESSAGES : DEFAULT_MESSAGES)[action], selection, lost)
+  let said = tidy(raw.message)
+  const offered = copilot && action !== "finish" ? settlePick(raw.pick, context.ids) : null
+  if (offered && action === "edit" && !offered.candidates.some((id) => citesId(plan, id))) {
+    action = "ask"
+    if (!asksSelection(said) && !said.endsWith("?")) said = ""
+  }
+  const selection = action === "ask" ? offered : null
+  const lost = copilot && action === "ask" && !selection && (wantedPick(raw.pick) || asksSelection(said))
+  const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : selection ? pickSuggestions(raw.suggestions, selection.candidates, context.texts) : cleanSuggestions(raw.suggestions)
+  const message = settleMessage(said, (copilot ? COPILOT_MESSAGES : DEFAULT_MESSAGES)[action], selection, lost)
   return selection ? { message, suggestions, action, plan, pick: selection } : { message, suggestions, action, plan }
 }
 
@@ -785,7 +836,8 @@ export async function interviewTurn(input: InterviewInput, hooks: InterviewHooks
     try {
       const raw = await converse(setup, messages, hooks, context.scope === "copilot" ? COPILOT_FORMAT : BUILDER_FORMAT)
       const ids = context.flow ? context.flow.nodes.map((node) => node.id) : []
-      return { ok: true, turn: settleTurn(raw, { hasFlow: context.flow !== null, history: context.history, scope: context.scope, ids }) }
+      const texts = context.scope === "copilot" && context.flow ? componentTexts(context.flow) : undefined
+      return { ok: true, turn: settleTurn(raw, { hasFlow: context.flow !== null, history: context.history, scope: context.scope, ids, texts }) }
     } catch (error) {
       return { ok: false, failure: interviewFailure(describeFailure(error, resolved.provider, resolved.apiKey, { client: hooks.signal })) }
     }

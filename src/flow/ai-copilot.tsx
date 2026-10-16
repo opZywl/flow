@@ -63,6 +63,7 @@ import {
   type Listing,
 } from "./ai/generation-client"
 import {
+  FOCUS_MISSED,
   STATUS_LABELS,
   createCopilot,
   linkPick,
@@ -91,7 +92,7 @@ export interface AICopilotProps {
   open: boolean
   onClose: () => void
   getCurrentFlow: () => AtendimentoFlow | null
-  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean) => void
+  onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean, focus?: string | null) => void
   onWorkflowEdited: (workflow: AtendimentoFlow) => boolean
   onOpenGenerate: () => void
   dialogBusy?: boolean
@@ -124,6 +125,7 @@ const REFINE_HINT = "O próximo pedido ajusta a proposta mostrada no canvas."
 const EMPTY_NOTICE = "O fluxo aberto só tem o Início. Para criar um fluxo do zero, use Gerar com IA."
 const BUSY_NOTICE = "Aguarde a geração do Gerar com IA terminar."
 const EDIT_NOW_LABEL = "Editar agora com o que já foi decidido"
+const FOLLOW_GAP = 160
 
 export const PICK_REGION = "Seleção do componente"
 
@@ -195,7 +197,8 @@ export function copilotTurnInput({ history, flow, proposal, settings }: CopilotT
   }
 }
 
-export function pickHint(label: string, onCanvas: boolean): string {
+export function pickHint(label: string, onCanvas: boolean, blocked = false): string {
+  if (blocked) return `Aguarde a geração do Gerar com IA terminar para selecionar ${label}.`
   return onCanvas ? `Selecione ${label} no canvas ou na lista e confirme.` : `Selecione ${label} na lista e confirme.`
 }
 
@@ -260,18 +263,19 @@ interface PickBoxProps {
   pick: CopilotPick
   onCanvas: boolean
   disabled: boolean
+  blocked?: boolean
   onSelect: (id: string) => void
   onCancel: () => void
   onConfirm: () => void
 }
 
-export function PickBox({ id, pick, onCanvas, disabled, onSelect, onCancel, onConfirm }: PickBoxProps) {
+export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelect, onCancel, onConfirm }: PickBoxProps) {
   const hintId = `${id}-hint`
   return (
     <div role="region" aria-label={PICK_REGION} className="rounded-xl border border-flow-accent/40 bg-flow-accent/10 px-3 py-2.5">
       <p id={hintId} className="flex items-start gap-2 text-xs font-medium leading-5 text-flow-fg">
         <MousePointerClick className="mt-0.5 h-3.5 w-3.5 shrink-0 text-flow-accent" aria-hidden="true" />
-        <span className="min-w-0">{pickHint(pick.label, onCanvas)}</span>
+        <span className="min-w-0">{pickHint(pick.label, onCanvas, blocked)}</span>
       </p>
       <ul aria-labelledby={hintId} className="mt-2 max-h-56 space-y-1.5 overflow-y-auto overscroll-contain">
         {pick.candidates.map((candidate) => {
@@ -322,6 +326,17 @@ function SeverityIcon({ severity }: { severity: GenerationIssue["severity"] }) {
   )
 }
 
+export function IncomingReply({ text }: { text: string }) {
+  if (!text) return null
+  return (
+    <div className="flex justify-start" aria-hidden="true">
+      <div className="max-w-[85%] whitespace-pre-line break-words rounded-2xl rounded-bl-md border border-flow-border bg-flow-soft px-3 py-2 text-sm leading-relaxed text-flow-fg">
+        {text}
+      </div>
+    </div>
+  )
+}
+
 function Waiting({ text, time, onStop }: { text: string; time?: string; onStop: () => void }) {
   return (
     <div className="flex justify-start">
@@ -360,7 +375,7 @@ interface ProposalCardProps {
   onDiscard: () => void
 }
 
-function ProposalCard({ entryId, proposal, status, meta, applyId, canApply, canDiscard, onApply, onDiscard }: ProposalCardProps) {
+export function ProposalCard({ entryId, proposal, status, meta, applyId, canApply, canDiscard, onApply, onDiscard }: ProposalCardProps) {
   const titleId = `${entryId}-title`
   const tone = TONES[proposalTone(proposal)]
   const ToneIcon = tone.Icon
@@ -387,6 +402,7 @@ function ProposalCard({ entryId, proposal, status, meta, applyId, canApply, canD
               {plural(proposal.blocking, "pendência impede", "pendências impedem")} a exportação do JSON. Corrija no editor depois de aplicar.
             </p>
           ) : null}
+          {proposal.missed ? <p className="mt-0.5 text-[11px] font-medium leading-4 text-flow-warning">{FOCUS_MISSED}</p> : null}
         </div>
       </div>
 
@@ -532,10 +548,10 @@ export default function AICopilot({
   const options: CopilotOptions = {
     settings: { provider, model, apiKey, effort, fill },
     getFlow: () => safeFlow(propsRef.current.getCurrentFlow),
-    preview: (flow, done, fresh) => propsRef.current.onLivePreview(flow, done, "edit", fresh),
+    preview: (flow, done, fresh, focus) => propsRef.current.onLivePreview(flow, done, "edit", fresh, focus),
     applyEdit: (flow) => propsRef.current.onWorkflowEdited(flow),
     generate: generateFlow,
-    turn: (input, signal) => requestTurn(copilotTurnInput(input), signal),
+    turn: (input, signal, onPartial) => requestTurn(copilotTurnInput(input), signal, undefined, onPartial),
     engine: loadEngine,
     notify: (attention) => toast(ATTENTION_TOASTS[attention]),
   }
@@ -549,7 +565,7 @@ export default function AICopilot({
 
   const [store] = useState(() => createCopilot(() => latest.current))
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
-  const { entries, thinking, running, pending, suggestions, plan, fieldErrors, focus } = state
+  const { entries, thinking, incoming, running, pending, suggestions, plan, fieldErrors, focus } = state
   const asked = state.pick
   const busy = thinking || running
   const arrival = landing(entries, pending)
@@ -625,6 +641,13 @@ export default function AICopilot({
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
     body.scrollTo({ top: body.scrollHeight, behavior: reduced ? "auto" : "smooth" })
   }, [entries.length, busy, open])
+
+  useEffect(() => {
+    const body = bodyRef.current
+    if (!body || !open || !incoming) return
+    if (body.scrollHeight - body.scrollTop - body.clientHeight > FOLLOW_GAP) return
+    body.scrollTo({ top: body.scrollHeight })
+  }, [incoming, open])
 
   useEffect(() => {
     const opened = open && !openRef.current
@@ -764,6 +787,11 @@ export default function AICopilot({
   const request = (text: string): boolean => {
     const before = store.getState().focus?.seq
     return follow(store.send(text), before)
+  }
+
+  const answer = (chip: string) => {
+    const before = store.getState().focus?.seq
+    follow(store.send(chip, false), before)
   }
 
   const submit = (event?: FormEvent<HTMLFormElement>) => {
@@ -1161,11 +1189,14 @@ export default function AICopilot({
               pick={asked}
               onCanvas={onCanvas}
               disabled={!canAnswer}
+              blocked={dialogBusy}
               onSelect={(candidate) => store.selectPick(candidate)}
               onCancel={cancelSelection}
               onConfirm={confirmSelection}
             />
           ) : null}
+
+          {thinking ? <IncomingReply text={incoming} /> : null}
 
           {busy ? (
             <Waiting text={running ? stageText(state.progress, true) : THINKING_TEXT} time={running ? clock(elapsed) : undefined} onStop={store.cancel} />
@@ -1173,7 +1204,7 @@ export default function AICopilot({
         </div>
       </div>
 
-      <Replies suggestions={suggestions} editNow={canEditNow} disabled={!canAnswer} onAnswer={request} onEditNow={editNow} />
+      <Replies suggestions={suggestions} editNow={canEditNow} disabled={!canAnswer} onAnswer={answer} onEditNow={editNow} />
 
       <form onSubmit={submit} className="shrink-0 space-y-2 border-t border-flow-border px-3 py-3">
         <label className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-0.5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30">

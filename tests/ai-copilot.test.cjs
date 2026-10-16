@@ -115,6 +115,16 @@ const PICK_DRAFT = 'Depois da mensagem escolhida, acrescente uma pergunta pedind
 const PICK_PLAN = `Depois da mensagem Obrigado pelo contato. Até logo., ID ${FAREWELL.id}, acrescente uma pergunta pedindo o CPF do cliente.`
 const PICK_EDIT = 'Vou acrescentar a pergunta de CPF depois da despedida.'
 const PICK_CHIPS = ['Na boas-vindas', 'Na despedida']
+const AGENDA = BASE.nodes.find((node) => node.data.type === 'departamentos')
+const FAREWELL_RI = textNode(BASE_RI, 'Obrigado pelo contato. Até logo.').id
+const FAREWELL_DELTA = { name: '', description: '', nodes: [{ id: FAREWELL_RI, type: 'envio_pergunta', config: [{ key: 'template', value: 'Até a próxima.' }] }], edges: [] }
+const NOTICE_BEFORE = applyEdit(BASE, {
+  name: '',
+  description: '',
+  nodes: [{ id: 'aviso', type: 'envio_pergunta', config: [{ key: 'template', value: 'Aviso: o atendimento vai encerrar.' }] }],
+  edges: [{ from: MENU.id, output: 'Encerrar', to: 'aviso' }, { from: 'aviso', output: '', to: FAREWELL_RI }],
+}, { now: NOW }).flow
+const BOTH = { ...CHANGED, nodes: CHANGED.nodes.map((node) => (node.id === WELCOME.id ? { ...node, data: { ...node.data, data: { ...node.data.data, template: 'Oi, #NAME.' } } } : node)) }
 
 function received(flow, extra = {}) {
   return {
@@ -193,6 +203,7 @@ function harness({ flow = BASE, outcomes = [], turns = null, visible = true } = 
     accept: true,
     previews: [],
     fresh: [],
+    focus: [],
     applied: [],
     notified: [],
     requests: [],
@@ -204,9 +215,10 @@ function harness({ flow = BASE, outcomes = [], turns = null, visible = true } = 
       return env.settings
     },
     getFlow: () => env.flow,
-    preview: (shown, done, fresh) => {
+    preview: (shown, done, fresh, focus) => {
       env.previews.push(shown ? { flow: shown, done } : null)
       env.fresh.push(fresh)
+      env.focus.push(focus)
     },
     applyEdit: (applied) => {
       env.applied.push(applied)
@@ -220,10 +232,10 @@ function harness({ flow = BASE, outcomes = [], turns = null, visible = true } = 
       if (!next) throw new Error('pedido inesperado')
       return next
     },
-    async turn(input, signal) {
-      env.turns.push({ ...input, history: JSON.parse(JSON.stringify(input.history)), signal })
+    async turn(input, signal, onPartial) {
+      env.turns.push({ ...input, history: JSON.parse(JSON.stringify(input.history)), signal, onPartial })
       const next = turns ? turns.shift() : edited()
-      if (typeof next === 'function') return next({ input, signal })
+      if (typeof next === 'function') return next({ input, signal, onPartial })
       if (!next) throw new Error('turno inesperado')
       return next
     },
@@ -1293,7 +1305,7 @@ test('when the edit after a selection comes without a plan, the prompt is the pl
   assert.equal(proposals(state)[0].proposal.prompt, prompt)
 })
 
-test('Cancelar seleção leaves the pick with a muted note and the answer can come by text', async () => {
+test('Cancelar seleção leaves the pick with a muted note, hides Editar agora until the next answer and the answer can come by text', async () => {
   const { store, env } = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', ['Pode ser assim'], PICK_PLAN)] })
   store.send(PICK_REQUEST)
   await settled(store)
@@ -1304,7 +1316,9 @@ test('Cancelar seleção leaves the pick with a muted note and the answer can co
   assert.deepEqual(kinds(state), ['user', 'assistant', `note:${copilot.PICK_CANCELLED}`])
   assert.equal(state.entries.at(-1).tone, 'muted')
   assert.deepEqual(state.suggestions, PICK_CHIPS)
-  assert.equal(state.plan, PICK_DRAFT)
+  assert.equal(state.plan, '')
+  assert.equal(store.editNow(), false)
+  assert.equal(env.requests.length, 0)
   assert.equal(store.cancelPick(), false)
   assert.equal(store.confirmPick(), false)
   assert.equal(store.send('Na despedida, que agradece o contato'), true)
@@ -1315,22 +1329,54 @@ test('Cancelar seleção leaves the pick with a muted note and the answer can co
   ])
   state = await settled(store)
   assert.equal(state.plan, PICK_PLAN)
+  assert.equal(store.editNow(), true)
 })
 
-test('an answer typed or clicked while picking clears the pick, and a send refused for the key keeps it', async () => {
+test('after Cancelar seleção, an edit that comes without a plan still carries the plan of the question and the typed answer', async () => {
+  const { store, env } = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), edited('', PICK_EDIT)], outcomes: [received(FIRST)] })
+  store.send(PICK_REQUEST)
+  await settled(store)
+  store.cancelPick()
+  store.send('Na despedida, que agradece o contato')
+  const state = await settled(store)
+  assert.equal(env.requests[0].request.prompt, `${PICK_DRAFT}\n\nNa despedida, que agradece o contato`)
+  assert.equal(proposals(state)[0].proposal.focus, null)
+  assert.equal(env.focus[0], null)
+})
+
+test('a chip clicked while picking goes alone, a typed answer brings the selected candidate along, and a send refused for the key keeps the pick', async () => {
   const { store, env } = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', [], PICK_PLAN)] })
   store.send(PICK_REQUEST)
   await settled(store)
   store.selectPick(WELCOME.id)
   env.settings = { ...env.settings, apiKey: '' }
-  assert.equal(store.send(PICK_CHIPS[1]), false)
+  assert.equal(store.send(PICK_CHIPS[1], false), false)
+  assert.equal(store.send('Pode ser assim'), false)
   assert.equal(store.getState().pick.selected, WELCOME.id)
+  assert.equal(store.getState().entries.length, 2)
   env.settings = { ...env.settings, apiKey: KEY }
-  assert.equal(store.send(PICK_CHIPS[1]), true)
+  assert.equal(store.send(PICK_CHIPS[1], false), true)
   assert.equal(store.getState().pick, null)
   const state = await settled(store)
   assert.equal(state.pick, null)
   assert.deepEqual(env.turns[1].history.at(-1), { role: 'user', text: PICK_CHIPS[1] })
+
+  const typed = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), edited(PICK_PLAN, PICK_EDIT)], outcomes: [received(CHANGED)] })
+  typed.store.send(PICK_REQUEST)
+  await settled(typed.store)
+  typed.store.selectPick(FAREWELL.id)
+  assert.equal(typed.store.send('Pode ser assim'), true)
+  assert.deepEqual(texts(typed.store.getState()).slice(-2), [`user:${choice(FAREWELL)}`, 'user:Pode ser assim'])
+  assert.deepEqual(typed.env.turns[1].history.at(-1), { role: 'user', text: `${choice(FAREWELL)}\n\nPode ser assim` })
+  const done = await settled(typed.store)
+  assert.equal(proposals(done)[0].proposal.focus, FAREWELL.id)
+
+  const unselected = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', [], PICK_PLAN)] })
+  unselected.store.send(PICK_REQUEST)
+  await settled(unselected.store)
+  unselected.store.send('Na despedida')
+  assert.deepEqual(texts(unselected.store.getState()).slice(-1), ['user:Na despedida'])
+  await settled(unselected.store)
 })
 
 test('Aplicar, Descartar, a stale proposal, Parar and dispose clear the pick', async () => {
@@ -1431,6 +1477,278 @@ test('while picking, Editar agora waits for the selection, and reopening the pan
   assert.deepEqual(kinds(state).slice(-1), [`note:${copilot.COPILOT_TEXT.outdated}`])
   assert.equal(reopened.store.confirmPick(), false)
   assert.equal(reopened.env.turns.length, 1)
+})
+
+test('the edit that follows a selection keeps the canvas focus on the chosen component in every frame, on the proposal and on reopen, and other edits have no focus', async () => {
+  const release = gate()
+  const { store, env } = harness({
+    turns: [picked([WELCOME.id, FAREWELL.id]), edited(PICK_PLAN, PICK_EDIT), edited(OPTION_PLAN, OPTION_EDIT)],
+    outcomes: [
+      async ({ onPartial }) => {
+        onPartial(FAREWELL_DELTA)
+        await release.opened
+        return received(CHANGED)
+      },
+      received(FIRST),
+    ],
+  })
+  store.send(PICK_REQUEST)
+  await settled(store)
+  store.selectPick(FAREWELL.id)
+  store.confirmPick()
+  await started(store)
+  await tick()
+  assert.deepEqual(env.focus, [FAREWELL.id, FAREWELL.id])
+  assert.deepEqual(env.fresh, [true, false])
+  assert.equal(lastPreview(env).done, false)
+  assert.ok(JSON.stringify(lastPreview(env).flow).includes('Até a próxima.'))
+  release.open()
+  let state = await settled(store)
+  assert.deepEqual(env.focus, [FAREWELL.id, FAREWELL.id, FAREWELL.id])
+  assert.deepEqual(lastPreview(env), { flow: CHANGED, done: true })
+  const proposal = proposals(state)[0].proposal
+  assert.equal(proposal.focus, FAREWELL.id)
+  assert.equal(proposal.missed, false)
+  assert.equal(copilot.proposalTitle(proposal), 'Edição pronta')
+  store.setVisible(false)
+  assert.equal(lastPreview(env), null)
+  assert.equal(env.focus.at(-1), undefined)
+  store.setVisible(true)
+  assert.deepEqual(lastPreview(env), { flow: CHANGED, done: true })
+  assert.equal(env.focus.at(-1), FAREWELL.id)
+
+  store.discard()
+  const count = env.focus.length
+  store.send(OPTION_REQUEST)
+  state = await settled(store)
+  assert.deepEqual(env.focus.slice(count), [null, null])
+  assert.equal(proposals(state).at(-1).proposal.focus, null)
+  assert.equal(proposals(state).at(-1).proposal.missed, false)
+})
+
+test('the focus follows the plan: a plan that names another candidate drops it and a plan without any ID keeps it', async () => {
+  const other = `Depois da mensagem de boas-vindas, ID ${WELCOME.id}, acrescente uma pergunta pedindo o CPF do cliente.`
+  const moved = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), edited(other, PICK_EDIT)], outcomes: [received(FIRST)] })
+  moved.store.send(PICK_REQUEST)
+  await settled(moved.store)
+  moved.store.selectPick(FAREWELL.id)
+  moved.store.confirmPick()
+  let state = await settled(moved.store)
+  assert.deepEqual(moved.env.focus, [null, null])
+  assert.equal(proposals(state)[0].proposal.focus, null)
+  assert.equal(proposals(state)[0].proposal.missed, false)
+
+  const vague = 'Depois da despedida, acrescente uma pergunta pedindo o CPF do cliente.'
+  const kept = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), edited(vague, PICK_EDIT)], outcomes: [received(CHANGED)] })
+  kept.store.send(PICK_REQUEST)
+  await settled(kept.store)
+  kept.store.selectPick(FAREWELL.id)
+  kept.store.confirmPick()
+  state = await settled(kept.store)
+  assert.deepEqual(kept.env.focus, [FAREWELL.id, FAREWELL.id])
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+})
+
+test('a proposal that leaves the selected component as it was carries a warning, and one that changes it or connects a new component to it does not', async () => {
+  const run = async (result, extra = {}) => {
+    const setup = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), edited(PICK_PLAN, PICK_EDIT)], outcomes: [received(result, extra)] })
+    setup.store.send(PICK_REQUEST)
+    await settled(setup.store)
+    setup.store.selectPick(FAREWELL.id)
+    setup.store.confirmPick()
+    return proposals(await settled(setup.store))[0].proposal
+  }
+  const missed = await run(FIRST, { issues: [ISSUE] })
+  assert.equal(missed.focus, FAREWELL.id)
+  assert.equal(missed.missed, true)
+  assert.deepEqual(missed.issues, [{ severity: 'warning', scope: 'ia', message: copilot.FOCUS_MISSED, nodeId: FAREWELL.id }, ISSUE])
+  assert.equal(copilot.proposalTitle(missed), 'Edição pronta com 2 pendências')
+  assert.equal(copilot.proposalTone(missed), 'warning')
+  assert.deepEqual(copilot.proposalGroups(missed).map((group) => [group.title, group.items.length]), [['Revise', 1], ['Dados da plataforma', 1]])
+
+  const before = await run(NOTICE_BEFORE)
+  assert.equal(before.missed, false)
+  assert.deepEqual(before.issues, [])
+  const changed = await run(CHANGED)
+  assert.equal(changed.missed, false)
+
+  const refining = harness({
+    turns: [edited('Troque a despedida por Até a próxima.'), picked([WELCOME.id, FAREWELL.id]), edited(PICK_PLAN, PICK_EDIT)],
+    outcomes: [received(CHANGED), received(BOTH)],
+  })
+  refining.store.send('Troque a despedida')
+  await settled(refining.store)
+  refining.store.send(PICK_REQUEST)
+  await settled(refining.store)
+  refining.store.selectPick(FAREWELL.id)
+  refining.store.confirmPick()
+  const refined = proposals(await settled(refining.store)).at(-1).proposal
+  assert.equal(refined.base, CHANGED)
+  assert.ok(refined.diff.changed.includes(FAREWELL.id))
+  assert.equal(refined.missed, true)
+})
+
+test('citesId finds the ID of a component in a plan and touches sees a change, a removal or a new connection into it', () => {
+  assert.equal(copilot.citesId(PICK_PLAN, FAREWELL.id), true)
+  assert.equal(copilot.citesId('No menu Como podemos ajudar?, ID: 3, acrescente a opção.', '3'), true)
+  assert.equal(copilot.citesId('Use o componente id 3.', '3'), true)
+  assert.equal(copilot.citesId('Use o componente ID 31.', '3'), false)
+  assert.equal(copilot.citesId('Use o componente de ID 3a.', '3'), false)
+  assert.equal(copilot.citesId('Depois da despedida, acrescente a pergunta.', FAREWELL.id), false)
+  assert.equal(copilot.citesId('No menu ID menu.x, acrescente a opção.', 'menu.x'), true)
+  assert.equal(copilot.citesId('No menu ID menu_x, acrescente a opção.', 'menu.x'), false)
+  assert.equal(copilot.touches(diffFlows(BASE, CHANGED), BASE, CHANGED, FAREWELL.id), true)
+  assert.equal(copilot.touches(diffFlows(BASE, NOTICE_BEFORE), BASE, NOTICE_BEFORE, FAREWELL.id), true)
+  assert.equal(diffFlows(BASE, NOTICE_BEFORE).changed.includes(FAREWELL.id), false)
+  assert.equal(copilot.touches(diffFlows(BASE, FIRST), BASE, FIRST, FAREWELL.id), false)
+  assert.equal(copilot.touches(diffFlows(BASE, FIRST), BASE, FIRST, MENU.id), true)
+  const removed = { ...BASE, nodes: BASE.nodes.filter((node) => node.id !== AGENDA.id), edges: BASE.edges.filter((edge) => edge.target !== AGENDA.id && edge.source !== AGENDA.id) }
+  assert.equal(copilot.touches(diffFlows(BASE, removed), BASE, removed, AGENDA.id), true)
+})
+
+test('closing the panel in the middle of a selection leaves the question reminder on the Copiloto button without a toast', async () => {
+  const { store, env } = harness({ turns: [picked([WELCOME.id, FAREWELL.id])] })
+  store.setVisible(false)
+  assert.equal(store.getState().attention, null)
+  store.setVisible(true)
+  store.send(PICK_REQUEST)
+  await settled(store)
+  store.selectPick(FAREWELL.id)
+  store.setVisible(false)
+  let state = store.getState()
+  assert.equal(state.attention, 'question')
+  assert.deepEqual(env.notified, [])
+  store.setVisible(true)
+  state = store.getState()
+  assert.equal(state.attention, null)
+  assert.equal(state.pick.selected, FAREWELL.id)
+  store.cancelPick()
+  store.setVisible(false)
+  assert.equal(store.getState().attention, null)
+  assert.deepEqual(env.notified, [])
+})
+
+test('Editar agora after a selection whose turn was stopped sends the plan with the selection, and after the AI answered it sends the new plan', async () => {
+  const stopped = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), ({ signal }) => waiting(signal)], outcomes: [received(CHANGED)] })
+  stopped.store.send(PICK_REQUEST)
+  await settled(stopped.store)
+  stopped.store.selectPick(FAREWELL.id)
+  stopped.store.confirmPick()
+  stopped.store.cancel()
+  let state = stopped.store.getState()
+  assert.equal(state.plan, PICK_DRAFT)
+  assert.equal(stopped.store.editNow(), true)
+  state = await settled(stopped.store)
+  assert.equal(stopped.env.requests[0].request.prompt, `${PICK_DRAFT}\n\n${choice(FAREWELL)}`)
+  assert.deepEqual(kinds(state), ['user', 'assistant', 'user', `note:${copilot.COPILOT_TEXT.cancelled}`, 'user', 'proposal:pending'])
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+  assert.equal(stopped.env.focus[0], FAREWELL.id)
+
+  const answered = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', ['Pode ser assim'], PICK_PLAN)], outcomes: [received(CHANGED)] })
+  answered.store.send(PICK_REQUEST)
+  await settled(answered.store)
+  answered.store.selectPick(FAREWELL.id)
+  answered.store.confirmPick()
+  await settled(answered.store)
+  assert.equal(answered.store.editNow(), true)
+  state = await settled(answered.store)
+  assert.equal(answered.env.requests[0].request.prompt, PICK_PLAN)
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+})
+
+test('the answer of the AI shows while it is written, repeated fragments do not touch the state, and a stopped or failed turn leaves nothing behind', async () => {
+  const release = gate()
+  let partial
+  const { store } = harness({
+    turns: [
+      async ({ onPartial }) => {
+        partial = onPartial
+        onPartial({ message: 'Pensei na opção' })
+        await release.opened
+        return asked(OPTION_QUESTION, ['Pode ser assim'], OPTION_DRAFT)
+      },
+      async ({ onPartial, signal }) => {
+        partial = onPartial
+        return waiting(signal)
+      },
+      async ({ onPartial }) => {
+        onPartial({ message: 'Vou aplicar' })
+        return refused('provider_error', 'O provedor não respondeu.', 'Tente novamente.')
+      },
+    ],
+  })
+  store.send(OPTION_REQUEST)
+  assert.equal(store.getState().thinking, true)
+  assert.equal(store.getState().incoming, 'Pensei na opção')
+  let updates = 0
+  const stop = store.subscribe(() => {
+    updates += 1
+  })
+  partial({ message: 'Pensei na opção Segunda via' })
+  assert.equal(store.getState().incoming, 'Pensei na opção Segunda via')
+  partial({ message: 'Pensei na opção Segunda via', plan: 'No menu' })
+  partial({ plan: 'No menu Como podemos ajudar?' })
+  partial({ message: ' Pensei na opção Segunda via ' })
+  partial({ message: 7 })
+  assert.equal(updates, 1)
+  stop()
+  release.open()
+  let state = await settled(store)
+  assert.equal(state.incoming, '')
+  assert.deepEqual(texts(state), [`user:${OPTION_REQUEST}`, `assistant:${OPTION_QUESTION}`])
+
+  store.send('Pode ser assim')
+  partial({ message: 'Vou' })
+  assert.equal(store.getState().incoming, 'Vou')
+  store.cancel()
+  assert.equal(store.getState().incoming, '')
+  partial({ message: 'Vou aplicar a mudança' })
+  assert.equal(store.getState().incoming, '')
+
+  store.send('Pode ser assim')
+  state = await settled(store)
+  assert.equal(state.incoming, '')
+  assert.equal(state.entries.at(-1).kind, 'error')
+})
+
+test('requestTurn hands the partial answers to the interview engine only when the panel asks for them', async () => {
+  const { requestTurn } = require('../src/flow/ai/generation-client.ts')
+  const calls = []
+  const engine = {
+    interviewTurn: async (input, hooks) => {
+      calls.push(hooks)
+      hooks.onPartial?.({ message: 'Pensei' })
+      return { ok: true, turn: { action: 'ask', message: OPTION_QUESTION, suggestions: [], plan: '' } }
+    },
+  }
+  const signal = new AbortController().signal
+  const input = { provider: 'openai', model: 'gpt-6.1-sol', apiKey: KEY, effort: 'medium', fill: true, history: [{ role: 'user', text: OPTION_REQUEST }], flow: BASE, scope: 'copilot' }
+  const seen = []
+  await requestTurn(input, signal, engine, (turn) => seen.push(turn))
+  await requestTurn(input, signal, engine)
+  assert.equal(typeof calls[0].onPartial, 'function')
+  assert.deepEqual(seen, [{ message: 'Pensei' }])
+  assert.deepEqual(calls[1], { transport: 'browser', signal })
+})
+
+test('linkPick clears the canvas selection when the panel selects a candidate the canvas could not show', async () => {
+  const { store } = harness({ turns: [picked([WELCOME.id, FAREWELL.id, AGENDA.id])] })
+  const canvas = fakeCanvas((request) => request.candidates.slice(0, 2))
+  const unlink = copilot.linkPick(store, canvas)
+  store.send(PICK_REQUEST)
+  await settled(store)
+  await tick()
+  assert.deepEqual(canvas.calls, [['start', 'a mensagem', [WELCOME.id, FAREWELL.id, AGENDA.id], null]])
+  store.selectPick(AGENDA.id)
+  await tick()
+  assert.deepEqual(canvas.calls.at(-1), ['select', null])
+  store.selectPick(FAREWELL.id)
+  await tick()
+  assert.deepEqual(canvas.calls.at(-1), ['select', FAREWELL.id])
+  store.selectPick(null)
+  await tick()
+  assert.deepEqual(canvas.calls.at(-1), ['select', null])
+  unlink()
 })
 
 test('a question with a pick that arrives with the panel closed asks for attention like any question', async () => {
@@ -1856,11 +2174,62 @@ test('the pick box shows the hint, one pressed button per candidate and confirms
   html = render({ pick: { ...pick, selected: FAREWELL.id }, disabled: true })
   assert.deepEqual(markupButtons(html).map((button) => button.disabled), [true, true, false, true])
 
+  html = render({ pick: { ...pick, selected: FAREWELL.id }, disabled: true, blocked: true, onCanvas: false })
+  assert.ok(html.includes('Aguarde a geração do Gerar com IA terminar para selecionar a mensagem.'))
+  assert.ok(!html.includes('Selecione a mensagem'))
+  assert.deepEqual(markupButtons(html).map((button) => button.disabled), [true, true, false, true])
+
   const props = { id: 'copiloto', open: true, onClose: () => undefined, getCurrentFlow: () => BASE, onLivePreview: () => undefined, onWorkflowEdited: () => true, onOpenGenerate: () => undefined }
   const canvas = { start: () => [], select: () => undefined, confirm: () => undefined, end: () => undefined }
   const whole = renderToStaticMarkup(React.createElement(panel.default, { ...props, pick: canvas }))
   assert.match(whole, /<section id="copiloto" aria-label="Copiloto"/)
   assert.doesNotMatch(whole, /Seleção do componente/)
+})
+
+test('the answer being written shows as a Copiloto bubble hidden from screen readers, outside the message list', () => {
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const panel = loadPanel()
+  assert.equal(renderToStaticMarkup(React.createElement(panel.IncomingReply, { text: '' })), '')
+  const html = renderToStaticMarkup(React.createElement(panel.IncomingReply, { text: 'Pensei na opção Segunda via' }))
+  assert.match(html, /^<div class="flex justify-start" aria-hidden="true"><div class="[^"]*rounded-2xl[^"]*">Pensei na opção Segunda via<\/div><\/div>$/)
+  assert.doesNotMatch(html, /<p[ >]/)
+})
+
+test('the proposal card warns in the open when the edit did not change the selected component', () => {
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const panel = loadPanel()
+  const proposal = {
+    flow: FIRST,
+    original: BASE,
+    base: BASE,
+    prompt: PICK_PLAN,
+    issues: [{ severity: 'warning', scope: 'ia', message: copilot.FOCUS_MISSED, nodeId: FAREWELL.id }],
+    blocking: 0,
+    changes: { added: 2, changed: 1, removed: 0 },
+    diff: diffFlows(BASE, FIRST),
+    removed: [],
+    partial: false,
+    rounds: 1,
+    provider: 'openai',
+    model: 'gpt-6.1-sol',
+    effort: 'medium',
+    fill: true,
+    focus: FAREWELL.id,
+    missed: true,
+  }
+  const render = (extra = {}) =>
+    renderToStaticMarkup(
+      React.createElement(panel.ProposalCard, { entryId: 'p1', proposal: { ...proposal, ...extra }, status: 'pending', meta: 'GPT', applyId: 'aplicar', canApply: true, canDiscard: true, onApply: () => undefined, onDiscard: () => undefined }),
+    )
+  let html = render()
+  assert.match(html, />Edição pronta com 1 pendência</)
+  assert.equal(html.split(copilot.FOCUS_MISSED).length - 1, 2)
+  assert.ok(html.includes(`Enviar Mensagem · ID ${FAREWELL.id}: </span>${copilot.FOCUS_MISSED}`))
+  html = render({ missed: false, issues: [] })
+  assert.ok(!html.includes(copilot.FOCUS_MISSED))
+  assert.match(html, />Edição pronta</)
 })
 
 test('the reply bar shows the full text of each suggestion in a tooltip and locks with the composer', () => {
@@ -1951,11 +2320,13 @@ test('the selection texts are in PT-BR without exclamation marks or dashes', () 
   assert.equal(copilot.PICK_PREFIX, 'Selecionei no canvas:')
   assert.equal(copilot.PICK_CANCELLED, 'Seleção cancelada. Você pode responder por texto.')
   assert.equal(copilot.PICK_LABEL, 'o componente')
-  for (const text of [copilot.PICK_CANCELLED, copilot.COPILOT_TEXT.paused, copilot.COPILOT_TEXT.outdated]) assert.match(text, PT_TEXT)
+  for (const text of [copilot.PICK_CANCELLED, copilot.COPILOT_TEXT.paused, copilot.COPILOT_TEXT.outdated, copilot.FOCUS_MISSED]) assert.match(text, PT_TEXT)
   const panel = loadPanel()
   assert.equal(panel.pickHint('o menu de opções', true), 'Selecione o menu de opções no canvas ou na lista e confirme.')
   assert.equal(panel.pickHint('o menu de opções', false), 'Selecione o menu de opções na lista e confirme.')
-  for (const onCanvas of [true, false]) assert.match(panel.pickHint(copilot.PICK_LABEL, onCanvas), PT_TEXT)
+  assert.equal(panel.pickHint('o menu de opções', true, true), 'Aguarde a geração do Gerar com IA terminar para selecionar o menu de opções.')
+  assert.equal(panel.pickHint('o menu de opções', false, true), 'Aguarde a geração do Gerar com IA terminar para selecionar o menu de opções.')
+  for (const onCanvas of [true, false]) for (const blocked of [true, false]) assert.match(panel.pickHint(copilot.PICK_LABEL, onCanvas, blocked), PT_TEXT)
   assert.equal(copilot.pickLabel(' O menu   de opções. '), 'o menu de opções')
   assert.equal(copilot.pickLabel('Menu de Opções'), 'Menu de Opções')
   assert.equal(copilot.pickLabel(''), 'o componente')

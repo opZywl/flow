@@ -1,9 +1,9 @@
 "use client"
 
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
-import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, getNodesBounds, getViewportForBounds, useReactFlow, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type Viewport, type XYPosition } from "reactflow"
+import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, getNodesBounds, useReactFlow, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type Viewport, type XYPosition } from "reactflow"
 import "reactflow/dist/style.css"
-import { Check, Download, Eraser, FilePlus2, Info, Loader2, MapIcon, Maximize, MousePointerClick, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Download, Eraser, FilePlus2, Info, Loader2, MapIcon, Maximize, MousePointerClick, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -17,7 +17,8 @@ import NodeLibrary from "./node-library"
 import NodeConfigPanel from "./node-config-panel"
 import SavedFlows from "./saved-flows"
 import CustomEdge, { EdgeActionsContext } from "./custom-edge"
-import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, NodePickContext, nodeSummary, noteColor, type NodePick } from "./nodes/atendimento-node"
+import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, NodeFocusContext, NodePickContext, nodeSummary, noteColor, pickSubject, type NodePick } from "./nodes/atendimento-node"
+import { betterFrame, centerView, editedIds, fitBox, frameAround, overlapsCorner, previewFocusOf, roomForPick, shownIn, stepCandidate, unite, zoomScale, type Box, type ZoomLimits } from "./canvas-frame"
 import type { PickHandlers, PickRequest } from "./pick"
 import { ui } from "./ui"
 
@@ -33,7 +34,7 @@ export interface WorkflowActions {
   removeNode: (id: string) => void
   reset: () => void
   download: () => boolean
-  previewWorkflow: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean) => void
+  previewWorkflow: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean, focus?: string | null) => void
   captureImage: () => Promise<Blob | null>
   getFlow: () => AtendimentoFlow
   applyWorkflowEdit: (flow: AtendimentoFlow) => boolean
@@ -60,7 +61,6 @@ interface PickSession extends PickHandlers {
 
 type Handlers = WorkflowActions & { undo: () => void; redo: () => void }
 type Size = { width: number; height: number }
-type Box = XYPosition & Size
 type ToolButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "type"> & { label: string; icon: LucideIcon; pressed?: boolean }
 
 const ConfigPanel = memo(NodeConfigPanel)
@@ -102,6 +102,10 @@ const OVERLAY_SELECTOR = ".react-flow__minimap, [data-canvas-overlay]"
 const NO_INVALID_NODES: ReadonlySet<string> = new Set()
 const NO_EDGE_ACTIONS = {}
 const MIN_ZOOM = 0.05
+const MAX_ZOOM = 2
+const PICK_MIN_ZOOM = 0.4
+const PICK_STEP_ZOOM = 0.75
+const FOCUS_MIN_ZOOM = 0.5
 const FIT_INTERVAL = 1000
 const FIT_DURATION = 450
 const FIT_PADDING = 0.15
@@ -109,6 +113,8 @@ const FIT_MAX_ZOOM = 1
 const FIT_MARGIN = 16
 const FIT_TOP_MARGIN = 64
 const PREVIEW_COOLDOWN = 1000
+const FIT_LIMITS: ZoomLimits = { minZoom: MIN_ZOOM, maxZoom: FIT_MAX_ZOOM, padding: FIT_PADDING }
+const REVEAL_LIMITS: ZoomLimits = { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, padding: FIT_PADDING }
 const ID_SEPARATOR = "\u0000"
 const LOCKED_NODE = { selected: false, draggable: false, selectable: false, connectable: false, deletable: false, focusable: false }
 const PICK_CANDIDATE_NODE = { ...LOCKED_NODE, className: "nopan", zIndex: 1 }
@@ -116,6 +122,7 @@ const PICK_DIMMED_NODE = { ...LOCKED_NODE, style: { pointerEvents: "none" } as C
 const LOCKED_EDGE = { selectable: false, deletable: false, focusable: false, updatable: false }
 const PICK_EDGE = { ...LOCKED_EDGE, className: "opacity-30 transition-opacity" }
 const PICK_FALLBACK_LABEL = "o componente"
+const PICK_HINT = "Enter ou Espaço seleciona o componente. Enter no selecionado ou duplo clique confirma."
 const LAYER_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]'
 const CANVAS_HINTS: ReadonlyArray<readonly [string, string]> = [
   ['[id^="react-flow__node-desc-"]', "Pressione Enter ou Espaço para selecionar o componente. Depois, use as setas para movê-lo, Delete para removê-lo e Esc para cancelar."],
@@ -137,6 +144,10 @@ const sameJson = (first: unknown, second: unknown) => first === second || JSON.s
 const isPreviewFlow = (value: AtendimentoFlow | null): value is AtendimentoFlow => Boolean(value && Array.isArray(value.nodes) && Array.isArray(value.edges) && value.nodes.length)
 const pickLabel = (value: unknown) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().replace(/[\s.,;:!?]+$/, "") : "") || PICK_FALLBACK_LABEL
 const pickMinimapClass = (candidates: ReadonlySet<string>) => (node: Node<AtendimentoData>) => (candidates.has(node.id) ? "fill-flow-accent" : "fill-flow-muted/30")
+const boxOf = (node: Node): Box => {
+  const point = node.positionAbsolute ?? node.position
+  return { x: point.x, y: point.y, width: node.width || DEFAULT_NODE_SIZE.width, height: node.height || DEFAULT_NODE_SIZE.height }
+}
 
 function safely(run: () => void) {
   try {
@@ -233,9 +244,9 @@ const PREVIEW_TEXT: Record<PreviewKind, { live: string; done: string }> = {
   edit: { live: "Editando com IA. As mudanças aparecem aqui conforme chegam.", done: "Edição pronta. Aplique ou descarte no Copiloto." },
 }
 
-function PreviewBanner({ nodes, edges, done, kind }: { nodes: number; edges: number; done: boolean; kind: PreviewKind }) {
+function PreviewBanner({ bannerRef, nodes, edges, done, kind }: { bannerRef?: (element: HTMLElement | null) => void; nodes: number; edges: number; done: boolean; kind: PreviewKind }) {
   return (
-    <div data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 items-center gap-2.5 border-flow-accent/40 px-3 py-2")}>
+    <div ref={bannerRef} data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 items-center gap-2.5 border-flow-accent/40 px-3 py-2")}>
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-flow-accent/15 text-flow-accent">
         {done ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden />}
       </span>
@@ -249,24 +260,42 @@ function PreviewBanner({ nodes, edges, done, kind }: { nodes: number; edges: num
   )
 }
 
-function PickBanner({ label, selection, onCancel, onConfirm }: { label: string; selection: string; onCancel: () => void; onConfirm: () => void }) {
+export function PickBanner({ bannerRef, hintId, label, selection, steps, onStep, onCancel, onConfirm }: {
+  bannerRef?: (element: HTMLElement | null) => void
+  hintId?: string
+  label: string
+  selection: string
+  steps: number
+  onStep: (step: number) => void
+  onCancel: () => void
+  onConfirm: () => void
+}) {
   return (
-    <section aria-label="Seleção no canvas" data-canvas-overlay="" className={cn(ui.overlay, "nokey absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 flex-wrap items-center gap-x-2.5 gap-y-2 border-flow-accent/40 px-3 py-2")}>
+    <section ref={bannerRef} aria-label="Seleção no canvas" data-canvas-overlay="" className={cn(ui.overlay, "nokey absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 flex-wrap items-center gap-x-2.5 gap-y-2 border-flow-accent/40 px-3 py-2")}>
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-flow-accent/15 text-flow-accent">
         <MousePointerClick className="h-3.5 w-3.5" aria-hidden />
       </span>
       <div className="min-w-0 max-w-[26rem] flex-1">
         <p className="break-words text-xs font-semibold leading-5 text-flow-fg">Selecione {label} no canvas.</p>
-        <p role="status" className="truncate text-[11px] leading-4 text-flow-muted">
+        <p role="status" title={selection || undefined} className="truncate text-[11px] leading-4 text-flow-muted">
           {selection ? <>Selecionado: <span className="font-semibold text-flow-muted-strong">{selection}</span></> : "Clique em um dos componentes destacados."}
         </p>
+        {hintId ? <p id={hintId} className="sr-only">{PICK_HINT}</p> : null}
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <span className="flex items-center gap-1">
+          <button type="button" onClick={() => onStep(-1)} disabled={steps < 2} aria-label="Anterior" title="Componente anterior" className={cn(ui.toolButton, "h-7 w-7")}>
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          </button>
+          <button type="button" onClick={() => onStep(1)} disabled={steps < 2} aria-label="Próximo" title="Próximo componente" className={cn(ui.toolButton, "h-7 w-7")}>
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </button>
+        </span>
         <button type="button" onClick={onCancel} className={cn(ui.button, "h-7")}>
           <X className="h-3.5 w-3.5" aria-hidden />
           Cancelar
         </button>
-        <button type="button" onClick={onConfirm} disabled={!selection} className={cn(ui.primaryButton, "h-7")}>
+        <button type="button" onClick={onConfirm} disabled={!selection} title="Confirmar (Enter ou duplo clique no componente)" className={cn(ui.primaryButton, "h-7")}>
           <Check className="h-3.5 w-3.5" aria-hidden />
           Confirmar
         </button>
@@ -409,6 +438,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const [previewKind, setPreviewKind] = useState<PreviewKind>("create")
   const [previewSizes, setPreviewSizes] = useState<Record<string, Size>>({})
   const [pick, setPick] = useState<PickSession | null>(null)
+  const [focusMark, setFocusMark] = useState<string | null>(null)
   const [, setHistoryVersion] = useState(0)
   const flowRef = useRef(flow)
   const past = useRef<AtendimentoFlow[]>([])
@@ -440,12 +470,19 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const moveOrigin = useRef<Viewport | null>(null)
   const pickRef = useRef<PickSession | null>(null)
   const pickSequence = useRef(0)
+  const previewFocus = useRef<{ id: string | null; overview: boolean }>({ id: null, overview: false })
+  const bannerRef = useRef<HTMLElement | null>(null)
+  const libraryByPick = useRef(false)
+  const libraryShown = useRef(true)
+  const recenter = useRef<{ width: number; view: Viewport; keep?: string } | null>(null)
   const issuesId = useId()
+  const pickHintId = useId()
   const { setViewport, getViewport, getNode, getNodes, screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
   const store = useStoreApi()
   const dirty = Object.values(drafts).some(Boolean)
   const previewing = preview !== null
   const picking = pick !== null
+  const marking = picking || focusMark !== null
   const locked = previewing || picking
   const display = preview ?? flow
   const issues = useMemo(() => validateFlow(flow), [flow])
@@ -521,11 +558,34 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setPick(next)
   }, [])
 
+  const showComponents = useCallback((visible: boolean) => {
+    recenter.current = null
+    libraryShown.current = visible
+    setShowLibrary(visible)
+  }, [])
+
+  const toggleLibrary = useCallback((visible: boolean) => {
+    const surface = canvas.current
+    const pending = surface ? { width: surface.clientWidth, view: getViewport() } : null
+    showComponents(visible)
+    recenter.current = pending
+  }, [getViewport, showComponents])
+
   const leavePick = useCallback(() => {
     const session = pickRef.current
-    if (session) writePick(null)
+    if (!session) return null
+    writePick(null)
+    setFocusMark(previewRef.current ? previewFocus.current.id : null)
+    if (libraryByPick.current) {
+      libraryByPick.current = false
+      toggleLibrary(true)
+    }
     return session
-  }, [writePick])
+  }, [toggleLibrary, writePick])
+
+  const setBanner = useCallback((element: HTMLElement | null) => {
+    bannerRef.current = element
+  }, [])
 
   const cancelPick = useCallback(() => {
     const session = leavePick()
@@ -594,63 +654,62 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const endPreview = useCallback((): Viewport | null => {
     if (!previewRef.current) return null
     previewRef.current = null
+    previewFocus.current = { id: null, overview: false }
     cancelFit()
     const view = previewView.current
     previewView.current = null
     setPreview(null)
     setPreviewDone(false)
     setPreviewSizes({})
+    setFocusMark(null)
     releaseView()
     if (view) void setViewport(view)
     return view
   }, [cancelFit, releaseView, setViewport])
 
-  const previewWorkflow = useCallback((next: AtendimentoFlow | null, done = false, kind: PreviewKind = "create", fresh = false) => {
-    if (!isPreviewFlow(next)) {
-      endPreview()
-      return
-    }
-    setPreviewDone(done)
-    setPreviewKind(kind)
-    const current = previewRef.current
-    if (!current) {
-      if (!fresh && performance.now() < previewCooldown.current) return
-      if (kind === "create") cancelPick()
-      previewView.current = settledView()
-      previewFollow.current = true
-      previewFitted.current = false
-      lastFit.current = 0
-      setSettingsOpen(false)
-      setLibraryOpen(false)
-      setConfirmClear(false)
-    }
-    const stable = stabilizePreview(next, current)
-    if (stable === current) return
-    previewRef.current = stable
-    setPreview(stable)
-  }, [cancelPick, endPreview, settledView])
+  const freeArea = useCallback((): Box | null => {
+    const { domNode, width: storedWidth, height: storedHeight } = store.getState()
+    const width = domNode?.clientWidth || storedWidth
+    const height = domNode?.clientHeight || storedHeight
+    if (!width || !height) return null
+    const banner = bannerRef.current
+    const top = banner?.offsetHeight ? Math.min(height - 1, banner.offsetTop + banner.offsetHeight + FIT_MARGIN) : FIT_TOP_MARGIN
+    return { x: 0, y: top, width, height: Math.max(1, height - top) }
+  }, [store])
+
+  const moveCamera = useCallback((viewport: Viewport, duration: number) => {
+    holdView(duration, viewport)
+    void setViewport(viewport, { duration })
+    syncViewport(duration + 50)
+  }, [holdView, setViewport, syncViewport])
 
   const fitPreview = useCallback((force: boolean) => {
-    if (!previewRef.current) return
-    const { width, height } = store.getState()
+    const shown = previewRef.current
+    const area = freeArea()
     const nodes = getNodes()
-    if (!width || !height || !nodes.length) return
-    const bounds = getNodesBounds(nodes.map((node) => (node.width && node.height ? node : { ...node, width: DEFAULT_NODE_SIZE.width, height: DEFAULT_NODE_SIZE.height })))
-    const current = settledView()
-    if (!force && previewFitted.current) {
-      const left = bounds.x * current.zoom + current.x
-      const top = bounds.y * current.zoom + current.y
-      const right = left + bounds.width * current.zoom
-      const bottom = top + bounds.height * current.zoom
-      if (left >= FIT_MARGIN && top >= FIT_TOP_MARGIN && right <= width - FIT_MARGIN && bottom <= height - FIT_MARGIN) return
+    if (!shown || !area || !nodes.length) return
+    const boxes = new Map(nodes.map((node) => [node.id, boxOf(node)]))
+    const { id, overview } = previewFocus.current
+    const anchor = id && !overview ? boxes.get(id) : undefined
+    let bounds: Box
+    let target: Viewport
+    if (anchor) {
+      const near = [...editedIds(flowRef.current, shown)].flatMap((edited) => (edited === id ? [] : boxes.get(edited) ?? []))
+      const frame = frameAround(anchor, near, area, FIT_LIMITS, FOCUS_MIN_ZOOM)
+      bounds = frame.bounds
+      target = frame.view
+    } else {
+      bounds = [...boxes.values()].reduce(unite)
+      target = fitBox(bounds, area, FIT_LIMITS)
     }
+    const current = settledView()
+    if (!force && previewFitted.current && shownIn(bounds, current, area, FIT_MARGIN)) return
     previewFitted.current = true
     lastFit.current = performance.now()
-    const target = getViewportForBounds(bounds, width, height, MIN_ZOOM, FIT_MAX_ZOOM, FIT_PADDING)
     if (Math.abs(target.zoom - current.zoom) < 0.005 && Math.abs(target.x - current.x) < 2 && Math.abs(target.y - current.y) < 2) return
     holdView(FIT_DURATION, target)
     void setViewport(target, { duration: FIT_DURATION })
-  }, [getNodes, holdView, setViewport, settledView, store])
+  }, [freeArea, getNodes, holdView, setViewport, settledView])
 
   const scheduleFit = useCallback(function schedule() {
     if (!previewRef.current || !previewFollow.current || pickRef.current) return
@@ -676,6 +735,46 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   useEffect(() => {
     if (preview) scheduleFit()
   }, [preview, scheduleFit])
+
+  const previewWorkflow = useCallback((next: AtendimentoFlow | null, done = false, kind: PreviewKind = "create", fresh = false, focus?: string | null) => {
+    if (!isPreviewFlow(next)) {
+      endPreview()
+      return
+    }
+    setPreviewDone(done)
+    setPreviewKind(kind)
+    const current = previewRef.current
+    const target = previewFocusOf(focus, current ? previewFocus.current.id : null, next.nodes)
+    let refocused = false
+    if (!current) {
+      if (!fresh && performance.now() < previewCooldown.current) return
+      if (kind === "create") cancelPick()
+      previewView.current = settledView()
+      previewFollow.current = true
+      previewFitted.current = false
+      lastFit.current = 0
+      previewFocus.current = { id: target, overview: false }
+      setSettingsOpen(false)
+      setLibraryOpen(false)
+      setConfirmClear(false)
+    } else if (target !== previewFocus.current.id) {
+      refocused = target !== null
+      previewFocus.current = { id: target, overview: false }
+      if (refocused) {
+        previewFollow.current = true
+        previewFitted.current = false
+        lastFit.current = 0
+      }
+    }
+    if (!pickRef.current) setFocusMark(target)
+    const stable = stabilizePreview(next, current)
+    if (stable === current) {
+      if (refocused) scheduleFit()
+      return
+    }
+    previewRef.current = stable
+    setPreview(stable)
+  }, [cancelPick, endPreview, scheduleFit, settledView])
 
   const allocateId = useCallback(() => {
     idFloor.current = Math.max(idFloor.current, maxNumericId(flowRef.current.nodes.map((node) => node.id))) + 1
@@ -1003,6 +1102,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const fitCanvas = useCallback(() => {
     if (previewRef.current) {
       previewFollow.current = true
+      previewFocus.current = { ...previewFocus.current, overview: true }
       cancelFit()
       fitPreview(true)
       return
@@ -1050,52 +1150,40 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     return box.width && box.height ? { x: box.left - area.left, y: box.top - area.top } : null
   }, [store])
 
-  const fitPick = useCallback((ids: readonly string[]) => {
-    const { width, height } = store.getState()
+  const fitPick = useCallback((ids: readonly string[], anchorId: string | null) => {
+    const area = freeArea()
+    if (!area) return
     const wanted = new Set(ids)
-    const nodes = getNodes().filter((node) => wanted.has(node.id))
-    if (!width || !height || !nodes.length) return
-    const bounds = getNodesBounds(nodes.map((node) => (node.width && node.height ? node : { ...node, width: DEFAULT_NODE_SIZE.width, height: DEFAULT_NODE_SIZE.height })))
-    const room = height - FIT_TOP_MARGIN
-    const fit = (areaWidth: number, areaHeight: number) => getViewportForBounds(bounds, Math.max(1, areaWidth), Math.max(1, areaHeight), MIN_ZOOM, FIT_MAX_ZOOM, FIT_PADDING)
-    let fitted = fit(width, room)
+    const boxes = new Map(getNodes().flatMap((node) => (wanted.has(node.id) ? [[node.id, boxOf(node)] as const] : [])))
+    const anchor = (anchorId ? boxes.get(anchorId) : undefined) ?? ids.map((id) => boxes.get(id)).find((box) => box !== undefined)
+    if (!anchor) return
+    const others = [...boxes.values()].filter((box) => box !== anchor)
+    const frame = (space: Box) => frameAround(anchor, others, space, FIT_LIMITS, PICK_MIN_ZOOM)
+    let chosen = frame(area)
     const map = minimapCorner()
-    if (map && (bounds.x + bounds.width) * fitted.zoom + fitted.x > map.x && (bounds.y + bounds.height) * fitted.zoom + fitted.y + FIT_TOP_MARGIN > map.y) {
-      const beside = fit(map.x, room)
-      const above = fit(width, map.y - FIT_TOP_MARGIN)
-      fitted = above.zoom > beside.zoom ? above : beside
-    }
-    const viewport = { x: fitted.x, y: fitted.y + FIT_TOP_MARGIN, zoom: fitted.zoom }
-    holdView(FIT_DURATION, viewport)
-    void setViewport(viewport, { duration: FIT_DURATION })
-    syncViewport(FIT_DURATION + 50)
-  }, [getNodes, holdView, minimapCorner, setViewport, store, syncViewport])
+    if (map && overlapsCorner(chosen.bounds, chosen.view, map)) chosen = betterFrame(frame({ ...area, width: map.x }), frame({ ...area, height: map.y - area.y }))
+    moveCamera(chosen.view, FIT_DURATION)
+  }, [freeArea, getNodes, minimapCorner, moveCamera])
 
-  const revealPick = useCallback((id: string) => {
+  const revealPick = useCallback((id: string, floor = PICK_MIN_ZOOM) => {
     const node = getNode(id)
-    const { width, height } = store.getState()
-    if (!node || !width || !height) return
-    const nodeWidth = node.width || DEFAULT_NODE_SIZE.width
-    const nodeHeight = node.height || DEFAULT_NODE_SIZE.height
-    const { x, y, zoom } = settledView()
-    const left = node.position.x * zoom + x
-    const top = node.position.y * zoom + y
-    const right = left + nodeWidth * zoom
-    const bottom = top + nodeHeight * zoom
-    const map = minimapCorner()
-    const covered = map !== null && right > map.x && bottom > map.y
-    if (!covered && left >= FIT_MARGIN && top >= FIT_TOP_MARGIN && right <= width - FIT_MARGIN && bottom <= height - FIT_MARGIN) return
-    const viewport = { x: width / 2 - (node.position.x + nodeWidth / 2) * zoom, y: (height + FIT_TOP_MARGIN) / 2 - (node.position.y + nodeHeight / 2) * zoom, zoom }
-    holdView(PAN_DURATION, viewport)
-    void setViewport(viewport, { duration: PAN_DURATION })
-    syncViewport(PAN_DURATION + 50)
-  }, [getNode, holdView, minimapCorner, setViewport, settledView, store, syncViewport])
+    const area = freeArea()
+    if (!node || !area) return
+    const box = boxOf(node)
+    const view = settledView()
+    const zoom = Math.min(Math.max(view.zoom, floor), fitBox(box, area, REVEAL_LIMITS).zoom)
+    if (Math.abs(zoom - view.zoom) < 0.005 && shownIn(box, view, area, FIT_MARGIN, minimapCorner())) return
+    moveCamera(centerView(box, area, zoom), PAN_DURATION)
+  }, [freeArea, getNode, minimapCorner, moveCamera, settledView])
 
   const startPick = useCallback((request: PickRequest): string[] => {
     const shown = new Set((previewRef.current ?? flowRef.current).nodes.map((node) => node.id))
     const listed: unknown[] = Array.isArray(request.candidates) ? request.candidates : []
     const order = [...new Set(listed)].filter((id): id is string => typeof id === "string" && shown.has(id))
     if (!order.length) return []
+    const surface = canvas.current
+    const { width, height } = store.getState()
+    if (!roomForPick(surface?.parentElement?.clientWidth ?? width, surface?.clientHeight ?? height)) return []
     const candidates: ReadonlySet<string> = new Set(order)
     pickSequence.current += 1
     const key = pickSequence.current
@@ -1109,6 +1197,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       onConfirm: request.onConfirm,
       onCancel: request.onCancel,
     })
+    if (libraryShown.current) {
+      libraryByPick.current = true
+      toggleLibrary(false)
+    }
     const keep = !dirty
     requestAnimationFrame(() => {
       if (pickRef.current?.key !== key) return
@@ -1117,11 +1209,12 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       setLibraryOpen(false)
       setConfirmClear(false)
       requestAnimationFrame(() => {
-        if (pickRef.current?.key === key) fitPick(order)
+        const session = pickRef.current
+        if (session?.key === key) fitPick(order, session.selected)
       })
     })
     return [...order]
-  }, [clearSelection, dirty, fitPick, writePick])
+  }, [clearSelection, dirty, fitPick, store, toggleLibrary, writePick])
 
   const selectPick = useCallback((id: string | null) => {
     const session = pickRef.current
@@ -1143,12 +1236,69 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const id = session?.selected
     if (!session || !id) return
     leavePick()
+    if (recenter.current) recenter.current = { ...recenter.current, keep: id }
+    setFocusMark(id)
     safely(() => session.onConfirm(id))
   }, [leavePick])
+
+  const confirmCandidate = useCallback((id: string) => {
+    const session = pickRef.current
+    if (!session || !session.candidates.has(id)) return
+    chooseCandidate(id)
+    confirmPick()
+  }, [chooseCandidate, confirmPick])
+
+  const stepPick = useCallback((step: number) => {
+    const session = pickRef.current
+    if (!session) return
+    const shown = new Set((previewRef.current ?? flowRef.current).nodes.map((node) => node.id))
+    const id = stepCandidate(session.order, shown, session.selected, step)
+    if (!id) return
+    chooseCandidate(id)
+    revealPick(id, PICK_STEP_ZOOM)
+  }, [chooseCandidate, revealPick])
 
   const endPick = useCallback(() => {
     leavePick()
   }, [leavePick])
+
+  useLayoutEffect(() => {
+    const pending = recenter.current
+    recenter.current = null
+    const width = canvas.current?.clientWidth
+    if (!pending || !width || width === pending.width) return
+    const view = getViewport()
+    if (view.x !== pending.view.x || view.y !== pending.view.y || view.zoom !== pending.view.zoom) return
+    let next = { ...view, x: view.x + (width - pending.width) / 2 }
+    const kept = pending.keep ? getNode(pending.keep) : undefined
+    const area = kept ? freeArea() : null
+    if (kept && area && !shownIn(boxOf(kept), next, area, FIT_MARGIN, minimapCorner())) next = centerView(boxOf(kept), area, next.zoom)
+    releaseView()
+    void setViewport(next)
+    syncViewport()
+  }, [freeArea, getNode, getViewport, minimapCorner, releaseView, setViewport, showLibrary, syncViewport])
+
+  useLayoutEffect(() => {
+    const root = canvas.current
+    if (!root || !marking) return
+    let last = ""
+    const update = () => {
+      const value = zoomScale(store.getState().transform[2]).toFixed(3)
+      if (value === last) return
+      last = value
+      root.style.setProperty("--pick-scale", value)
+    }
+    update()
+    const stop = store.subscribe(update)
+    return () => {
+      stop()
+      root.style.removeProperty("--pick-scale")
+    }
+  }, [marking, store])
+
+  useEffect(() => {
+    if (!previewRef.current && !pickRef.current) setFocusMark(null)
+  }, [flow.nodes])
 
   useEffect(() => {
     if (!picking) return
@@ -1190,7 +1340,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     removeNode: (id) => handlers.current?.removeNode(id),
     reset: () => handlers.current?.reset(),
     download: () => handlers.current?.download() ?? false,
-    previewWorkflow: (flow, done, kind, fresh) => handlers.current?.previewWorkflow(flow, done, kind, fresh),
+    previewWorkflow: (flow, done, kind, fresh, focus) => handlers.current?.previewWorkflow(flow, done, kind, fresh, focus),
     captureImage: () => handlers.current?.captureImage() ?? Promise.resolve(null),
     getFlow: () => handlers.current?.getFlow() ?? newFlow(),
     applyWorkflowEdit: (flow) => handlers.current?.applyWorkflowEdit(flow) ?? false,
@@ -1459,13 +1609,17 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [pushHistory])
 
   const openNode = useCallback((_: ReactMouseEvent, node: Node) => {
-    if (previewRef.current || pickRef.current || node.id === panelId || !ensureApplied()) return
+    if (previewRef.current || pickRef.current) return
+    setFocusMark(null)
+    if (node.id === panelId || !ensureApplied()) return
     setPanelId(node.id)
     setDrafts({})
   }, [ensureApplied, panelId])
 
   const closeOnPane = useCallback(() => {
-    if (previewRef.current || pickRef.current || !ensureApplied()) return
+    if (previewRef.current || pickRef.current) return
+    setFocusMark(null)
+    if (!ensureApplied()) return
     setPanelId(null)
     setDrafts({})
   }, [ensureApplied])
@@ -1721,10 +1875,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     })
   }, [display.edges, displayById, locked, picking, selectedEdges])
 
-  const nodePick = useMemo<NodePick | null>(() => (pick ? { candidates: pick.candidates, selected: pick.selected, select: chooseCandidate } : null), [chooseCandidate, pick])
+  const nodePick = useMemo<NodePick | null>(() => (pick ? { candidates: pick.candidates, selected: pick.selected, select: chooseCandidate, confirm: confirmCandidate, hint: pickHintId } : null), [chooseCandidate, confirmCandidate, pick, pickHintId])
   const minimapNodeClass = useMemo(() => (pickCandidates ? pickMinimapClass(pickCandidates) : minimapClass), [pickCandidates])
   const pickedNode = pick?.selected ? displayById.get(pick.selected) : undefined
-  const pickedText = pickedNode ? `${getComponentLabel(pickedNode.data.type)} · ID ${pickedNode.id}` : ""
+  const pickedText = pickedNode ? pickSubject(pickedNode.id, pickedNode.data) : ""
+  const pickSteps = pick ? pick.order.filter((id) => displayById.has(id)).length : 0
 
   const edgeActions = useMemo(() => ({ remove: (id: string) => removeEdges([id]) }), [removeEdges])
   const nodeActions = useMemo(() => ({
@@ -1743,7 +1898,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     <div className="flex h-full min-h-0 flex-col bg-flow-bg text-flow-fg">
       <input aria-label="Importar arquivo JSON" ref={fileInput} type="file" accept=".json,application/json" className="hidden" onChange={importFile} />
       <div className={cn("flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2", ui.panel)}>
-        <ToolButton label="Componentes" title={showLibrary ? "Ocultar componentes" : "Mostrar componentes"} icon={showLibrary ? PanelLeftClose : PanelLeftOpen} pressed={showLibrary} onClick={() => setShowLibrary((visible) => !visible)} />
+        <ToolButton label="Componentes" title={showLibrary ? "Ocultar componentes" : "Mostrar componentes"} icon={showLibrary ? PanelLeftClose : PanelLeftOpen} pressed={showLibrary} disabled={picking} onClick={() => showComponents(!libraryShown.current)} />
         <span className={ui.divider} aria-hidden />
         <ToolButton label="Diminuir zoom" icon={ZoomOut} onClick={zoomOutView} />
         <ToolButton label="Aumentar zoom" icon={ZoomIn} onClick={zoomInView} />
@@ -1834,65 +1989,67 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
               <EdgeActionsContext.Provider value={locked ? NO_EDGE_ACTIONS : edgeActions}>
                 <NodeActionsContext.Provider value={locked ? null : nodeActions}>
                   <NodePickContext.Provider value={nodePick}>
-                    <ReactFlow
-                      nodes={canvasNodes}
-                      edges={canvasEdges}
-                      nodeTypes={nodeTypes}
-                      edgeTypes={edgeTypes}
-                      onNodesChange={handleNodeChanges}
-                      onEdgesChange={handleEdgeChanges}
-                      onNodeDragStart={startDrag}
-                      onNodeDragStop={finishDrag}
-                      onSelectionDragStart={startDrag}
-                      onSelectionDragStop={finishDrag}
-                      onNodeClick={openNode}
-                      onPaneClick={closeOnPane}
-                      isValidConnection={isValidConnection}
-                      onConnect={connect}
-                      onDragOver={dragOver}
-                      onDrop={drop}
-                      onMoveStart={moveStart}
-                      onMoveEnd={moveEnd}
-                      defaultViewport={flow.viewport}
-                      minZoom={MIN_ZOOM}
-                      maxZoom={2}
-                      nodesDraggable={!locked}
-                      nodesConnectable={!locked}
-                      nodesFocusable={!locked}
-                      edgesFocusable={!locked}
-                      edgesUpdatable={!locked}
-                      elementsSelectable={!locked}
-                      deleteKeyCode={dirty || locked ? null : DELETE_KEYS}
-                      multiSelectionKeyCode={MULTI_SELECTION_KEYS}
-                      selectNodesOnDrag={false}
-                      connectionLineStyle={CONNECTION_LINE_STYLE}
-                      proOptions={PRO_OPTIONS}
-                      className={CANVAS_CLASS}
-                    >
-                      <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="rgb(var(--flow-border))" className="[&_circle]:fill-flow-border" />
-                      {showMinimap && (
-                        <MiniMap
-                          pannable
-                          zoomable
-                          ariaLabel="Minimapa"
-                          nodeColor={minimapColor}
-                          nodeClassName={minimapNodeClass}
-                          nodeBorderRadius={16}
-                          className={MINIMAP_CLASS}
-                        />
-                      )}
-                    </ReactFlow>
+                    <NodeFocusContext.Provider value={focusMark}>
+                      <ReactFlow
+                        nodes={canvasNodes}
+                        edges={canvasEdges}
+                        nodeTypes={nodeTypes}
+                        edgeTypes={edgeTypes}
+                        onNodesChange={handleNodeChanges}
+                        onEdgesChange={handleEdgeChanges}
+                        onNodeDragStart={startDrag}
+                        onNodeDragStop={finishDrag}
+                        onSelectionDragStart={startDrag}
+                        onSelectionDragStop={finishDrag}
+                        onNodeClick={openNode}
+                        onPaneClick={closeOnPane}
+                        isValidConnection={isValidConnection}
+                        onConnect={connect}
+                        onDragOver={dragOver}
+                        onDrop={drop}
+                        onMoveStart={moveStart}
+                        onMoveEnd={moveEnd}
+                        defaultViewport={flow.viewport}
+                        minZoom={MIN_ZOOM}
+                        maxZoom={MAX_ZOOM}
+                        nodesDraggable={!locked}
+                        nodesConnectable={!locked}
+                        nodesFocusable={!locked}
+                        edgesFocusable={!locked}
+                        edgesUpdatable={!locked}
+                        elementsSelectable={!locked}
+                        deleteKeyCode={dirty || locked ? null : DELETE_KEYS}
+                        multiSelectionKeyCode={MULTI_SELECTION_KEYS}
+                        selectNodesOnDrag={false}
+                        connectionLineStyle={CONNECTION_LINE_STYLE}
+                        proOptions={PRO_OPTIONS}
+                        className={CANVAS_CLASS}
+                      >
+                        <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="rgb(var(--flow-border))" className="[&_circle]:fill-flow-border" />
+                        {showMinimap && (
+                          <MiniMap
+                            pannable
+                            zoomable
+                            ariaLabel="Minimapa"
+                            nodeColor={minimapColor}
+                            nodeClassName={minimapNodeClass}
+                            nodeBorderRadius={16}
+                            className={MINIMAP_CLASS}
+                          />
+                        )}
+                      </ReactFlow>
+                    </NodeFocusContext.Provider>
                   </NodePickContext.Provider>
                 </NodeActionsContext.Provider>
               </EdgeActionsContext.Provider>
             </AtendimentoEdgesContext.Provider>
           </InvalidNodesContext.Provider>
-          {!showLibrary && (
+          {!showLibrary && !picking && (
             <button
               type="button"
               aria-label="Mostrar componentes"
               data-canvas-overlay=""
-              onClick={() => setShowLibrary(true)}
+              onClick={() => showComponents(true)}
               className="absolute left-3 top-3 z-10 inline-flex h-9 items-center gap-1.5 rounded-xl border border-flow-border bg-flow-surface px-3 text-xs font-semibold text-flow-muted-strong shadow-sm transition hover:border-flow-accent/60 hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
             >
               <PanelLeftOpen className="h-4 w-4" aria-hidden />
@@ -1900,8 +2057,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             </button>
           )}
           {showIssues && !locked && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
-          {preview && !pick && <PreviewBanner nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} />}
-          {pick && <PickBanner label={pick.label} selection={pickedText} onCancel={cancelPick} onConfirm={confirmPick} />}
+          {preview && !pick && <PreviewBanner bannerRef={setBanner} nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} />}
+          {pick && <PickBanner bannerRef={setBanner} hintId={pickHintId} label={pick.label} selection={pickedText} steps={pickSteps} onStep={stepPick} onCancel={cancelPick} onConfirm={confirmPick} />}
           <CanvasStatus container={canvas} count={display.nodes.length} start={startNode?.position} />
         </div>
         {panelNode && (

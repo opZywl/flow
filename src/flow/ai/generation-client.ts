@@ -18,7 +18,7 @@ import {
   type RequestField,
 } from "@/lib/atendimento/ai/contracts"
 import { PROVIDERS, defaultEffort, effortsFor, type ProviderId, type ProviderInfo } from "@/lib/atendimento/ai/providers"
-import type { InterviewInput } from "@/lib/atendimento/ai/interview"
+import type { InterviewInput, InterviewTurn } from "@/lib/atendimento/ai/interview"
 import { START_TYPE, getComponentLabel, getDefinition } from "@/lib/atendimento/catalog"
 import { importFlow, isObject } from "@/lib/atendimento/format"
 import type { AtendimentoFlow, AtendimentoNode, FlowIssue } from "@/lib/atendimento/types"
@@ -516,7 +516,12 @@ export async function loadInterview(): Promise<InterviewModule | null> {
   }
 }
 
-export async function requestTurn(input: InterviewInput, signal: AbortSignal, engine?: InterviewModule | null): Promise<InterviewTurnResult> {
+export async function requestTurn(
+  input: InterviewInput,
+  signal: AbortSignal,
+  engine?: InterviewModule | null,
+  onPartial?: (turn: Partial<InterviewTurn>) => void,
+): Promise<InterviewTurnResult> {
   const loaded = engine === undefined ? await loadInterview() : engine
   if (!loaded) return { ok: false, failure: TURN_UNAVAILABLE }
   return loaded.interviewTurn(
@@ -531,7 +536,7 @@ export async function requestTurn(input: InterviewInput, signal: AbortSignal, en
       ...(input.scope ? { scope: input.scope } : {}),
       ...(input.proposal ? { proposal: true } : {}),
     },
-    { transport: "browser", signal },
+    { transport: "browser", signal, ...(onPartial ? { onPartial } : {}) },
   )
 }
 
