@@ -7,7 +7,7 @@ import { createXai } from "@ai-sdk/xai"
 import { NOTE_TYPE, START_ID, START_TYPE } from "../catalog"
 import { importFlow, stampExport } from "../format"
 import type { AtendimentoFlow } from "../types"
-import { COUNT_LIMITS, DEFAULT_EFFORT, DEFAULT_FILL, DEFAULT_MODE, GENERATION_SIZES, LIMITS, MAX_ROUNDS } from "./contracts"
+import { COUNT_LIMITS, DEFAULT_EFFORT, DEFAULT_FILL, DEFAULT_MODE, GENERATION_SIZES, LIMITS, MAX_ROUNDS, RI_LIMITS } from "./contracts"
 import type {
   Effort,
   FailureCode,
@@ -55,6 +55,7 @@ export interface GenerationInput {
   effort: Effort
   mode?: GenerationMode
   base?: unknown
+  reserved?: unknown
   fill?: boolean
 }
 
@@ -68,7 +69,7 @@ export interface RunHooks {
 }
 
 export interface ParsedRequest {
-  input: GenerationInput & { image: GenerationImage | null; mode: GenerationMode; base?: AtendimentoFlow; fill: boolean }
+  input: GenerationInput & { image: GenerationImage | null; mode: GenerationMode; base?: AtendimentoFlow; reserved?: string[]; fill: boolean }
   stream: boolean
 }
 
@@ -127,6 +128,7 @@ const REPLY_LIMIT = 20_000
 const DETAIL_LIMIT = 300
 const RELAX_LIMIT = 2
 const KEY_MIN = 8
+const RESERVED_LIMIT = 1000
 const READ_ERROR = "Não foi possível ler a solicitação."
 const IMAGE_ERROR = "Imagem inválida. Envie PNG ou JPG de até 5 MB."
 const EMPTY_FLOW = "O modelo não gerou nenhum componente para esta descrição."
@@ -277,11 +279,13 @@ export function parseGenerationRequest(body: unknown): RequestCheck {
     const starts = base.nodes.filter((node) => node.data.type === START_TYPE)
     if (starts.length !== 1 || starts[0].id !== START_ID) return reject(BASE_INVALID, "base")
   }
+  const present = new Set(base?.nodes.map((node) => node.id) ?? [])
+  const reserved = base && Array.isArray(body.reserved) ? [...new Set(body.reserved.flatMap((id) => (typeof id === "string" && id.trim() && id.trim().length <= RI_LIMITS.id && !present.has(id.trim()) ? [id.trim()] : [])))].slice(0, RESERVED_LIMIT) : []
 
   return {
     ok: true,
     request: {
-      input: { provider, model, apiKey, prompt, image, size: size as GenerationSize, count, name: name || undefined, effort, mode, ...(base ? { base } : {}), fill },
+      input: { provider, model, apiKey, prompt, image, size: size as GenerationSize, count, name: name || undefined, effort, mode, ...(base ? { base } : {}), ...(reserved.length ? { reserved } : {}), fill },
       stream: body.stream === true,
     },
   }
@@ -746,7 +750,7 @@ async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hoo
   ]
   const usage: GenerationUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
   const salvaged = new WeakSet<EditRound>()
-  const initial: EditResult = { flow: original, notes: [], changes: { added: 0, changed: 0, removed: 0 }, ids: new Map(), detached: { nodes: [], edges: [] } }
+  const initial: EditResult = { flow: original, notes: [], changes: { added: 0, changed: 0, removed: 0 }, ids: new Map(), detached: { nodes: [], edges: [], ...(input.reserved?.length ? { removed: input.reserved } : {}) } }
   let state = initial
   const apply = (delta: RiDelta, prune = true) => applyEdit(state.flow, delta, { now, ids: state.ids, detached: state.detached, prune })
   const evaluate = (delta: RiDelta, round: number): EditRound => {

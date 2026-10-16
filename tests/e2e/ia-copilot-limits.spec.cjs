@@ -15,7 +15,7 @@ const EDIT_DONE = 'Edição pronta. Aplique ou descarte no Copiloto.'
 const APPLIED = 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.'
 const FOLLOW_UP = 'Precisa mudar mais alguma coisa no fluxo?'
 const FULL_REQUEST = 'Ver o pedido completo'
-const REMOVED_HINT = 'Removidos por deixarem de ser alcançados a partir do início:'
+const REMOVED_HINT = 'Componentes removidos:'
 const SECOND_ROUND = 'Editando o fluxo, rodada 2 de 3.'
 
 const WELCOME = 'Olá, #NAME. Você está no atendimento do Pet Shop Exemplo.'

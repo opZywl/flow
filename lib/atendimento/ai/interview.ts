@@ -92,7 +92,7 @@ export const copilotSchema: z.ZodType<InterviewTurn> = z.object({
   pick: z
     .object({
       label: z.string().describe("O que o usuário seleciona no canvas, com o artigo, como o menu de opções ou a mensagem"),
-      any: z.boolean().describe("true quando o pedido cria um componente sem dizer o ponto do fluxo: o usuário seleciona qualquer componente, o Início inclusive, candidates fica vazio e ready fica false; false quando candidates traz os componentes que servem"),
+      any: z.boolean().describe("true quando o pedido cria um componente sem dizer o ponto do fluxo: o usuário seleciona qualquer componente, o Início inclusive, e candidates fica vazio; false quando candidates traz os componentes que servem"),
       candidates: z.array(z.string()).describe("IDs do resumo do fluxo de todos os componentes que servem para o pedido; vazio com any true"),
       ready: z.boolean().describe("true quando plan já descreve a mudança inteira e só falta saber qual componente, com plan escrito para o componente que o usuário selecionar; false quando ainda falta outra decisão"),
     })
@@ -318,7 +318,7 @@ const COPILOT_LINES = [
   "# Componente novo sem ponto no fluxo",
   "1. Quando o pedido cria um componente para o caminho do atendimento, como uma mensagem, uma tag ou um menu, sem dizer o ponto do fluxo, antes ou depois de qual componente, peça para o usuário selecionar no canvas o componente que fica antes do novo, mesmo quando um ponto parece o mais provável: devolva ask com pick, com any true e candidates vazio. Todos os componentes do fluxo servem para essa seleção, o Início inclusive. A opção nova de um menu entra no menu, e o caminho dela segue dessa opção.",
   "2. Nessa pergunta, message traz a sua proposta para o componente novo, diz que ele entra logo depois do componente selecionado, ou logo antes dele, se o usuário preferir, e termina perguntando o ponto, como: Pensei na mensagem Obrigado pelo contato, volte sempre. Ela entra logo depois do componente que você selecionar, ou logo antes dele, se preferir. Depois de qual componente ela entra?",
-  "3. Em pick, label diz o que selecionar, como o componente que vem antes da mensagem nova, e ready fica false. suggestions traz Logo depois do selecionado e Logo antes do selecionado.",
+  "3. Em pick, label diz o que selecionar, como o componente que vem antes da mensagem nova. ready fica true quando plan já descreve o componente novo inteiro, escrito para entrar logo depois do componente que o usuário selecionar, e a interface edita logo que ele confirma a seleção de um componente com uma saída; quando ainda falta outra decisão sobre o componente novo, ready fica false. suggestions traz Logo depois do selecionado e Logo antes do selecionado.",
   "4. A mensagem que começa com Selecionei no canvas traz o componente escolhido: o componente novo entra logo depois dele, na saída dele, e o caminho segue como antes. Com Logo antes do selecionado na resposta, ele entra logo antes, na entrada dele, e com o Início escolhido, ele entra logo depois do Início. Quando o componente escolhido tem mais de uma saída, como um menu, pergunte em qual saída o componente novo entra, propondo a mais provável. Cite em plan o ID do componente escolhido e devolva edit quando o pedido fica completo.",
   "5. Quando o fluxo tem só o Início, o componente novo entra logo depois dele, sem seleção.",
   "",
@@ -334,7 +334,7 @@ const COPILOT_LINES = [
   "1. plan traz o pedido de mudança completo, escrito como um cliente pede a quem edita o fluxo: o que criar, alterar ou remover, citando os componentes pelo texto ou pelo nome que aparecem no resumo, os textos novos, as opções na ordem e o destino de cada saída.",
   "2. Atualize plan em toda resposta, inclusive nas perguntas, com as decisões tomadas e as suas propostas para o que falta.",
   "3. plan descreve só a mudança desta conversa que ainda falta fazer no fluxo do resumo, e todo o resto do fluxo continua como está. As mudanças já aplicadas e a proposta em revisão já aparecem no resumo.",
-  "4. Na remoção, plan cita cada componente que sai do fluxo pelo texto e pelo ID que aparecem no resumo, como em: Remova a mensagem Aguarde um instante, ID 7, e ligue a opção Boletos direto à mensagem com o link do boleto, ID 9. Quando o usuário pede para limpar o fluxo, plan pede para remover todos os componentes, mantendo o Início e as notas.",
+  "4. Na remoção, plan cita cada componente que sai do fluxo pelo texto e pelo ID que aparecem no resumo, como em: Remova a mensagem Aguarde um instante, ID 7, e ligue a opção Boletos direto à mensagem com o link do boleto, ID 9. Quando o usuário pede para limpar o fluxo, plan pede para remover todos os componentes, citando o ID de cada um, e manter o Início e as notas, como em: Remova todos os componentes, IDs 2, 3, 4, 5 e 6, mantendo o Início e as notas.",
   "",
   "# Ações",
   "Nesta conversa, as ações são ask, edit e finish.",
@@ -658,7 +658,7 @@ function pickLabel(value: unknown): string {
 
 function settlePick(value: unknown, ids: readonly string[], plan: string): InterviewPick | null {
   if (!isRecord(value)) return null
-  if (value.any === true) return new Set(ids.filter((id) => typeof id === "string" && id.trim())).size < PICK_LIMITS.min ? null : { label: pickLabel(value.label), candidates: [], ready: false, any: true }
+  if (value.any === true) return new Set(ids.filter((id) => typeof id === "string" && id.trim())).size < PICK_LIMITS.min ? null : { label: pickLabel(value.label), candidates: [], ready: value.ready === true && plan !== "", any: true }
   if (!Array.isArray(value.candidates)) return null
   const resolve = idResolver(ids)
   const candidates: string[] = []

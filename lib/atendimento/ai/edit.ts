@@ -604,10 +604,20 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
   const removal = new Set<string>()
   const leaving = new Set([...gone].map((id) => id.toLowerCase()))
   for (const [name, value] of options.ids ?? []) if (gone.has(value)) leaving.add(name.toLowerCase())
+  const edited = new Set(ri.nodes.flatMap((raw) => {
+    const id = lookup(raw.id, false)
+    return id ? [id] : []
+  }))
+  const both = new Set<string>()
   for (const reference of ri.remove) {
     const id = lookup(reference, false)
     const node = id ? nodes.get(id) : undefined
     if (!id || !node || isStart(node)) continue
+    if (edited.has(id)) {
+      if (!both.has(id)) notes.push(noteOf("warning", "ajuste", `O componente ${quote(nameOf(id))} veio para alterar e para remover, e ficou no fluxo com as mudanças pedidas. Para tirar ele do fluxo, peça de novo a remoção.`, { riId: nameOf(id), nodeId: id, type: node.data.type }))
+      both.add(id)
+      continue
+    }
     removal.add(id)
     leaving.add(reference.trim().toLowerCase())
     leaving.add(id.toLowerCase())
@@ -1066,6 +1076,12 @@ export function reviewEdit(original: AtendimentoFlow, result: Pick<EditResult, "
   const empty = cleared(original, result)
   const issues = reviewFlow(assembled).filter((issue) => !known.has(issueKey(issue)) && !(empty && issue.nodeId === START_ID && issue.message.startsWith(CONNECT_OUTPUT)))
   const pending = correctionItems(assembled, issues)
+  const left = (result.detached?.nodes ?? []).map((entry) => name(entry.node.id))
+  if (left.length && startLinked(original) && !startLinked(result.flow) && result.flow.nodes.every((node) => isStart(node) || node.data.type === NOTE_TYPE)) {
+    const head = `[${name(START_ID)}]`
+    const index = pending.findIndex((item) => item.startsWith(head) && item.includes(CONNECT_OUTPUT))
+    if (index >= 0) pending[index] = `${head} Iniciar Fluxo: o Início ficou sem destino. Para limpar o fluxo, liste em remove também ${listQuoted(left)}. Para manter o caminho, ligue a saída do Início ao componente que vem depois dele.`
+  }
   if (unchanged) pending.unshift(NO_CHANGE)
   return { issues, pending, score: scoreOf(issues), changes: countOf(diff), unchanged }
 }

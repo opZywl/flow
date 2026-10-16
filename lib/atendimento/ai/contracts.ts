@@ -64,6 +64,7 @@ export interface GenerateRequest {
   stream?: boolean
   mode?: GenerationMode
   base?: unknown
+  reserved?: string[]
   fill?: boolean
 }
 

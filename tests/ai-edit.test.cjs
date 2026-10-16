@@ -992,3 +992,36 @@ test('o modo de edição pede as remoções em remove, em forma positiva, e a en
   assert.match(reviewEdit(BASE, applyEdit(BASE, {})).pending[0], /^\[fluxo\] A resposta não trouxe nenhuma mudança\. .*, as saídas que mudam em edges e os ids dos componentes que saem do fluxo em remove\.$/)
   for (const text of [rules, editCorrectionPrompt(['[3] pendência'], editSnapshot(BASE, applyEdit(BASE, { remove: [NOTICE.id] })))]) assert.equal(/[!—–]/.test(text), false, text)
 })
+
+test('um componente em remove e em nodes fica no fluxo como alteração, com aviso de ajuste, e o caminho depois dele continua', () => {
+  const notice = { id: NOTICE.id, type: 'envio_pergunta', config: [{ key: 'template', value: 'Aguarde, vou chamar o agendamento.' }] }
+  const result = applyEdit(BASE, { name: '', description: '', nodes: [notice], edges: [{ from: NOTICE.id, output: '', to: AGENDA.id }], remove: [NOTICE.id, NOTICE.id] }, { now: NOW })
+  assert.deepEqual(diffFlows(BASE, result.flow), { added: [], changed: [NOTICE.id], removed: [] })
+  const node = result.flow.nodes.find((entry) => entry.id === NOTICE.id)
+  assert.equal(node.data.data.template, 'Aguarde, vou chamar o agendamento.')
+  assert.deepEqual(node.position, NOTICE.position)
+  assert.equal(result.notes.filter((note) => note.nodeId === NOTICE.id && note.message.includes('veio para alterar e para remover')).length, 1)
+  assert.equal(needsEditCorrection(reviewEdit(BASE, result)), false)
+  assert.equal(result.detached.removed, undefined)
+  const menu = { id: MENU.id, type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify([{ text: 'Agendar consulta' }, { text: 'Encerrar' }]) }] }
+  const dropped = applyEdit(BASE, { name: '', description: '', nodes: [menu], edges: [{ from: MENU.id, output: 'Agendar consulta', to: NOTICE.id }, { from: MENU.id, output: 'Encerrar', to: BYE.id }], remove: [MENU.id, BOLETOS.id, VOLTA.id] }, { now: NOW })
+  assert.deepEqual(diffFlows(BASE, dropped.flow), { added: [], changed: [MENU.id], removed: [BOLETOS.id, VOLTA.id] })
+  assertReturnsValid(dropped.flow)
+  assertNoNewErrors(BASE, dropped.flow)
+})
+
+test('quando o Início fica sem destino e o resto sai sem caminho, a correção oferece limpar de vez ou religar o Início', () => {
+  const tidy = applyEdit(BASE, { remove: [LOOSE_ID] }, { now: NOW }).flow
+  const partial = applyEdit(tidy, { remove: [WELCOME.id] }, { now: NOW })
+  assert.deepEqual(idsOf(partial.flow), [START_ID, NOTE_ID])
+  const left = partial.detached.nodes.map((entry) => entry.node.id)
+  assert.ok(left.length > 0)
+  const review = reviewEdit(tidy, partial)
+  assert.equal(needsEditCorrection(review), true)
+  const item = review.pending.find((entry) => entry.startsWith(`[${START_ID}]`))
+  assert.ok(item && item.includes('Para limpar o fluxo, liste em remove também'), item)
+  for (const id of left) assert.ok(item.includes(`“${id}”`), id)
+  assert.ok(item.endsWith('Para manter o caminho, ligue a saída do Início ao componente que vem depois dele.'))
+  assert.equal(review.pending.some((entry) => entry.startsWith(`[${START_ID}]`) && entry.includes('Conecte a saída')), false)
+  assert.ok(!/[—–!]/.test(item))
+})

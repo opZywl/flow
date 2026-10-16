@@ -12,7 +12,7 @@ import type { InterviewMessage, InterviewTurn } from "@/lib/atendimento/ai/inter
 import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
 import { clip, shorten } from "@/lib/atendimento/ai/text"
 import { NOTE_TYPE, START_TYPE } from "@/lib/atendimento/catalog"
-import { behaviorSignature, importFlow, isObject, validateFlow } from "@/lib/atendimento/format"
+import { behaviorSignature, importFlow, isObject, outputHandles, validateFlow } from "@/lib/atendimento/format"
 import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode, FlowIssue } from "@/lib/atendimento/types"
 import type { InterviewTurnResult } from "../ai-interview"
 import type { CanvasPick } from "../pick"
@@ -98,6 +98,7 @@ export interface CopilotProposal {
   blocking: number
   broken: GenerationIssue[]
   unmet: GenerationIssue[]
+  emptied?: boolean
   changes: GenerationChanges | null
   diff: FlowDiff | null
   removed: AtendimentoNode[]
@@ -223,6 +224,7 @@ export const PICK_CANCELLED = "Seleção cancelada. Você pode responder por tex
 export const PICK_LABEL = "o componente"
 export const FOCUS_MISSED = "A edição não mudou o componente que você selecionou. Confira se a mudança ficou no lugar certo antes de aplicar."
 export const BLOCKED_TITLE = "Edição com pendências que impedem aplicar"
+export const EMPTIED_NOTICE = "O fluxo ficou só com o Início e as notas. Para exportar o JSON, ligue um componente à saída do Início."
 export const FAULTS_HEAD = "Pendências para corrigir:"
 
 export const STATUS_LABELS: Readonly<Record<Exclude<ProposalStatus, "pending">, string>> = {
@@ -285,8 +287,19 @@ export function proposalTitle(proposal: CopilotProposal): string {
 }
 
 export function proposalTone(proposal: CopilotProposal): "success" | "warning" | "danger" {
-  if (proposal.blocking || proposal.broken.length || proposal.unmet.length) return "danger"
-  return proposal.issues.length || proposal.partial ? "warning" : "success"
+  if ((proposal.blocking && !proposal.emptied) || proposal.broken.length || proposal.unmet.length) return "danger"
+  return proposal.issues.length || proposal.partial || proposal.emptied ? "warning" : "success"
+}
+
+const isComponent = (node: AtendimentoNode) => node.data.type !== START_TYPE && node.data.type !== NOTE_TYPE
+
+export function branching(flow: AtendimentoFlow, id: string): boolean {
+  const node = flow.nodes.find((entry) => entry.id === id)
+  return node ? outputHandles(node).length > 1 : false
+}
+
+export function emptiedFlow(before: AtendimentoFlow, after: AtendimentoFlow): boolean {
+  return before.nodes.some(isComponent) && !after.nodes.some(isComponent)
 }
 
 export function proposalGroups(proposal: CopilotProposal): IssueGroup[] {
@@ -600,18 +613,23 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     show(proposal.flow, true, true, proposal.focus)
   }
 
-  const requestOf = (job: Job): GenerateRequest => ({
-    provider: job.settings.provider,
-    model: job.settings.model,
-    apiKey: job.settings.apiKey.trim(),
-    prompt: job.prompt,
-    image: null,
-    size: "auto",
-    effort: job.settings.effort,
-    fill: job.settings.fill,
-    mode: "edit",
-    base: job.base,
-  })
+  const requestOf = (job: Job): GenerateRequest => {
+    const present = new Set(job.base.nodes.map((node) => node.id))
+    const reserved = job.original.nodes.flatMap((node) => (present.has(node.id) ? [] : [node.id]))
+    return {
+      provider: job.settings.provider,
+      model: job.settings.model,
+      apiKey: job.settings.apiKey.trim(),
+      prompt: job.prompt,
+      image: null,
+      size: "auto",
+      effort: job.settings.effort,
+      fill: job.settings.fill,
+      mode: "edit",
+      base: job.base,
+      ...(reserved.length ? { reserved } : {}),
+    }
+  }
 
   const checkSettings = (): CopilotSettings | null => {
     const settings = read().settings
@@ -751,19 +769,23 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     })
     const blocking = flowErrors(received.flow)
     const known = new Set(blocking.map(errorKey))
-    const broken = introducedErrors(flowErrors(job.original), blocking).map(
-      (issue): GenerationIssue => ({ severity: "error", scope: "ia", message: issue.message, ...(issue.nodeId ? { nodeId: issue.nodeId } : {}) }),
-    )
+    const emptied = emptiedFlow(job.original, received.flow)
+    const starts = new Set(received.flow.nodes.flatMap((node) => (node.data.type === START_TYPE ? [node.id] : [])))
+    const expected = (issue: { nodeId?: string }) => emptied && issue.nodeId !== undefined && starts.has(issue.nodeId)
+    const broken = introducedErrors(flowErrors(job.original), blocking)
+      .filter((issue) => !expected(issue))
+      .map((issue): GenerationIssue => ({ severity: "error", scope: "ia", message: issue.message, ...(issue.nodeId ? { nodeId: issue.nodeId } : {}) }))
     const unmet = received.issues.filter((issue) => issue.severity === "error" && !known.has(errorKey(issue)))
     const proposal: CopilotProposal = {
       flow: received.flow,
       original: job.original,
       base: job.base,
       prompt: job.prompt,
-      issues: mergeIssues([...warned, ...received.issues], blocking),
+      issues: mergeIssues([...warned, ...received.issues], blocking).filter((issue) => !expected(issue)),
       blocking: blocking.length,
       broken,
       unmet,
+      emptied,
       changes,
       diff,
       removed,
@@ -1007,7 +1029,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       }
       chosen = choice
       const entries = [...state.entries, choiceEntry(choice)]
-      if (pick.ready && state.plan) {
+      if (pick.ready && state.plan && !(pick.any && branching(base.base, choice.id))) {
         planned = base
         const prompt = join(state.plan, choiceText(choice))
         start(jobFor(base, prompt, settings), entries, { plan: prompt })

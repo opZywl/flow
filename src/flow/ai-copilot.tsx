@@ -62,6 +62,7 @@ import {
   type Listing,
 } from "./ai/generation-client"
 import {
+  EMPTIED_NOTICE,
   FOCUS_MISSED,
   STATUS_LABELS,
   createCopilot,
@@ -409,6 +410,8 @@ export function ProposalCard({ entryId, proposal, status, meta, applyId, canAppl
           ) : null}
           {proposal.broken.length ? (
             <p className="mt-0.5 text-[11px] font-medium leading-4 text-flow-danger">{brokenText(proposal.broken.length)}</p>
+          ) : proposal.emptied ? (
+            <p className="mt-0.5 text-[11px] font-medium leading-4 text-flow-warning">{EMPTIED_NOTICE}</p>
           ) : proposal.blocking ? (
             <p className="mt-0.5 text-[11px] font-medium leading-4 text-flow-danger">
               {plural(proposal.blocking, "pendência impede", "pendências impedem")} a exportação do JSON. Corrija no editor depois de aplicar.

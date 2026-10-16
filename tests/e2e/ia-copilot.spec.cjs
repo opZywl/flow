@@ -14,6 +14,7 @@ const PROMPT = 'No menu, acrescente a opção Segunda via de boleto, que envia o
 const REFINE_PROMPT = 'Troque o texto do boleto por um link direto e deixe a despedida mais calorosa.'
 const EDIT_BANNER = 'Editando com IA. As mudanças aparecem aqui conforme chegam.'
 const EDIT_DONE = 'Edição pronta. Aplique ou descarte no Copiloto.'
+const EMPTIED_NOTICE = 'O fluxo ficou só com o Início e as notas. Para exportar o JSON, ligue um componente à saída do Início.'
 const FILL_ON = 'Nomes, IDs e URLs saem sempre preenchidos. Os valores provisórios aparecem em Dados da plataforma para você conferir.'
 const FILL_OFF = 'Dados cadastrados na plataforma, como nomes, IDs e URLs, ficam em branco para você completar no editor.'
 const INTRO = 'O copiloto edita o fluxo aberto a partir do seu pedido. Quando faltar alguma informação, como o texto de uma opção ou o destino de uma transferência, ele pergunta antes de mudar. As mudanças aparecem no canvas para você conferir e só valem quando você aplicar. Desfazer (Ctrl+Z) volta ao fluxo anterior.'
@@ -1307,6 +1308,9 @@ test('limpe o fluxo: the Copiloto confirms, Pode limpar edits with remove listin
   await expect(changes).toHaveText(['0 componentes novos', '0 alterados', `${CLEAR_IDS.length} removidos`])
   await expect(panel.getByText(removedList(CLEAR_FLOW, CLEAR_IDS)), 'o cartão lista cada componente removido').toBeVisible()
   await expect(page.getByText(EDIT_DONE)).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'Edição pronta', exact: true }), 'a limpeza pedida não aparece como falha').toBeVisible()
+  await expect(panel.getByText(EMPTIED_NOTICE, { exact: true })).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Aplicar', exact: true })).toBeEnabled()
   await expect(nodes).toHaveCount(CLEAR_KEPT.length)
   await expect(page.locator('.react-flow__edge')).toHaveCount(0)
   for (const text of CLEAR_NOTES) await expect(canvas).toContainText(text)

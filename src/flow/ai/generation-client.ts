@@ -494,6 +494,7 @@ export async function generateFlow(
       ...(request.fill !== undefined ? { fill: request.fill } : {}),
       ...(request.mode ? { mode: request.mode } : {}),
       ...(request.base !== undefined ? { base: request.base } : {}),
+      ...(request.reserved?.length ? { reserved: request.reserved } : {}),
     },
     { transport: "browser", signal, fetch: direct, onProgress, onPartial },
   )
