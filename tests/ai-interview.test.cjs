@@ -1,5 +1,6 @@
 const { test, afterEach } = require('node:test')
 const assert = require('node:assert/strict')
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 
@@ -10,10 +11,11 @@ globalThis.fetch = async () => {
 }
 
 const { zodSchema } = require('ai')
-const { interviewTurn, interviewSystemPrompt, copilotSystemPrompt, interviewMessages, interviewFlowSummary, interviewSchema, copilotSchema, settleTurn, INTERVIEW_SCHEMA_NAME, SUGGESTION_LIMITS, PICK_LIMITS } = require('../lib/atendimento/ai/interview.ts')
+const { interviewTurn, interviewSystemPrompt, copilotSystemPrompt, interviewMessages, interviewFlowSummary, interviewSchema, copilotSchema, settleTurn, placeGiven, INTERVIEW_SCHEMA_NAME, SUGGESTION_LIMITS, PICK_LIMITS, PLACE_LABEL, PLACE_PROPOSED, PLACE_ASK, ARRANGE_LOST } = require('../lib/atendimento/ai/interview.ts')
+const { ARRANGE_LIMIT } = require('../lib/atendimento/ai/arrange.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
 const { componentCatalog, START_TYPE, NOTE_TYPE } = require('../lib/atendimento/catalog.ts')
-const { newNode, importFlow } = require('../lib/atendimento/format.ts')
+const { newNode, importFlow, outputHandles } = require('../lib/atendimento/format.ts')
 
 const NOW = new Date('2026-10-13T12:00:00.000Z')
 const PROVIDERS = ['openai', 'anthropic', 'google', 'xai']
@@ -534,13 +536,14 @@ test('o prompt do Copiloto segue as regras da casa: pergunta antes de editar, pr
   assert.ok(!prompt.includes('Pode fazer assim'))
   assert.match(prompt, /as outras trazem alternativas concretas tiradas do resumo/)
   for (const decision of ['o texto de uma opção nova', 'quando mais de um serve', 'o departamento de uma transferência', 'o horário de atendimento e o que acontece fora dele', 'os dados a coletar', 'a URL e o retorno de uma integração', 'ficam sem caminho', 'conte o que o fluxo faz hoje', 'proponha manter como está']) assert.ok(prompt.includes(decision), decision)
-  for (const action of ['- ask:', '- edit:', '- finish:']) assert.ok(prompt.includes(action), action)
+  for (const action of ['- ask:', '- edit:', '- arrange:', '- finish:']) assert.ok(prompt.includes(action), action)
+  assert.match(prompt, /Nesta conversa, as ações são ask, edit, arrange e finish\./)
   assert.match(prompt, /- finish: o usuário já tem o que precisa, inclusive quando decide manter o fluxo como está\./)
   assert.ok(!prompt.includes('- generate:'))
-  for (const text of ['Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.', 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.', 'Proposta descartada. O fluxo aberto não mudou.', 'Pedido cancelado. O fluxo aberto não mudou.', 'Precisa mudar mais alguma coisa no fluxo?', 'Aplicar']) assert.ok(prompt.includes(text), text)
+  for (const text of ['Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.', 'Organização pronta no canvas: 5 componentes movidos.', 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.', 'Proposta descartada. O fluxo aberto não mudou.', 'Pedido cancelado. O fluxo aberto não mudou.', 'Precisa mudar mais alguma coisa no fluxo?', 'Aplicar']) assert.ok(prompt.includes(text), text)
   const listed = componentCatalog.filter((definition) => ![START_TYPE, NOTE_TYPE].includes(definition.nativeType ?? definition.id))
   for (const definition of listed) assert.ok(prompt.includes(`- ${definition.label}`), definition.label)
-  assert.ok(prompt.length < 20000, String(prompt.length))
+  assert.ok(prompt.length < 24000, String(prompt.length))
 })
 
 test('interviewMessages traz exatamente o que o provedor recebe no turno do Copiloto', async () => {
@@ -630,9 +633,9 @@ test('o esquema do Copiloto acrescenta pick, objeto estrito ou null com descriç
     }
   }
   walkSchema(jsonSchema, visit)
-  assert.deepEqual(objects, ['$', '$.pick/0'])
+  assert.deepEqual(objects.sort(), ['$', '$.layout[]', '$.pick/0'])
   assert.deepEqual(unions, ['$.pick'])
-  assert.deepEqual(Object.keys(jsonSchema.properties).sort(), ['action', 'message', 'pick', 'plan', 'suggestions'])
+  assert.deepEqual(Object.keys(jsonSchema.properties).sort(), ['action', 'adds', 'after', 'layout', 'message', 'pick', 'plan', 'suggestions'])
   const { pick } = jsonSchema.properties
   assert.deepEqual(pick.anyOf[1], { type: 'null' })
   assert.deepEqual(Object.keys(pick.anyOf[0].properties), ['label', 'any', 'candidates', 'ready'])
@@ -642,7 +645,8 @@ test('o esquema do Copiloto acrescenta pick, objeto estrito ou null com descriç
   assert.match(pick.anyOf[0].properties.ready.description, /^true quando plan já descreve a mudança inteira e só falta saber qual componente/)
   for (const schema of [pick, pick.anyOf[0].properties.label, pick.anyOf[0].properties.candidates, pick.anyOf[0].properties.ready]) assert.ok(schema.description.length > 30, JSON.stringify(schema))
   const builder = zodSchema(interviewSchema).jsonSchema
-  for (const key of ['message', 'suggestions', 'action', 'plan']) assert.deepEqual(jsonSchema.properties[key], builder.properties[key], key)
+  for (const key of ['message', 'suggestions', 'plan']) assert.deepEqual(jsonSchema.properties[key], builder.properties[key], key)
+  assert.deepEqual(jsonSchema.properties.action.enum, [...builder.properties.action.enum, 'arrange'])
   assert.deepEqual(Object.keys(builder.properties).sort(), ['action', 'message', 'plan', 'suggestions'])
 })
 
@@ -740,7 +744,7 @@ test('no Copiloto, a resposta sem pick, com nomes em português ou com IDs fora 
   calls.length = 0
   result = await interviewTurn(menusInput('openai'), hooks((call, index) => reply.openai(index === 0 ? 'não é JSON' : JSON.stringify({ ...PICK_ASK, pick: MENU_PICK }))))
   assert.deepEqual([result.turn, calls.length], [{ ...PICK_ASK, pick: MENU_PICK }, 2])
-  assert.match(bodyText(calls[1]), /Responda de novo só com o objeto: message, suggestions, action, plan e pick\./)
+  assert.match(bodyText(calls[1]), /Responda de novo só com o objeto: message, suggestions, action, plan, pick, adds, after e layout\./)
   calls.length = 0
   await interviewTurn(input('openai'), hooks((call, index) => reply.openai(index === 0 ? 'não é JSON' : JSON.stringify(ASK))))
   assert.match(bodyText(calls[1]), /Responda de novo só com o objeto: message, suggestions, action e plan\./)
@@ -1325,4 +1329,354 @@ test('a conversa tenta de novo sozinha quando a conexão cai, antes ou no meio d
   result = await interviewTurn(input('openai'), hooks(() => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401, headers: { 'content-type': 'application/json' } })))
   assert.equal(result.failure.code, 'invalid_key')
   assert.equal(calls.length, 1, 'recusa do provedor não repete')
+})
+
+const BUILDER_SCHEMA = '{"type":"object","properties":{"message":{"type":"string","description":"Fala para o usuário: a proposta e uma pergunta, o aviso de montagem ou de edição, ou a despedida"},"suggestions":{"type":"array","items":{"type":"string"},"description":"De 2 a 5 respostas curtas que o usuário pode clicar; vazio fora de ask"},"action":{"type":"string","enum":["ask","generate","edit","finish"],"description":"ask pergunta, generate monta o fluxo novo, edit altera o fluxo aberto, finish encerra a conversa"},"plan":{"type":"string","description":"Descrição consolidada do atendimento com todas as decisões até aqui; na edição, o pedido de mudança completo"}},"required":["message","suggestions","action","plan"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"}'
+const BUILDER_PROMPT_SHA256 = 'ef4e398a2747dca3aa51051bfc26b2cbeb65a5b3978fd2486e488de9098a0239'
+const BUILDER_FIELDS = ['action', 'message', 'plan', 'suggestions']
+const COPILOT_FIELDS = ['action', 'adds', 'after', 'layout', 'message', 'pick', 'plan', 'suggestions']
+const BUILDER_ACTIONS = ['ask', 'generate', 'edit', 'finish']
+const NUMERIC_LIMITS = ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf']
+const sha256 = (text) => crypto.createHash('sha256').update(text, 'utf8').digest('hex')
+const ANCHOR_IDS = MENUS.nodes.filter((node) => node.data.type !== NOTE_TYPE && outputHandles(node).length > 0).map((node) => node.id)
+const CLOSED_IDS = MENUS_IDS.filter((id) => !ANCHOR_IDS.includes(id))
+const WELCOME = MESSAGE_IDS[0]
+const PLACE_PLAN = `Acrescente a mensagem Obrigado pela preferência, volte sempre, logo depois do componente ID ${WELCOME}, na saída dele, e o caminho segue como antes.`
+const PLACE_EDIT = { message: 'Vou acrescentar a mensagem de agradecimento logo depois das boas-vindas.', suggestions: [], action: 'edit', plan: PLACE_PLAN, pick: null, adds: true, after: WELCOME, layout: [] }
+const PLACE_CONTEXT = { hasFlow: true, history: THANKS, scope: 'copilot', ids: MENUS_IDS, anchors: ANCHOR_IDS, texts: summaryTexts(MENUS) }
+const PROPOSAL_DONE = 'Proposta pronta no canvas: 1 componente novo, 1 alterado e 0 removidos.'
+const APPLIED_DONE = 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.'
+const FOLLOW_UP = 'Precisa mudar mais alguma coisa no fluxo?'
+const placePick = (selected) => ({ label: PLACE_LABEL, candidates: [], ready: true, any: true, ...(selected === undefined ? {} : { selected }) })
+const placeAsk = (message, selected, plan = PLACE_PLAN) => ({ message, suggestions: [], action: 'ask', plan, pick: placePick(selected) })
+const editOf = (turn) => ({ message: turn.message, suggestions: [], action: 'edit', plan: turn.plan })
+const complete = (turn) => ({ pick: null, adds: false, after: '', layout: [], ...turn })
+const said = (...texts) => texts.map((text) => (typeof text === 'string' ? { role: 'user', text } : text))
+const answer = (text) => ({ role: 'assistant', text })
+const SHAPE = [{ role: 'user', text: 'organiza o fluxo em L' }]
+const L_CELLS = MENUS_IDS.map((id, index) => (index < 5 ? { id, col: 0, row: index } : { id, col: index - 4, row: 4 }))
+const ARRANGE = { message: 'Vou organizar o fluxo em L, com uma coluna descendo e a última linha seguindo para a direita.', suggestions: [], action: 'arrange', plan: '', pick: null, adds: false, after: '', layout: L_CELLS }
+const ARRANGE_CONTEXT = { ...PLACE_CONTEXT, history: SHAPE }
+const arranged = (layout = L_CELLS, message = ARRANGE.message) => ({ message, suggestions: [], action: 'arrange', plan: '', layout })
+const formatOf = {
+  openai: (body) => ({ mode: [body.text.format.type, body.text.format.strict, body.text.format.name], schema: body.text.format.schema }),
+  anthropic: (body) => ({ mode: [body.output_config.format.type], schema: body.output_config.format.schema }),
+  google: (body) => ({ mode: [body.generationConfig.responseMimeType], schema: body.generationConfig.responseSchema }),
+  xai: (body) => ({ mode: [body.text.format.type, body.text.format.strict, body.text.format.name], schema: body.text.format.schema }),
+}
+const STRICT_MODE = {
+  openai: ['json_schema', true, INTERVIEW_SCHEMA_NAME],
+  anthropic: ['json_schema'],
+  google: ['application/json'],
+  xai: ['json_schema', true, INTERVIEW_SCHEMA_NAME],
+}
+
+test('os textos da seleção do lugar e da organização são os combinados, sem exclamação, travessão nem emoji', () => {
+  assert.equal(PLACE_LABEL, 'o componente que vem antes do componente novo')
+  assert.equal(PLACE_PROPOSED, 'Antes de editar, confirme no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado, e a minha sugestão já está marcada.')
+  assert.equal(PLACE_ASK, 'Antes de editar, selecione no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado.')
+  assert.equal(ARRANGE_LOST, 'Qual formato você quer para o fluxo? Por exemplo: em L, em coluna ou como uma casa.')
+  assert.equal(ARRANGE_LIMIT, 60)
+  for (const text of [PLACE_LABEL, PLACE_PROPOSED, PLACE_ASK, ARRANGE_LOST]) assert.ok(!/[—–!]|[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text), text)
+  assert.ok(PLACE_LABEL.length <= PICK_LIMITS.label)
+})
+
+test('o esquema do Copiloto traz adds, after e layout obrigatórios e a ação arrange, e o esquema e o prompt da montagem continuam byte a byte os mesmos', () => {
+  const { jsonSchema } = zodSchema(copilotSchema)
+  assert.deepEqual(Object.keys(jsonSchema.properties).sort(), COPILOT_FIELDS)
+  assert.deepEqual([...jsonSchema.required].sort(), COPILOT_FIELDS)
+  assert.equal(jsonSchema.additionalProperties, false)
+  const { action, adds, after, layout } = jsonSchema.properties
+  assert.deepEqual(action.enum, [...BUILDER_ACTIONS, 'arrange'])
+  assert.match(action.description, /\barrange\b/)
+  assert.deepEqual([adds.type, after.type, layout.type, layout.items.type], ['boolean', 'string', 'array', 'object'])
+  assert.equal(layout.items.additionalProperties, false)
+  assert.deepEqual(Object.keys(layout.items.properties), ['id', 'col', 'row'])
+  assert.deepEqual([...layout.items.required].sort(), ['col', 'id', 'row'])
+  assert.deepEqual(['id', 'col', 'row'].map((key) => layout.items.properties[key].type), ['string', 'integer', 'integer'])
+  assert.match(action.description, /^ask pergunta, edit altera o fluxo aberto, arrange muda só as posições dos componentes no canvas, finish encerra a conversa$/)
+  assert.match(adds.description, /^true quando plan cria componentes novos no caminho do atendimento; false nas outras respostas$/)
+  assert.match(after.description, /^ID do resumo do fluxo do componente que fica logo antes dos componentes novos: o ponto que o usuário indicou ou a sua sugestão; vazio quando nada novo é criado$/)
+  assert.match(layout.description, /^Com arrange, uma célula para cada componente do resumo, o Início inclusive, desenhando o formato pedido e seguindo o caminho a partir do Início; vazio nas outras respostas$/)
+  for (const key of ['col', 'row']) assert.ok(layout.items.properties[key].description.includes(`de 0 a ${ARRANGE_LIMIT}`), key)
+  assert.match(layout.items.properties.id.description, /ID do componente, como aparece no resumo do fluxo/)
+  const walk = (schema, trail) => {
+    for (const key of NUMERIC_LIMITS) assert.equal(schema[key], undefined, `${trail} ${key}`)
+    if (schema.anyOf) schema.anyOf.forEach((option, index) => walkSchema(option, walk, `${trail}/${index}`))
+  }
+  walkSchema(jsonSchema, walk)
+  const builder = zodSchema(interviewSchema).jsonSchema
+  assert.equal(JSON.stringify(builder), BUILDER_SCHEMA)
+  for (const key of ['message', 'suggestions', 'plan']) assert.deepEqual(jsonSchema.properties[key], builder.properties[key], key)
+  assert.equal(sha256(interviewSystemPrompt()), BUILDER_PROMPT_SHA256)
+})
+
+test('os 4 provedores recebem o esquema estrito do Copiloto com adds, after, layout e arrange, e a conversa de montagem segue sem eles', async () => {
+  for (const provider of PROVIDERS) {
+    calls.length = 0
+    const copilot = await interviewTurn(menusInput(provider), hooks(() => reply[provider](JSON.stringify(complete(ASK)))))
+    const builder = await interviewTurn(input(provider, { flow: MENUS }), hooks(() => reply[provider](JSON.stringify(ASK))))
+    assert.deepEqual([copilot.ok, builder.ok, calls.length], [true, true, 2], provider)
+    assert.deepEqual([copilot.turn, builder.turn], [ASK, ASK], provider)
+    const [turn, build] = calls.map((call) => formatOf[provider](call.body))
+    assert.deepEqual([turn.mode, build.mode], [STRICT_MODE[provider], STRICT_MODE[provider]], provider)
+    assert.deepEqual([...turn.schema.required].sort(), COPILOT_FIELDS, provider)
+    assert.deepEqual(Object.keys(turn.schema.properties).sort(), COPILOT_FIELDS, provider)
+    assert.deepEqual(turn.schema.properties.action.enum, [...BUILDER_ACTIONS, 'arrange'], provider)
+    const { adds, after, layout } = turn.schema.properties
+    assert.deepEqual([adds.type, after.type, layout.type, layout.items.type], ['boolean', 'string', 'array', 'object'], provider)
+    assert.deepEqual([...layout.items.required].sort(), ['col', 'id', 'row'], provider)
+    assert.deepEqual(['id', 'col', 'row'].map((key) => layout.items.properties[key].type), ['string', 'integer', 'integer'], provider)
+    if (provider !== 'google') assert.deepEqual([turn.schema.additionalProperties, layout.items.additionalProperties], [false, false], provider)
+    assert.deepEqual([...build.schema.required].sort(), BUILDER_FIELDS, provider)
+    assert.deepEqual(Object.keys(build.schema.properties).sort(), BUILDER_FIELDS, provider)
+    assert.deepEqual(build.schema.properties.action.enum, BUILDER_ACTIONS, provider)
+  }
+})
+
+test('placeGiven vale pela seleção no canvas, por palavra de posição, por ID ou pelo texto de um componente, nas falas do usuário depois da última proposta', () => {
+  const texts = summaryTexts(MENUS)
+  const given = (history, ids = MENUS_IDS) => placeGiven(history, texts, ids)
+  const base = 'adicione uma mensagem de agradecimento'
+  assert.equal(given(said(base)), false)
+  assert.equal(given(said(base, 'pode ser uma mensagem curta')), false)
+  assert.equal(given([]), false)
+  assert.equal(given(said(base, `Selecionei no canvas: Enviar Mensagem “Olá, #NAME. Você está no atendimento da Lucas Lima.” · ID ${WELCOME}`)), true)
+  for (const choice of ['Selecionei no canvas: Encerrar Conversa', 'selecionei no CANVAS: Encerrar Conversa', 'Logo antes do selecionado\n\nSelecionei no canvas: Encerrar Conversa']) assert.equal(given(said(base, answer(PLACE_ASK), choice)), true, choice)
+  assert.equal(given(said(base, answer(PLACE_ASK), 'Encerrar Conversa')), false)
+  const positions = ['depois do menu', 'antes da despedida', 'após o menu', 'entre o menu e a despedida', 'no início do fluxo', 'no começo do fluxo', 'no fim do fluxo', 'no final do fluxo', 'logo depois do menu', 'logo após o menu', 'em seguida', 'no lugar de uma mensagem antiga']
+  for (const phrase of positions) {
+    assert.equal(given(said(`${base} ${phrase}`)), true, phrase)
+    assert.equal(given(said(base, answer('Onde ela entra?'), phrase)), true, phrase)
+  }
+  for (const phrase of [`na saída do ID ${WELCOME}`, `na saída do #${WELCOME}`, 'na saída do ID 3', 'na saída do id 4']) assert.equal(given(said(`${base} ${phrase}`)), true, phrase)
+  for (const phrase of ['na saída do menu Como podemos ajudar', 'no menu QUAL BOLETO VOCE QUER', 'na mensagem obrigado pelo contato. ate logo']) assert.equal(given(said(`${base} ${phrase}`)), true, phrase)
+  assert.equal(given(said(base, answer('Onde ela entra? Depois do menu Como podemos ajudar?'))), false)
+  const boundaries = [answer(PROPOSAL_DONE), answer(`Vou acrescentar a mensagem.\n\n${PROPOSAL_DONE}`), answer(APPLIED_DONE), answer(`${APPLIED_DONE}\n\n${FOLLOW_UP}`), answer('Organização pronta no canvas: 5 componentes movidos.')]
+  for (const boundary of boundaries) {
+    assert.equal(given(said(`${base} depois do menu`, boundary, 'adicione também uma tag Cliente')), false, boundary.text)
+    assert.equal(given(said(`Selecionei no canvas: Menu de Opções Como podemos ajudar? · ID 3`, boundary, 'adicione também uma tag Cliente')), false, boundary.text)
+    assert.equal(given(said(base, boundary, 'adicione também uma tag Cliente depois do menu')), true, boundary.text)
+    assert.equal(given(said(base, boundary)), false, boundary.text)
+  }
+  assert.equal(given(said(`${base} depois do menu`, answer(PROPOSAL_DONE), 'agora uma tag', answer(APPLIED_DONE), 'adicione também uma tag Cliente')), false)
+  assert.equal(given(said(base, answer(PROPOSAL_DONE), 'agora depois do menu', answer('Qual tag?'), 'Cliente')), true)
+  assert.equal(given(said(`${base} depois do menu`, answer('Vou acrescentar a mensagem. Fica assim?'), 'adicione também uma tag Cliente')), true)
+  for (const chip of ['Logo depois do selecionado', 'Logo antes do selecionado', 'depois da selecionada', 'Logo depois do componente selecionado']) assert.equal(given(said(base, answer('Depois de qual componente ela entra?'), chip)), false, chip)
+  assert.equal(given(said(base, answer('Depois de qual componente ela entra?'), 'Logo antes do selecionado, no fim do fluxo')), true)
+  for (const phrase of ['quero falar da entrega', 'com antecedência', 'no menu', 'para os suportes']) assert.equal(given(said(`${base} ${phrase}`)), false, phrase)
+  for (const phrase of ['na saída do ID 99', 'na saída do #99', 'na saída do ID 20']) {
+    assert.equal(given(said(`${base} ${phrase}`)), false, phrase)
+    assert.equal(placeGiven(said(`${base} ${phrase}`), texts), true, phrase)
+  }
+  assert.equal(placeGiven(said(`${base} na saída do id abc`), texts), false)
+  assert.equal(placeGiven(said(`${base} no menu Como podemos ajudar`)), false)
+  assert.equal(placeGiven(said(`${base} no menu Como podemos ajudar`), texts), true)
+  const names = new Map([['a', '“Menu”'], ['b', '“Sim” opções: Sim, Não'], ['c', '“Suporte”'], ['d', '“Atendimento geral”']])
+  assert.equal(placeGiven(said(`${base} no menu, opção sim`), names, ['a', 'b', 'c', 'd']), false)
+  assert.equal(placeGiven(said(`${base} para os suportes`), names, ['a', 'b', 'c', 'd']), false)
+  assert.equal(placeGiven(said(`${base} no SUPORTE`), names, ['a', 'b', 'c', 'd']), true)
+  assert.equal(placeGiven(said(`${base} no atendimento geral`), names, ['a', 'b', 'c']), false)
+  assert.equal(placeGiven(said(`${base} no atendimento geral`), names, ['a', 'b', 'c', 'd']), true)
+  const sizes = new Map([['e', '“Boleto”'], ['f', '“Plano”']])
+  assert.deepEqual([placeGiven(said(`${base} no boleto`), sizes, ['e', 'f']), placeGiven(said(`${base} no plano`), sizes, ['e', 'f'])], [true, false])
+  for (const history of [null, undefined, 'depois do menu', [{ role: 'user' }, { role: 'system', text: 'depois do menu' }, { text: 'depois do menu' }]]) assert.equal(placeGiven(history, texts, MENUS_IDS), false, JSON.stringify(history))
+})
+
+test('settleTurn: o edit do Copiloto que cria componente sem o lugar dito pelo usuário vira a seleção no canvas, com a sugestão do Copiloto marcada quando ela tem saída', () => {
+  const settle = (extra = {}, context = PLACE_CONTEXT) => settleTurn({ ...PLACE_EDIT, ...extra }, context)
+  assert.deepEqual(ANCHOR_IDS.length > 2 && CLOSED_IDS.length > 0, true)
+  assert.deepEqual(settle(), placeAsk(PLACE_PROPOSED, WELCOME))
+  for (const after of ANCHOR_IDS) assert.deepEqual(settle({ after }), placeAsk(PLACE_PROPOSED, after), after)
+  for (const after of [...CLOSED_IDS, '99', '', 'boas_vindas']) assert.deepEqual(settle({ after }), placeAsk(PLACE_ASK), after)
+  const question = 'Pensei na mensagem Obrigado pela preferência, volte sempre. Depois de qual componente ela entra?'
+  assert.deepEqual(settle({ message: question }), placeAsk(question, WELCOME))
+  assert.deepEqual(settle({ message: question, after: CLOSED_IDS[0] }), placeAsk(question))
+  assert.deepEqual(settle({ message: '' }), placeAsk(PLACE_PROPOSED, WELCOME))
+  assert.deepEqual(settle({ suggestions: ['Logo depois do selecionado', 'Pode editar agora'] }), placeAsk(PLACE_PROPOSED, WELCOME))
+  assert.deepEqual(settle({ action: 'generate' }), placeAsk(PLACE_PROPOSED, WELCOME))
+  assert.deepEqual(settle({}, { ...PLACE_CONTEXT, anchors: [ANCHOR_IDS[0], WELCOME] }), placeAsk(PLACE_PROPOSED, WELCOME))
+  for (const anchors of [[], [ANCHOR_IDS[0]], [WELCOME, WELCOME]]) assert.deepEqual(settle({}, { ...PLACE_CONTEXT, anchors }), editOf(PLACE_EDIT), JSON.stringify(anchors))
+  for (const adds of [false, undefined, null, 'true', 1]) assert.deepEqual(settle({ adds }), editOf(PLACE_EDIT), String(adds))
+  for (const scope of [undefined, 'builder']) assert.deepEqual(settle({}, { ...PLACE_CONTEXT, scope }), editOf(PLACE_EDIT), String(scope))
+  assert.deepEqual(settle({ action: 'ask', message: 'Fica assim?', suggestions: ['Pode ser assim', 'Quero outro texto'] }), { message: 'Fica assim?', suggestions: ['Pode ser assim', 'Quero outro texto'], action: 'ask', plan: PLACE_PLAN })
+  assert.deepEqual(settle({ action: 'finish' }), { message: PLACE_EDIT.message, suggestions: [], action: 'finish', plan: PLACE_PLAN })
+  const chosen = [...THANKS, answer(PLACE_PROPOSED), { role: 'user', text: `Selecionei no canvas: Enviar Mensagem “Olá, #NAME. Você está no atendimento da Lucas Lima.” · ID ${WELCOME}` }]
+  const worded = [...THANKS, answer('Onde ela entra?'), { role: 'user', text: 'Logo depois das boas-vindas' }]
+  for (const history of [chosen, worded]) assert.deepEqual(settle({}, { ...PLACE_CONTEXT, history }), editOf(PLACE_EDIT), history.at(-1).text)
+  const later = [...worded, answer(PROPOSAL_DONE), { role: 'user', text: 'adicione também uma tag Cliente' }]
+  assert.deepEqual(settle({}, { ...PLACE_CONTEXT, history: later }), placeAsk(PLACE_PROPOSED, WELCOME))
+  for (const after of [`ID ${WELCOME}`, ` ${WELCOME} `, `${WELCOME} (Enviar Mensagem)`, `#${WELCOME}`]) assert.deepEqual(settle({ after }).pick, placePick(WELCOME), after)
+  for (const after of [null, undefined, 2, ['2']]) assert.deepEqual(settle({ after }).pick, after === 2 ? placePick(WELCOME) : placePick(), String(after))
+  assert.deepEqual(settle({ plan: '' }), placeAsk(PLACE_PROPOSED, WELCOME, ''))
+  assert.deepEqual(settle({ pick: ANY_PICK }), placeAsk(PLACE_PROPOSED, WELCOME))
+  assert.deepEqual(settle({ pick: { ...ANY_PICK, ready: true }, message: '' }), placeAsk(PLACE_PROPOSED, WELCOME))
+  assert.deepEqual(settle({ pick: MENU_PICK }), { message: PICK_MESSAGE, suggestions: [], action: 'ask', plan: PLACE_PLAN, pick: MENU_PICK })
+  const cited = `No menu de opções ID ${MENU_IDS[1]}, acrescente a opção Falar com atendente.`
+  assert.deepEqual(settle({ pick: MENU_PICK, plan: cited }), placeAsk(PLACE_PROPOSED, WELCOME, cited))
+  assert.deepEqual(settle({ pick: MENU_PICK, plan: cited }, { ...PLACE_CONTEXT, history: worded }), { message: PLACE_EDIT.message, suggestions: [], action: 'edit', plan: cited })
+  const raw = JSON.parse(JSON.stringify({ ...PLACE_EDIT, pick: ANY_PICK, layout: L_CELLS }))
+  const before = JSON.stringify(raw)
+  settleTurn(raw, PLACE_CONTEXT)
+  assert.equal(JSON.stringify(raw), before)
+})
+
+test('no Copiloto, os 4 provedores levam o componente novo à seleção do lugar com a sugestão marcada, e o edit segue depois da seleção ou do lugar dito', async () => {
+  const chosen = [...THANKS, answer(PLACE_PROPOSED), { role: 'user', text: `Selecionei no canvas: Enviar Mensagem “Olá, #NAME. Você está no atendimento da Lucas Lima.” · ID ${WELCOME}` }]
+  const worded = [{ role: 'user', text: 'adicione uma mensagem de agradecimento logo depois das boas-vindas' }]
+  for (const provider of PROVIDERS) {
+    calls.length = 0
+    let result = await interviewTurn(menusInput(provider, { history: THANKS }), hooks(() => reply[provider](JSON.stringify(PLACE_EDIT))))
+    assert.deepEqual([result.turn, calls.length], [placeAsk(PLACE_PROPOSED, WELCOME), 1], provider)
+    calls.length = 0
+    result = await interviewTurn(menusInput(provider, { history: THANKS }), hooks(() => reply[provider](JSON.stringify({ ...PLACE_EDIT, after: CLOSED_IDS[0] }))))
+    assert.deepEqual([result.turn, calls.length], [placeAsk(PLACE_ASK), 1], provider)
+    for (const history of [chosen, worded]) {
+      calls.length = 0
+      result = await interviewTurn(menusInput(provider, { history }), hooks(() => reply[provider](JSON.stringify(PLACE_EDIT))))
+      assert.deepEqual([result.turn, calls.length], [editOf(PLACE_EDIT), 1], `${provider} ${history.at(-1).text}`)
+    }
+  }
+  const start = { ...FLOW, nodes: FLOW.nodes.filter((node) => node.data.type === START_TYPE), edges: [] }
+  calls.length = 0
+  let result = await interviewTurn(copilotInput('openai', { history: THANKS, flow: start }), hooks(() => reply.openai(JSON.stringify({ ...PLACE_EDIT, after: 'inicio' }))))
+  assert.deepEqual([result.turn, calls.length], [editOf(PLACE_EDIT), 1])
+  const noted = { ...MENUS, nodes: [...MENUS.nodes, noteNode('999', 'Revisar com o financeiro.')] }
+  result = await interviewTurn(menusInput('openai', { history: THANKS, flow: noted }), hooks(() => reply.openai(JSON.stringify({ ...PLACE_EDIT, after: '999' }))))
+  assert.deepEqual(result.turn, placeAsk(PLACE_ASK))
+  result = await interviewTurn(input('openai', { history: THANKS, flow: MENUS }), hooks(() => reply.openai(JSON.stringify(PLACE_EDIT))))
+  assert.deepEqual(result.turn, editOf(PLACE_EDIT))
+})
+
+test('settleTurn: arrange do Copiloto guarda só as células dos componentes do fluxo, arredondadas e dentro do limite, e com menos de 2 células vira pergunta', () => {
+  const settle = (extra = {}, context = ARRANGE_CONTEXT) => settleTurn({ ...ARRANGE, ...extra }, context)
+  assert.deepEqual(settle(), arranged())
+  assert.deepEqual(settle({ plan: 'Organize o fluxo em L.', suggestions: ['Pode ser assim'], pick: ANY_PICK }), arranged())
+  assert.deepEqual(settle({ layout: [...L_CELLS, { id: '99', col: 5, row: 5 }, { id: '999', col: 6, row: 0 }, { id: '', col: 1, row: 1 }] }), arranged())
+  const rough = [{ id: 'inicio', col: 0.4, row: -0.4 }, { id: WELCOME, col: 1.6, row: 2.5 }, { id: '3', col: -5, row: ARRANGE_LIMIT + 40 }, { id: '4', col: 1e9, row: 7 }]
+  assert.deepEqual(settle({ layout: rough }).layout, [{ id: 'inicio', col: 0, row: 0 }, { id: WELCOME, col: 2, row: 3 }, { id: '3', col: 0, row: ARRANGE_LIMIT }, { id: '4', col: ARRANGE_LIMIT, row: 7 }])
+  for (const layout of [[], [L_CELLS[0]], [L_CELLS[0], { id: '99', col: 1, row: 0 }], 'em L', null]) {
+    const turn = settle({ layout, message: '' })
+    assert.deepEqual([turn.action, turn.message, 'layout' in turn], ['ask', ARRANGE_LOST, false], JSON.stringify(layout))
+  }
+  const question = 'Qual formato você quer, em L ou em coluna?'
+  assert.deepEqual([settle({ layout: [], message: question }).action, settle({ layout: [], message: question }).message], ['ask', question])
+  assert.deepEqual(settle({ layout: [], message: question, suggestions: ['Em L.', 'Em coluna', 'em coluna', 'Como uma casa'] }), { message: question, suggestions: ['Em L', 'Em coluna', 'Como uma casa'], action: 'ask', plan: '' })
+  assert.deepEqual(settle({ layout: [L_CELLS[0]], message: 'Vou organizar o fluxo em L.', suggestions: ['Em L'], plan: 'Organize o fluxo em L.' }), { message: ARRANGE_LOST, suggestions: [], action: 'ask', plan: 'Organize o fluxo em L.' })
+  assert.deepEqual(settle({ message: '' }), arranged(L_CELLS, 'Vou organizar os componentes no canvas.'))
+  assert.deepEqual(settle({}, { ...ARRANGE_CONTEXT, ids: undefined }).message, ARRANGE_LOST)
+  const loose = [{ id: 'ID 3', col: '2', row: 1 }, { id: '3', col: 5, row: 5 }, { id: '4', col: 'x', row: 0 }, { id: '5', col: 1 }, { id: ' inicio ', col: 0, row: 0 }, 'inicio', null, { id: 6, col: 3, row: 3 }]
+  assert.deepEqual(settle({ layout: loose }).layout, [{ id: '3', col: 2, row: 1 }, { id: 'inicio', col: 0, row: 0 }, { id: '6', col: 3, row: 3 }])
+  for (const scope of [undefined, 'builder']) {
+    const turn = settle({}, { ...ARRANGE_CONTEXT, scope })
+    assert.notEqual(turn.action, 'arrange', String(scope))
+    assert.deepEqual(['layout' in turn, 'pick' in turn, 'adds' in turn, 'after' in turn], [false, false, false, false], String(scope))
+  }
+  for (const action of ['ask', 'edit', 'finish']) {
+    const turn = settle({ action, plan: 'Organize o fluxo em L.' })
+    assert.deepEqual([turn.action, 'layout' in turn, 'adds' in turn, 'after' in turn], [action, false, false, false], action)
+  }
+})
+
+test('no Copiloto, os 4 provedores devolvem a organização com arrange e as células do fluxo, sem chamar a edição', async () => {
+  for (const provider of PROVIDERS) {
+    calls.length = 0
+    const result = await interviewTurn(menusInput(provider, { history: SHAPE }), hooks(() => reply[provider](JSON.stringify(ARRANGE))))
+    assert.deepEqual([result.turn, calls.length], [arranged(), 1], provider)
+    calls.length = 0
+    const lost = await interviewTurn(menusInput(provider, { history: SHAPE }), hooks(() => reply[provider](JSON.stringify({ ...ARRANGE, message: '', layout: [L_CELLS[0], { id: '99', col: 0, row: 1 }] }))))
+    assert.deepEqual([lost.turn.action, lost.turn.message, 'layout' in lost.turn, calls.length], ['ask', ARRANGE_LOST, false, 1], provider)
+  }
+  const noted = { ...MENUS, nodes: [...MENUS.nodes, noteNode('999', 'Revisar com o financeiro.')] }
+  const result = await interviewTurn(menusInput('openai', { history: SHAPE, flow: noted }), hooks(() => reply.openai(JSON.stringify({ ...ARRANGE, layout: [...L_CELLS, { id: '999', col: 5, row: 0 }] }))))
+  assert.deepEqual(result.turn, arranged())
+  calls.length = 0
+  const builder = await interviewTurn(input('openai', { history: SHAPE, flow: MENUS }), hooks(() => reply.openai(JSON.stringify(ARRANGE))))
+  assert.deepEqual([builder.ok, calls.length], [true, 1])
+  assert.notEqual(builder.turn.action, 'arrange')
+  assert.deepEqual(Object.keys(builder.turn).sort(), BUILDER_FIELDS)
+  const partials = []
+  const streamed = await interviewTurn(menusInput('xai', { history: SHAPE }), hooks(() => reply.xai(JSON.stringify(ARRANGE)), { onPartial: (turn) => partials.push(turn) }))
+  assert.deepEqual(streamed.turn, arranged())
+  assert.ok(partials.length > 1)
+  assert.ok(partials.some((turn) => turn.action === 'arrange'))
+  assert.deepEqual(partials.at(-1).layout, L_CELLS)
+  assert.ok(partials.every((turn) => turn.layout === undefined || turn.layout.every((cell) => typeof cell.id === 'string' && Number.isInteger(cell.col) && Number.isInteger(cell.row))), JSON.stringify(partials.map((turn) => turn.layout)))
+  const built = []
+  await interviewTurn(input('xai', { history: SHAPE, flow: MENUS }), hooks(() => reply.xai(JSON.stringify({ ...ARRANGE, action: 'ask', message: 'Qual formato?' })), { onPartial: (turn) => built.push(turn) }))
+  assert.ok(built.length > 1)
+  assert.ok(built.every((turn) => !['layout', 'adds', 'after', 'pick'].some((key) => key in turn) && turn.action !== 'arrange'))
+})
+
+test('no Copiloto, a resposta fora do formato é reparada com adds, after e layout, inclusive com nomes em português e células fracionadas, sem nova chamada', async () => {
+  const fenced = (value) => `\`\`\`json\n${JSON.stringify(value)}\n\`\`\``
+  let result = await interviewTurn(menusInput('anthropic', { history: THANKS }), hooks(() => reply.anthropic(fenced({ mensagem: PLACE_EDIT.message, acao: 'edit', plano: PLACE_PLAN, cria: 'sim', depois: WELCOME }))))
+  assert.deepEqual([result.turn, calls.length], [placeAsk(PLACE_PROPOSED, WELCOME), 1])
+  calls.length = 0
+  result = await interviewTurn(menusInput('anthropic', { history: THANKS }), hooks(() => reply.anthropic(fenced({ mensagem: PLACE_EDIT.message, acao: 'edit', plano: PLACE_PLAN, adds: 'talvez', after: WELCOME }))))
+  assert.deepEqual([result.turn, calls.length], [editOf(PLACE_EDIT), 1])
+  calls.length = 0
+  const cells = L_CELLS.map(({ id, col, row }) => ({ componente: id, coluna: col, linha: row }))
+  result = await interviewTurn(menusInput('anthropic', { history: SHAPE }), hooks(() => reply.anthropic(fenced({ mensagem: ARRANGE.message, acao: 'arrange', celulas: cells }))))
+  assert.deepEqual([result.turn, calls.length], [arranged(), 1])
+  calls.length = 0
+  result = await interviewTurn(menusInput('openai', { history: SHAPE }), hooks(() => reply.openai(JSON.stringify({ ...ARRANGE, layout: L_CELLS.map((cell) => ({ ...cell, col: cell.col + 0.4, row: String(cell.row) })) }))))
+  assert.deepEqual([result.turn, calls.length], [arranged(), 1])
+  calls.length = 0
+  result = await interviewTurn(menusInput('google', { history: THANKS }), hooks(() => reply.google(JSON.stringify({ message: PLACE_EDIT.message, suggestions: [], action: 'edit', plan: PLACE_PLAN, pick: null }))))
+  assert.deepEqual([result.turn, calls.length], [editOf(PLACE_EDIT), 1])
+  calls.length = 0
+  result = await interviewTurn(input('anthropic', { history: SHAPE, flow: MENUS }), hooks(() => reply.anthropic(fenced({ mensagem: 'Qual formato?', acao: 'arrange', plano: '', celulas: cells, cria: 'sim', depois: WELCOME }))))
+  assert.deepEqual([result.turn, calls.length], [{ message: 'Qual formato?', suggestions: [], action: 'ask', plan: '' }, 1])
+  calls.length = 0
+  result = await interviewTurn(menusInput('openai', { history: SHAPE }), hooks((call, index) => reply.openai(index === 0 ? 'não é JSON' : JSON.stringify(ARRANGE))))
+  assert.deepEqual([result.turn, calls.length], [arranged(), 2])
+  assert.match(bodyText(calls[1]), /Responda de novo só com o objeto: message, suggestions, action, plan, pick, adds, after e layout\./)
+})
+
+test('o prompt do Copiloto pede adds e after em toda resposta, com o ponto do componente novo vindo do usuário, e organiza o canvas no formato pedido com arrange e layout, em forma positiva', () => {
+  const prompt = copilotSystemPrompt()
+  const order = ['# Proposta em revisão', '# Ponto do componente novo', '# Componente novo sem ponto no fluxo', '# Quantidades e limites', '# Plano', '# Ações', '# Organização no canvas', '# Registros da interface', '# Estilo', '# Componentes da plataforma']
+  const starts = order.map((head) => prompt.indexOf(`\n${head}\n`))
+  assert.ok(starts.every((start) => start > 0), JSON.stringify(starts))
+  assert.deepEqual([...starts].sort((first, second) => first - second), starts)
+  const section = (head) => {
+    const start = prompt.indexOf(`\n${head}\n`) + 1
+    return prompt.slice(start, prompt.indexOf('\n# ', start))
+  }
+  const numbers = (text) => text.split('\n').filter((line) => /^\d+\. /.test(line)).map((line) => Number(line.split('.')[0]))
+  const place = section('# Ponto do componente novo')
+  const arrange = section('# Organização no canvas')
+  const actions = section('# Ações')
+  assert.deepEqual([numbers(place), numbers(arrange)], [[1, 2], [1, 2, 3, 4, 5, 6]])
+  for (const text of [
+    '1. O ponto de cada componente novo no caminho do atendimento vem do usuário: dito na conversa, como logo depois da mensagem de boas-vindas, ou escolhido na seleção no canvas.',
+    'Quando a resposta é edit e o ponto ainda está em aberto, a interface pede a seleção no canvas antes de editar, com a sua sugestão já marcada.',
+    '2. Preencha adds e after em toda resposta.',
+    'adds fica true quando plan cria componentes novos no caminho do atendimento.',
+    'after traz o ID, como aparece no resumo, do componente que fica logo antes dos componentes novos: o ponto que o usuário indicou ou, enquanto ele está em aberto, a sua sugestão.',
+    'Quando nada novo é criado, adds fica false e after fica vazio.',
+  ]) assert.ok(place.includes(text), text)
+  for (const text of [
+    '1. Quando o usuário pede para organizar, arrumar ou posicionar os componentes em um formato, como L, U, T, casa, coluna, linha, grade, escada, zigue-zague, círculo ou qualquer desenho, devolva arrange com layout',
+    'uma célula para cada componente do resumo, o Início inclusive',
+    `com col e row inteiros, de 0 a ${ARRANGE_LIMIT}, que desenham o formato.`,
+    'col cresce para a direita e row cresce para baixo.',
+    '2. Distribua as células seguindo o caminho a partir do Início, com cada componente ao lado do anterior no desenho.',
+    '3. Um L é uma coluna que desce e, no fim, a última linha seguindo para a direita. Com 6 componentes: col 0 de row 0 a row 3 e, na row 3, col 1 e col 2.',
+    '4. Uma casa tem paredes em quadrado e um telhado em triângulo em cima delas, desenhados pelo contorno a partir do Início.',
+    'Com 12 componentes: a parede da esquerda em col 0, de row 4 a row 2, o telhado em col 1 row 1, col 2 row 0 e col 3 row 1, a parede da direita em col 4, de row 2 a row 4, e a base em row 4, de col 3 a col 1.',
+    '5. A organização muda só as posições no canvas.',
+    '6. Nas outras respostas, layout fica vazio.',
+  ]) assert.ok(arrange.includes(text), text)
+  assert.ok(actions.includes('Nesta conversa, as ações são ask, edit, arrange e finish.'))
+  assert.ok(actions.includes('- arrange: o usuário pediu para organizar os componentes no canvas em um formato. message diz em uma frase como os componentes ficam, suggestions e plan ficam vazios e layout traz as células.'))
+  assert.ok(section('# Registros da interface').includes('- organização pronta no canvas, com a contagem dos componentes movidos: Organização pronta no canvas: 5 componentes movidos.'))
+  for (const text of [place, arrange, actions]) {
+    assert.ok(!/[—–!]/.test(text), text)
+    assert.ok(!/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text), text)
+    assert.ok(!/(^|[^\p{L}])(não|nunca|jamais|evite|proibido)(?![\p{L}])/iu.test(text), text)
+  }
+  const builder = interviewSystemPrompt()
+  for (const text of ['adds', 'after', 'arrange', 'layout', 'Ponto do componente novo', 'Organização no canvas', 'zigue-zague', 'telhado', 'Organização pronta no canvas']) assert.ok(!builder.includes(text), text)
 })

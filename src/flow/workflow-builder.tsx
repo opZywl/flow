@@ -18,7 +18,7 @@ import NodeConfigPanel from "./node-config-panel"
 import SavedFlows from "./saved-flows"
 import CustomEdge, { EdgeActionsContext } from "./custom-edge"
 import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, NodeFocusContext, NodePickContext, nodeSummary, noteColor, pickSubject, type NodePick } from "./nodes/atendimento-node"
-import { betterFrame, centerView, editedIds, fitBox, frameAround, overlapsCorner, previewFocusOf, roomForPick, shownIn, stepCandidate, unite, zoomScale, type Box, type ZoomLimits } from "./canvas-frame"
+import { betterFrame, centerView, editedIds, fitBox, frameAround, overlapsCorner, previewFocusOf, roomForPick, shownIn, stepCandidate, unite, zoomScale, type Box, type Corner, type Frame, type ZoomLimits } from "./canvas-frame"
 import type { PickHandlers, PickRequest } from "./pick"
 import { ui } from "./ui"
 
@@ -61,6 +61,8 @@ interface PickSession extends PickHandlers {
 }
 
 type Handlers = WorkflowActions & { undo: () => void; redo: () => void }
+type Graph = Pick<AtendimentoFlow, "nodes" | "edges">
+type PickStart = Pick<PickSession, "label" | "order" | "candidates" | "selected" | "any">
 type Size = { width: number; height: number }
 type ToolButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "type"> & { label: string; icon: LucideIcon; pressed?: boolean }
 
@@ -150,10 +152,75 @@ const boxOf = (node: Node): Box => {
   const point = node.positionAbsolute ?? node.position
   return { x: point.x, y: point.y, width: node.width || DEFAULT_NODE_SIZE.width, height: node.height || DEFAULT_NODE_SIZE.height }
 }
+const sortedKeys = (_: string, value: unknown) =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([first], [second]) => (first < second ? -1 : first > second ? 1 : 0)))
+    : value
+const contentOf = (node: AtendimentoNode) => JSON.stringify([node.type, node.data?.type, node.data?.data], sortedKeys)
+const linkOf = (edge: Graph["edges"][number]) => [edge.source, edge.sourceHandle ?? "", edge.target].join(ID_SEPARATOR)
 
 export function edgeLock(picking: boolean, any: boolean, locked: boolean) {
   if (picking) return any ? LOCKED_EDGE : PICK_EDGE
   return locked ? LOCKED_EDGE : null
+}
+
+export function pickStart(request: Pick<PickRequest, "label" | "candidates" | "selected" | "any">, shown: ReadonlySet<string>): PickStart | null {
+  const listed: unknown[] = Array.isArray(request.candidates) ? request.candidates : []
+  const order = [...new Set(listed)].filter((id): id is string => typeof id === "string" && shown.has(id))
+  if (!order.length) return null
+  const candidates: ReadonlySet<string> = new Set(order)
+  return {
+    label: pickLabel(request.label),
+    order,
+    candidates,
+    selected: typeof request.selected === "string" && candidates.has(request.selected) ? request.selected : null,
+    any: request.any === true,
+  }
+}
+
+export function pickFrame(boxes: ReadonlyMap<string, Box>, order: readonly string[], selected: string | null, area: Box, corner: Corner | null): Frame | null {
+  const listed = order.flatMap((id) => {
+    const box = boxes.get(id)
+    return box ? [{ id, box }] : []
+  })
+  const anchor = (listed.find((entry) => entry.id === selected) ?? listed[0])?.box
+  if (!anchor) return null
+  const others = listed.flatMap((entry) => (entry.box === anchor ? [] : [entry.box]))
+  const frame = (space: Box) => frameAround(anchor, others, space, FIT_LIMITS, PICK_MIN_ZOOM)
+  const chosen = frame(area)
+  if (!corner || !overlapsCorner(chosen.bounds, chosen.view, corner)) return chosen
+  return betterFrame(frame({ ...area, width: corner.x }), frame({ ...area, height: corner.y - area.y }))
+}
+
+export function relaidIds(before: Graph, after: Graph): string[] {
+  if (before.nodes.length !== after.nodes.length || before.edges.length !== after.edges.length) return []
+  const previous = new Map(before.nodes.map((node) => [node.id, node]))
+  const seen = new Set<string>()
+  const moved: string[] = []
+  for (const node of after.nodes) {
+    const old = previous.get(node.id)
+    if (!old || seen.has(node.id)) return []
+    seen.add(node.id)
+    if (old === node) continue
+    if (contentOf(old) !== contentOf(node)) return []
+    if (old.position?.x !== node.position?.x || old.position?.y !== node.position?.y) moved.push(node.id)
+  }
+  if (!moved.length) return []
+  const links = new Set(before.edges.map(linkOf))
+  return after.edges.every((edge) => links.has(linkOf(edge))) ? moved : []
+}
+
+export function previewFrame(boxes: ReadonlyMap<string, Box>, focus: string | null, overview: boolean, edited: () => ReadonlySet<string>, area: Box): Pick<Frame, "bounds" | "view"> | null {
+  const anchor = focus && !overview ? boxes.get(focus) : undefined
+  if (anchor) {
+    const near = [...edited()].flatMap((id) => (id === focus ? [] : boxes.get(id) ?? []))
+    const { bounds, view } = frameAround(anchor, near, area, FIT_LIMITS, FOCUS_MIN_ZOOM)
+    return { bounds, view }
+  }
+  const all = [...boxes.values()]
+  if (!all.length) return null
+  const bounds = all.reduce(unite)
+  return { bounds, view: fitBox(bounds, area, FIT_LIMITS) }
 }
 
 function safely(run: () => void) {
@@ -696,20 +763,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const area = freeArea()
     const nodes = getNodes()
     if (!shown || !area || !nodes.length) return
-    const boxes = new Map(nodes.map((node) => [node.id, boxOf(node)]))
     const { id, overview } = previewFocus.current
-    const anchor = id && !overview ? boxes.get(id) : undefined
-    let bounds: Box
-    let target: Viewport
-    if (anchor) {
-      const near = [...editedIds(flowRef.current, shown)].flatMap((edited) => (edited === id ? [] : boxes.get(edited) ?? []))
-      const frame = frameAround(anchor, near, area, FIT_LIMITS, FOCUS_MIN_ZOOM)
-      bounds = frame.bounds
-      target = frame.view
-    } else {
-      bounds = [...boxes.values()].reduce(unite)
-      target = fitBox(bounds, area, FIT_LIMITS)
-    }
+    const framed = previewFrame(new Map(nodes.map((node) => [node.id, boxOf(node)])), id, overview, () => editedIds(flowRef.current, shown), area)
+    if (!framed) return
+    const { bounds, view: target } = framed
     const current = settledView()
     if (!force && previewFitted.current && shownIn(bounds, current, area, FIT_MARGIN)) return
     previewFitted.current = true
@@ -753,6 +810,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setPreviewKind(kind)
     const current = previewRef.current
     const target = previewFocusOf(focus, current ? previewFocus.current.id : null, next.nodes)
+    const relaid = kind === "edit" && relaidIds(current ?? flowRef.current, next).length > 0
     let refocused = false
     if (!current) {
       if (!fresh && performance.now() < previewCooldown.current) return
@@ -761,10 +819,15 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       previewFollow.current = true
       previewFitted.current = false
       lastFit.current = 0
-      previewFocus.current = { id: target, overview: false }
+      previewFocus.current = { id: target, overview: relaid }
       setSettingsOpen(false)
       setLibraryOpen(false)
       setConfirmClear(false)
+    } else if (relaid) {
+      previewFocus.current = { id: target, overview: true }
+      previewFollow.current = true
+      previewFitted.current = false
+      lastFit.current = 0
     } else if (target !== previewFocus.current.id) {
       refocused = target !== null
       previewFocus.current = { id: target, overview: false }
@@ -1163,14 +1226,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     if (!area) return
     const wanted = new Set(ids)
     const boxes = new Map(getNodes().flatMap((node) => (wanted.has(node.id) ? [[node.id, boxOf(node)] as const] : [])))
-    const anchor = (anchorId ? boxes.get(anchorId) : undefined) ?? ids.map((id) => boxes.get(id)).find((box) => box !== undefined)
-    if (!anchor) return
-    const others = [...boxes.values()].filter((box) => box !== anchor)
-    const frame = (space: Box) => frameAround(anchor, others, space, FIT_LIMITS, PICK_MIN_ZOOM)
-    let chosen = frame(area)
-    const map = minimapCorner()
-    if (map && overlapsCorner(chosen.bounds, chosen.view, map)) chosen = betterFrame(frame({ ...area, width: map.x }), frame({ ...area, height: map.y - area.y }))
-    moveCamera(chosen.view, FIT_DURATION)
+    const chosen = pickFrame(boxes, ids, anchorId, area, minimapCorner())
+    if (chosen) moveCamera(chosen.view, FIT_DURATION)
   }, [freeArea, getNodes, minimapCorner, moveCamera])
 
   const revealPick = useCallback((id: string, floor = PICK_MIN_ZOOM) => {
@@ -1185,23 +1242,17 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [freeArea, getNode, minimapCorner, moveCamera, settledView])
 
   const startPick = useCallback((request: PickRequest): string[] => {
-    const shown = new Set((previewRef.current ?? flowRef.current).nodes.map((node) => node.id))
-    const listed: unknown[] = Array.isArray(request.candidates) ? request.candidates : []
-    const order = [...new Set(listed)].filter((id): id is string => typeof id === "string" && shown.has(id))
-    if (!order.length) return []
+    const opened = pickStart(request, new Set((previewRef.current ?? flowRef.current).nodes.map((node) => node.id)))
+    if (!opened) return []
+    const { order } = opened
     const surface = canvas.current
     const { width, height } = store.getState()
     if (!roomForPick(surface?.parentElement?.clientWidth ?? width, surface?.clientHeight ?? height)) return []
-    const candidates: ReadonlySet<string> = new Set(order)
     pickSequence.current += 1
     const key = pickSequence.current
     writePick({
       key,
-      label: pickLabel(request.label),
-      order,
-      candidates,
-      selected: typeof request.selected === "string" && candidates.has(request.selected) ? request.selected : null,
-      any: request.any === true,
+      ...opened,
       onSelect: request.onSelect,
       onConfirm: request.onConfirm,
       onCancel: request.onCancel,

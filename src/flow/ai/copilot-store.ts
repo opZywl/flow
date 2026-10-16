@@ -1,3 +1,4 @@
+import { arrangeFlow, type LayoutCell } from "@/lib/atendimento/ai/arrange"
 import {
   LIMITS,
   type Effort,
@@ -111,6 +112,8 @@ export interface CopilotProposal {
   fill: boolean
   focus: string | null
   missed: boolean
+  arranged?: boolean
+  moved?: number
 }
 
 export type CopilotEntry =
@@ -134,6 +137,7 @@ export interface CopilotPick {
   label: string
   candidates: CopilotPickCandidate[]
   selected: string | null
+  proposed: string | null
   ready: boolean
   any: boolean
 }
@@ -226,6 +230,9 @@ export const FOCUS_MISSED = "A edição não mudou o componente que você seleci
 export const BLOCKED_TITLE = "Edição com pendências que impedem aplicar"
 export const EMPTIED_NOTICE = "O fluxo ficou só com o Início e as notas. Para exportar o JSON, ligue um componente à saída do Início."
 export const FAULTS_HEAD = "Pendências para corrigir:"
+export const ARRANGED_TITLE = "Organização pronta"
+
+export const movedLabel = (count: number) => plural(count, "componente movido", "componentes movidos")
 
 export const STATUS_LABELS: Readonly<Record<Exclude<ProposalStatus, "pending">, string>> = {
   applied: "Aplicada",
@@ -236,6 +243,12 @@ export const STATUS_LABELS: Readonly<Record<Exclude<ProposalStatus, "pending">, 
 export const CONNECTION_FAILURE: Failure = {
   title: "Não foi possível contatar o servidor.",
   details: "Verifique a conexão e tente novamente.",
+  items: [],
+}
+
+export const ARRANGE_FAILURE: Failure = {
+  title: "Não foi possível organizar o fluxo.",
+  details: "Peça de novo descrevendo o formato que você quer.",
   items: [],
 }
 
@@ -281,6 +294,7 @@ export function proposalApplicable(proposal: CopilotProposal): boolean {
 }
 
 export function proposalTitle(proposal: CopilotProposal): string {
+  if (proposal.arranged) return ARRANGED_TITLE
   if (proposal.partial) return "Edição feita em parte"
   if (!proposalApplicable(proposal)) return BLOCKED_TITLE
   return proposal.issues.length ? `Edição pronta com ${plural(proposal.issues.length, "pendência", "pendências")}` : "Edição pronta"
@@ -318,7 +332,9 @@ function faultLine(issue: GenerationIssue): string {
 
 export function proposalSummary(proposal: CopilotProposal): string {
   let head = "Proposta pronta no canvas."
-  if (proposal.changes) {
+  if (proposal.arranged) {
+    head = `Organização pronta no canvas: ${movedLabel(proposal.moved ?? 0)}.`
+  } else if (proposal.changes) {
     const [added, changed, removed] = changeLabels(proposal.changes)
     head = `Proposta pronta no canvas: ${added}, ${changed} e ${removed}.`
   }
@@ -372,11 +388,13 @@ export function anchors(flow: AtendimentoFlow): AtendimentoNode[] {
   return flowOrder(flow).filter((node) => outputHandles(node).length > 0)
 }
 
+const idOf = (value: unknown): string => (typeof value === "string" ? value.trim() : typeof value === "number" && Number.isFinite(value) ? String(value) : "")
+
 function listedCandidates(items: readonly unknown[], flow: AtendimentoFlow): CopilotPickCandidate[] {
   const nodes = new Map(flow.nodes.map((node) => [node.id, node]))
   const candidates: CopilotPickCandidate[] = []
   for (const item of items) {
-    const id = typeof item === "string" ? item.trim() : typeof item === "number" && Number.isFinite(item) ? String(item) : ""
+    const id = idOf(item)
     const node = nodes.get(id)
     if (!node || node.data.type === NOTE_TYPE || candidates.some((candidate) => candidate.id === id)) continue
     candidates.push({ id, text: nodeSubject(node) })
@@ -390,7 +408,10 @@ export function readPick(value: unknown, flow: AtendimentoFlow): CopilotPick | n
   const listed = Array.isArray(value.candidates) ? value.candidates : null
   if (!any && !listed) return null
   const candidates = any ? anchors(flow).map((node) => ({ id: node.id, text: nodeSubject(node) })) : listedCandidates(listed ?? [], flow)
-  return candidates.length < 2 ? null : { label: pickLabel(value.label), candidates, selected: null, ready: value.ready === true, any }
+  if (candidates.length < 2) return null
+  const wanted = idOf(value.selected)
+  const proposed = wanted && candidates.some((candidate) => candidate.id === wanted) ? wanted : null
+  return { label: pickLabel(value.label), candidates, selected: proposed, proposed, ready: value.ready === true, any }
 }
 
 export function pickKey(pick: CopilotPick | null | undefined): string {
@@ -472,6 +493,17 @@ export function introducedErrors(before: readonly FlowIssue[], after: readonly F
     if (count > 0) left.set(place, count - 1)
     return count === 0
   })
+}
+
+function review(original: AtendimentoFlow, flow: AtendimentoFlow, reported: GenerationIssue[]) {
+  const blocking = flowErrors(flow)
+  const emptied = emptiedFlow(original, flow)
+  const starts = new Set(flow.nodes.flatMap((node) => (node.data.type === START_TYPE ? [node.id] : [])))
+  const expected = (issue: { nodeId?: string }) => emptied && issue.nodeId !== undefined && starts.has(issue.nodeId)
+  const broken = introducedErrors(flowErrors(original), blocking)
+    .filter((issue) => !expected(issue))
+    .map((issue): GenerationIssue => ({ severity: "error", scope: "ia", message: issue.message, ...(issue.nodeId ? { nodeId: issue.nodeId } : {}) }))
+  return { issues: mergeIssues(reported, blocking).filter((issue) => !expected(issue)), blocking, broken, emptied }
 }
 
 export function createCopilot(read: () => CopilotOptions): CopilotStore {
@@ -561,8 +593,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     return behaviorSignature(opened) === behaviorSignature(found.original) ? { base: opened, original: opened, refines: null } : null
   }
 
-  const mark = (id: string, status: ProposalStatus): CopilotEntry[] =>
-    state.entries.map((entry) => (entry.kind === "proposal" && entry.id === id && entry.status === "pending" ? { ...entry, status } : entry))
+  const mark = (id: string, status: ProposalStatus, entries: readonly CopilotEntry[] = state.entries): CopilotEntry[] =>
+    entries.map((entry) => (entry.kind === "proposal" && entry.id === id && entry.status === "pending" ? { ...entry, status } : entry))
 
   const forget = (): Partial<CopilotState> => {
     planned = null
@@ -771,21 +803,15 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       const node = before.get(id)
       return node ? [node] : []
     })
-    const blocking = flowErrors(received.flow)
+    const { issues, blocking, broken, emptied } = review(job.original, received.flow, [...warned, ...received.issues])
     const known = new Set(blocking.map(errorKey))
-    const emptied = emptiedFlow(job.original, received.flow)
-    const starts = new Set(received.flow.nodes.flatMap((node) => (node.data.type === START_TYPE ? [node.id] : [])))
-    const expected = (issue: { nodeId?: string }) => emptied && issue.nodeId !== undefined && starts.has(issue.nodeId)
-    const broken = introducedErrors(flowErrors(job.original), blocking)
-      .filter((issue) => !expected(issue))
-      .map((issue): GenerationIssue => ({ severity: "error", scope: "ia", message: issue.message, ...(issue.nodeId ? { nodeId: issue.nodeId } : {}) }))
     const unmet = received.issues.filter((issue) => issue.severity === "error" && !known.has(errorKey(issue)))
     const proposal: CopilotProposal = {
       flow: received.flow,
       original: job.original,
       base: job.base,
       prompt: job.prompt,
-      issues: mergeIssues([...warned, ...received.issues], blocking).filter((issue) => !expected(issue)),
+      issues,
       blocking: blocking.length,
       broken,
       unmet,
@@ -895,7 +921,59 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     if (unseen) notify("failed")
   }
 
-  const answered = (controller: AbortController, turn: InterviewTurn, found: Target) => {
+  const arrange = (controller: AbortController, found: Target, cells: readonly LayoutCell[], entries: CopilotEntry[], settings: CopilotSettings) => {
+    let arranged: ReturnType<typeof arrangeFlow>
+    try {
+      arranged = arrangeFlow(found.base, cells)
+    } catch {
+      misheard(controller, { code: "unknown", failure: ARRANGE_FAILURE })
+      return
+    }
+    const { flow, moved } = arranged
+    const prior = found.refines !== null ? pendingProposal() : null
+    const { issues, blocking, broken, emptied } = review(found.original, flow, prior?.issues ?? [])
+    const proposal: CopilotProposal = {
+      flow,
+      original: found.original,
+      base: found.base,
+      prompt: "",
+      issues,
+      blocking: blocking.length,
+      broken,
+      unmet: prior?.unmet ?? [],
+      emptied,
+      changes: prior?.changes ?? null,
+      diff: prior?.diff ?? null,
+      removed: prior?.removed ?? [],
+      partial: prior?.partial ?? false,
+      rounds: 0,
+      provider: settings.provider,
+      model: settings.model,
+      effort: settings.effort,
+      fill: settings.fill,
+      focus: null,
+      missed: prior?.missed ?? false,
+      arranged: true,
+      moved: moved.length,
+    }
+    const id = nextId()
+    const listed = found.refines ? mark(found.refines, "refined", entries) : entries
+    const unseen = !state.visible
+    const attention: CopilotAttention = proposalApplicable(proposal) ? "ready" : "failed"
+    set({
+      entries: [...listed, { id, kind: "proposal", proposal, status: "pending" }],
+      pending: id,
+      ...forget(),
+      thinking: false,
+      incoming: "",
+      ...(unseen ? { attention } : {}),
+    })
+    if (active()) show(flow, true, true, null)
+    else hide()
+    if (unseen) notify(attention)
+  }
+
+  const answered = (controller: AbortController, turn: InterviewTurn, found: Target, settings: CopilotSettings) => {
     if (asking === controller) asking = null
     const message = typeof turn.message === "string" ? turn.message.trim() : ""
     const entries = message ? [...state.entries, said(message)] : state.entries
@@ -911,6 +989,11 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     planned = base
     const given = typeof turn.plan === "string" ? turn.plan.trim() : ""
     if (given) parked = ""
+    const cells = turn.action === "arrange" && Array.isArray(turn.layout) ? turn.layout : []
+    if (cells.length) {
+      arrange(controller, base, cells, entries, settings)
+      return
+    }
     if (turn.action === "edit" || turn.action === "generate") {
       const prompt = given || fallbackPrompt()
       if (prompt && state.blocked) {
@@ -950,7 +1033,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       return
     }
     if (!heard(controller)) return
-    if (result?.ok) answered(controller, result.turn, found)
+    if (result?.ok) answered(controller, result.turn, found, input.settings)
     else misheard(controller, turnRejection(result?.failure))
   }
 
@@ -1033,7 +1116,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       }
       chosen = choice
       const entries = [...state.entries, choiceEntry(choice)]
-      if (pick.ready && state.plan && !(pick.any && branching(base.base, choice.id))) {
+      const direct = pick.proposed ? choice.id === pick.proposed : !(pick.any && branching(base.base, choice.id))
+      if (pick.ready && state.plan && direct) {
         planned = base
         const prompt = join(state.plan, choiceText(choice))
         start(jobFor(base, prompt, settings), entries, { plan: prompt })

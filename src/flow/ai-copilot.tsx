@@ -68,6 +68,7 @@ import {
   STATUS_LABELS,
   createCopilot,
   linkPick,
+  movedLabel,
   pickKey,
   proposalApplicable,
   proposalGroups,
@@ -133,6 +134,7 @@ export const PICK_OTHER_LABEL = "Escreva outra resposta"
 export const PICK_OTHER_PLACEHOLDER = "Explique melhor ou peça outra coisa, como: crie as duas opções no menu principal."
 export const PICK_OTHER_SEND = "Enviar resposta"
 export const pickOtherWith = (subject: string) => `A seleção vai junto: ${subject}.`
+export const pickProposed = (subject: string) => `Sugestão do Copiloto: ${subject}.`
 export const ANY_PICK_NOTE = `Você pode escolher qualquer componente com saída, inclusive o ${getComponentLabel(START_TYPE)}.`
 
 const iconButton =
@@ -293,6 +295,7 @@ export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelec
   const [writing, setWriting] = useState(false)
   const [text, setText] = useState("")
   const selected = pick.candidates.find((candidate) => candidate.id === pick.selected)
+  const proposed = pick.proposed ? pick.candidates.find((candidate) => candidate.id === pick.proposed) : undefined
   const send = () => {
     const value = text.trim()
     if (!value || disabled || !onAnswer) return
@@ -316,6 +319,9 @@ export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelec
         <MousePointerClick className="mt-0.5 h-3.5 w-3.5 shrink-0 text-flow-accent" aria-hidden="true" />
         <span className="min-w-0">{pickHint(pick.label, onCanvas, blocked, pick.any === true)}</span>
       </p>
+      {proposed ? (
+        <p className="mt-1 break-words pl-[1.375rem] text-[11px] font-medium leading-4 text-flow-muted-strong">{pickProposed(proposed.text)}</p>
+      ) : null}
       <ul aria-labelledby={hintId} className="mt-2 max-h-56 space-y-1.5 overflow-y-auto overscroll-contain">
         {pick.candidates.map((candidate) => {
           const chosen = candidate.id === pick.selected
@@ -464,6 +470,12 @@ export function ProposalCard({ entryId, proposal, status, meta, applyId, canAppl
   const groups = proposalGroups(proposal)
   const byId = new Map(proposal.flow.nodes.map((node) => [node.id, node] as const))
   const pending = status === "pending"
+  const arranged = proposal.arranged === true
+  const chips = arranged
+    ? [{ label: movedLabel(proposal.moved ?? 0), dot: CHANGE_DOTS[1] }]
+    : proposal.changes
+      ? changeLabels(proposal.changes).map((label, index) => ({ label, dot: CHANGE_DOTS[index] }))
+      : []
   return (
     <div className={cn("rounded-xl border p-3", tone.box, !pending && "opacity-80")}>
       <div className="flex items-start gap-2.5">
@@ -508,18 +520,18 @@ export function ProposalCard({ entryId, proposal, status, meta, applyId, canAppl
         </div>
       </div>
 
-      {proposal.changes ? (
+      {chips.length > 0 ? (
         <ul aria-label="Mudanças no fluxo aberto" className="mt-2.5 flex flex-wrap gap-1.5">
-          {changeLabels(proposal.changes).map((label, index) => (
-            <li key={label} className={cn(ui.chip, "inline-flex items-center gap-1.5 bg-flow-surface")}>
-              <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-full", CHANGE_DOTS[index])} />
-              {label}
+          {chips.map((chip) => (
+            <li key={chip.label} className={cn(ui.chip, "inline-flex items-center gap-1.5 bg-flow-surface")}>
+              <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-full", chip.dot)} />
+              {chip.label}
             </li>
           ))}
         </ul>
       ) : null}
 
-      {proposal.removed.length > 0 ? (
+      {!arranged && proposal.removed.length > 0 ? (
         <p className={ui.hint}>
           Componentes removidos:{" "}
           {proposal.removed.map((node: AtendimentoNode) => `${getComponentLabel(node.data.type)} · ID ${node.id}`).join(", ")}.

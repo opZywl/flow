@@ -252,7 +252,7 @@ export function createInterview(read: () => InterviewOptions): InterviewStore {
     const message = typeof turn.message === "string" ? turn.message.trim() : ""
     const plan = typeof turn.plan === "string" && turn.plan.trim() ? turn.plan.trim() : state.plan
     const withFlow = hasNodes(currentFlow())
-    let action: InterviewAction = turn.action
+    let action: InterviewAction = turn.action === "arrange" ? "ask" : turn.action
     if (action === "edit" && !withFlow) action = "generate"
     if (force && action === "ask" && plan) action = withFlow ? "edit" : "generate"
     if ((action === "generate" || action === "edit") && !plan) action = "ask"

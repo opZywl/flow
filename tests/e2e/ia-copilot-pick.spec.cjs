@@ -253,6 +253,26 @@ const EDIT_BEFORE = { message: 'Vou colocar o aviso logo antes da mensagem dos p
 const START_NOTICE = JSON.stringify(noticeDelta(NOTED_FLOW, START))
 const BEFORE_NOTICE = JSON.stringify(beforeDelta(NOTED_FLOW, PAYMENTS))
 
+const PLACE_LABEL = 'o componente que vem antes do componente novo'
+const PLACE_PROPOSED = 'Antes de editar, confirme no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado, e a minha sugestão já está marcada.'
+const PLACE_ASK = 'Antes de editar, selecione no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado.'
+const PLACE_LIST = `Selecione ${PLACE_LABEL} no canvas ou na lista e confirme. Você pode escolher qualquer componente com saída, inclusive o ${START_KIND}.`
+const DISCARDED = 'Proposta descartada. O fluxo aberto não mudou.'
+const BASE_OUTLETS = NODE_IDS.filter((id) => outputHandles(BASE_FLOW.nodes.find((node) => node.id === id)).length > 0)
+const BASE_END = NODE_IDS.find((id) => !BASE_OUTLETS.includes(id))
+const PLACED_EDIT = { message: 'Vou colocar o aviso logo depois da mensagem dos pagamentos.', suggestions: [], action: 'edit', plan: NOTICE_PLAN, pick: null, adds: true, after: PAYMENTS, layout: [] }
+const PLACED_QUESTION = { ...PLACED_EDIT, message: 'Pensei em colocar o aviso logo depois da mensagem dos pagamentos. Pode ser nesse ponto?' }
+const INVOICES_PLAN = `Depois do Enviar Mensagem ${INVOICES_TEXT} ID ${INVOICES}, acrescente a mensagem ${NOTICE_TEXT}`
+const EDIT_INVOICES = { message: 'Vou colocar o aviso logo depois da mensagem das notas fiscais.', suggestions: [], action: 'edit', plan: INVOICES_PLAN, pick: null, adds: true, after: INVOICES, layout: [] }
+const CLOSED_EDIT = { message: 'Vou acrescentar a mensagem de aviso no fluxo.', suggestions: [], action: 'edit', plan: PLACE_DRAFT, pick: null, adds: true, after: BASE_END, layout: [] }
+const NAMED_REQUESTS = [
+  'adicione uma mensagem de aviso depois da mensagem dos pagamentos',
+  `adicione uma mensagem de aviso na saída do ID ${PAYMENTS}`,
+  'adicione uma mensagem de aviso na saída da mensagem os pagamentos sao confirmados em ate 2 dias uteis',
+]
+const INVOICES_NOTICE = JSON.stringify(noticeDelta(BASE_FLOW, INVOICES))
+const FAREWELL_NOTICE = JSON.stringify(noticeDelta(BASE_FLOW, FAREWELL))
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const event = (payload) => `data: ${JSON.stringify(payload)}\n\n`
 
@@ -296,6 +316,8 @@ const expectedNotice = once(() => engineEdit(BASE_FLOW, NOTICE_DELTA, NOTICE_PLA
 const expectedMain = once(() => engineEdit(BASE_FLOW, MAIN_TEXT, MAIN_PLAN))
 const expectedStart = once(() => engineEdit(NOTED_FLOW, START_NOTICE, START_PLAN))
 const expectedBefore = once(() => engineEdit(NOTED_FLOW, BEFORE_NOTICE, BEFORE_PLAN))
+const expectedInvoices = once(() => engineEdit(BASE_FLOW, INVOICES_NOTICE, INVOICES_PLAN))
+const expectedFarewell = once(() => engineEdit(BASE_FLOW, FAREWELL_NOTICE, PLACE_DRAFT))
 
 function certificate() {
   const length = (size) => {
@@ -457,6 +479,10 @@ const backgroundButton = (page) => page.getByRole('button', { name: 'Imagem de f
 const backgroundMenu = (page) => page.getByRole('group', { name: 'Opções da imagem de fundo', exact: true })
 const libraryToggle = (page) => page.getByRole('button', { name: 'Componentes', exact: true })
 const componentLibrary = (page) => page.getByLabel('Biblioteca de componentes')
+const discardButton = (panel) => panel.getByRole('button', { name: 'Descartar', exact: true })
+const proposedLine = (panel) => selection(panel).getByText(/^Sugestão do Copiloto: /)
+const proposedText = (kind, snippet, id) => new RegExp(`^Sugestão do Copiloto: ${escape(kind)}\\b.*${escape(snippet)}.* · ID ${escape(id)}\\.$`)
+const editRequest = (plan, kind, snippet, id) => new RegExp(`# Pedido de edição\\n${escape(plan)}\\n\\n${pickedText(kind, snippet, id)}\\n\\n# Entrega`)
 
 async function importFile(page, flow, name) {
   await page.getByLabel('Importar arquivo JSON').setInputFiles({ name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(flow)) })
@@ -1568,4 +1594,223 @@ test('in a whole canvas selection, the suggestion to place it before carries the
   expect(applied.edges.filter((edge) => edge.target === PAYMENTS).map((edge) => edge.source), 'o aviso entra logo antes da mensagem selecionada').toEqual([notice])
   expect(applied.edges.some((edge) => edge.source === FINANCE_MENU && edge.target === notice), 'a opção Pagamentos passa pelo aviso').toBe(true)
   expect(applied.edges.some((edge) => edge.source === PAYMENTS && edge.target === notice)).toBe(false)
+})
+
+test('an edit that creates a component without the place opens the whole canvas selection with the suggestion of the Copiloto marked, builds nothing before Confirmar, and Confirmar on the suggestion edits right away with the plan', async ({ page, ai }) => {
+  const result = await expectedNotice()
+  const final = result.workflow
+  const notice = idOf(final, NOTICE_TEXT)
+  const candidates = marks(BASE_OUTLETS, 'candidate')
+  const chosen = youPicked(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS)
+  expect(BASE_OUTLETS, 'a sugestão do Copiloto tem saída').toContain(PAYMENTS)
+  const panel = await start(page)
+  ai.say(PLACED_EDIT)
+  await ask(panel, PLACE_REQUEST)
+
+  await expect(messages(panel)).toHaveText([you(PLACE_REQUEST), says(PLACE_PROPOSED)])
+  await expect(banner(page)).toContainText(`Selecione ${PLACE_LABEL} no canvas.`)
+  await expectMarks(page, NODE_IDS, { ...candidates, [PAYMENTS]: 'selected' })
+  await expect(markOf(page, PAYMENTS)).toHaveAttribute('aria-pressed', 'true')
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  await expect(bannerButton(page, 'Confirmar')).toBeEnabled()
+  await expect.poll(() => insideCanvas(page, [PAYMENTS]), { message: 'a sugestão do Copiloto aparece no canvas' }).toBe(true)
+  await expect(selection(panel)).toContainText(PLACE_LIST)
+  await expect(proposedLine(panel)).toHaveText(proposedText(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  await expect(selection(panel).getByRole('list').getByRole('button'), 'a lista traz os componentes com saída').toHaveCount(BASE_OUTLETS.length)
+  await expect(choice(panel, PAYMENTS, SNIPPETS[PAYMENTS])).toHaveAttribute('aria-pressed', 'true')
+  await expect(confirmChoice(panel)).toBeEnabled()
+  await expect(chips(panel)).toHaveCount(0)
+  await expect(editNowOffered(panel)).toHaveCount(0)
+  await settle(page)
+  await expect(nodes(page)).toHaveCount(BASE_FLOW.nodes.length)
+  await expect(canvas(page)).not.toContainText(NOTICE_TEXT)
+  await expect(panel.getByRole('heading', { name: /^Edição pronta/ })).toHaveCount(0)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls(), 'nada é montado antes de Confirmar').toHaveLength(0)
+  const format = ai.turnCalls()[0].body.text.format
+  expect(format).toMatchObject({ type: 'json_schema', strict: true, name: INTERVIEW_SCHEMA_NAME })
+  expect(format.schema.required, 'o Copiloto responde sempre se cria componente e depois de qual').toEqual(expect.arrayContaining(['adds', 'after', 'layout']))
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  ai.builds.push({ steps: [NOTICE_DELTA] })
+  await bannerButton(page, 'Confirmar').click()
+  await expectPickOver(page, panel)
+  await expect(messages(panel).nth(2)).toHaveText(chosen)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel), 'nenhuma resposta nova do Copiloto entre a confirmação e a edição').toHaveText([you(PLACE_REQUEST), says(PLACE_PROPOSED), chosen])
+  await expect(panel.getByRole('heading', { name: 'Edição pronta', exact: true })).toBeVisible()
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
+  await expect(page.getByText(EDIT_DONE)).toBeVisible()
+  await expect(canvas(page)).toContainText(NOTICE_TEXT)
+  await expect(nodes(page)).toHaveCount(final.nodes.length)
+  await expect(focusMarks(page)).toHaveCount(1)
+  await expect(nodeAt(page, PAYMENTS).locator('[data-pick-focus]'), 'a sugestão confirmada fica marcada na prévia').toHaveCount(1)
+  expect(ai.turnCalls(), 'Confirmar na sugestão vai direto para a edição').toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(lastUser(ai.buildCalls()[0]), 'o pedido de edição leva o plano e o componente confirmado').toMatch(editRequest(NOTICE_PLAN, MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  expect(ai.fallbacks).toEqual([])
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect(messages(panel)).toHaveText([you(PLACE_REQUEST), says(PLACE_PROPOSED), chosen, APPLIED, says(FOLLOW_UP)])
+  await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: idsOf(final) })
+  const applied = await stored(page)
+  expect(applied.edges.filter((edge) => edge.source === PAYMENTS).map((edge) => edge.target), 'o aviso entra logo depois da sugestão confirmada').toEqual([notice])
+  await expect(marked(page)).toHaveCount(0)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
+})
+
+test('choosing a component other than the suggestion asks the AI once more before the edit, and the question of the AI stays as the message', async ({ page, ai }) => {
+  const result = await expectedInvoices()
+  expect(result.changes).toEqual({ added: 1, changed: 1, removed: 0 })
+  const final = result.workflow
+  const notice = idOf(final, NOTICE_TEXT)
+  const candidates = marks(BASE_OUTLETS, 'candidate')
+  const sent = youPicked(MESSAGE_KIND, SNIPPETS[INVOICES], INVOICES)
+  const panel = await start(page)
+  ai.say(PLACED_QUESTION)
+  await ask(panel, PLACE_REQUEST)
+
+  await expect(messages(panel), 'a pergunta da IA fica como mensagem da seleção').toHaveText([you(PLACE_REQUEST), says(PLACED_QUESTION)])
+  await expect(banner(page)).toContainText(`Selecione ${PLACE_LABEL} no canvas.`)
+  await expectMarks(page, NODE_IDS, { ...candidates, [PAYMENTS]: 'selected' })
+  await expect(proposedLine(panel)).toHaveText(proposedText(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  await settle(page)
+  await nodeAt(page, INVOICES).click()
+  await expectMarks(page, NODE_IDS, { ...candidates, [INVOICES]: 'selected' })
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MESSAGE_KIND, SNIPPETS[INVOICES], INVOICES))
+  await expect(choice(panel, INVOICES, SNIPPETS[INVOICES])).toHaveAttribute('aria-pressed', 'true')
+  await expect(choice(panel, PAYMENTS, SNIPPETS[PAYMENTS])).toHaveAttribute('aria-pressed', 'false')
+  await expect(proposedLine(panel), 'a sugestão do Copiloto continua à vista').toHaveText(proposedText(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+
+  ai.say(EDIT_INVOICES)
+  ai.builds.push({ steps: [INVOICES_NOTICE] })
+  await bannerButton(page, 'Confirmar').click()
+  await expectPickOver(page, panel)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel)).toHaveText([you(PLACE_REQUEST), says(PLACED_QUESTION), sent, says(EDIT_INVOICES)])
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
+  await expect(canvas(page)).toContainText(NOTICE_TEXT)
+  await expect(nodes(page)).toHaveCount(final.nodes.length)
+  await expect(nodeAt(page, INVOICES).locator('[data-pick-focus]'), 'o componente escolhido fica marcado na prévia').toHaveCount(1)
+  expect(ai.calls.map((call) => call.kind), 'outro componente volta para a IA antes da edição').toEqual(['turn', 'turn', 'build'])
+  const second = ai.turnCalls()[1]
+  expect(lastUser(second), 'o turno seguinte recebe o componente escolhido').toMatch(picked(MESSAGE_KIND, SNIPPETS[INVOICES], INVOICES))
+  expect(historyOf(second)).toContain(PLACED_QUESTION.message)
+  const build = JSON.stringify(ai.buildCalls()[0].body)
+  expect(build).toContain(INVOICES_PLAN)
+  expect(build).not.toContain(NOTICE_PLAN)
+  expect(build).not.toContain(PICKED)
+  expect(ai.fallbacks).toEqual([])
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: idsOf(final) })
+  const applied = await stored(page)
+  expect(applied.edges.filter((edge) => edge.source === INVOICES).map((edge) => edge.target), 'o aviso entra logo depois do componente escolhido').toEqual([notice])
+  expect(applied.edges.some((edge) => edge.source === PAYMENTS && edge.target === notice), 'a sugestão recusada fica como estava').toBe(false)
+})
+
+test('a request that says where the new component goes edits right away without the selection, and a later request without the place asks for it again', async ({ page, ai }) => {
+  const result = await expectedNotice()
+  await watchPicks(page)
+  const panel = await start(page)
+  const shown = []
+  for (const [index, request] of NAMED_REQUESTS.entries()) {
+    ai.say(PLACED_EDIT)
+    ai.builds.push({ steps: [NOTICE_DELTA] })
+    await ask(panel, request)
+    const cards = await proposal(panel, index + 1)
+    await expect(cards).toHaveText(labels(result.changes))
+    shown.push(you(request), says(PLACED_EDIT))
+    await expect(messages(panel)).toHaveText(shown)
+    await expect(canvas(page)).toContainText(NOTICE_TEXT)
+    await frames(page)
+    await expect(banner(page)).toHaveCount(0)
+    await expect(selection(panel)).toHaveCount(0)
+    await expect(marked(page)).toHaveCount(0)
+    expect(await pickSeen(page), `sem seleção no canvas com o lugar dito em: ${request}`).toBe(false)
+    expect(ai.turnCalls()).toHaveLength(index + 1)
+    expect(ai.buildCalls()).toHaveLength(index + 1)
+    expect(lastUser(ai.turnCalls()[index])).toBe(request)
+    expect(lastUser(ai.buildCalls()[index])).toContain(NOTICE_PLAN)
+    await discardButton(panel).click()
+    shown.push(DISCARDED)
+    await expect(messages(panel)).toHaveText(shown)
+    await expect(nodes(page)).toHaveCount(BASE_FLOW.nodes.length)
+  }
+
+  ai.say(PLACED_EDIT)
+  await ask(panel, PLACE_REQUEST)
+  shown.push(you(PLACE_REQUEST), says(PLACE_PROPOSED))
+  await expect(messages(panel), 'o lugar dito antes da última proposta não vale para o pedido novo').toHaveText(shown)
+  await expect(banner(page)).toBeVisible()
+  await expectMarks(page, NODE_IDS, { ...marks(BASE_OUTLETS, 'candidate'), [PAYMENTS]: 'selected' })
+  await expect(proposedLine(panel)).toHaveText(proposedText(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  expect(await pickSeen(page)).toBe(true)
+  expect(ai.turnCalls()).toHaveLength(NAMED_REQUESTS.length + 1)
+  expect(historyOf(ai.turnCalls().at(-1))).toContain('Proposta pronta no canvas')
+  expect(ai.buildCalls()).toHaveLength(NAMED_REQUESTS.length)
+
+  await bannerButton(page, 'Cancelar').click()
+  await expectPickOver(page, panel)
+  await expect(messages(panel)).toHaveText([...shown, PICK_CANCELLED])
+  expect(ai.turnCalls()).toHaveLength(NAMED_REQUESTS.length + 1)
+  expect(ai.buildCalls()).toHaveLength(NAMED_REQUESTS.length)
+  expect(await saved(page)).toEqual(BASE_STATE)
+})
+
+test('when the suggestion of the Copiloto has no output, the selection opens with nothing marked and confirming a component with one output edits right away', async ({ page, ai }) => {
+  const result = await expectedFarewell()
+  expect(result.changes).toEqual({ added: 1, changed: 1, removed: 0 })
+  const final = result.workflow
+  const notice = idOf(final, NOTICE_TEXT)
+  const chosen = youPicked(MESSAGE_KIND, SNIPPETS[FAREWELL], FAREWELL)
+  expect(BASE_END, 'o fluxo do teste tem um componente sem saída').toBeTruthy()
+  const panel = await start(page)
+  ai.say(CLOSED_EDIT)
+  await ask(panel, PLACE_REQUEST)
+
+  await expect(messages(panel)).toHaveText([you(PLACE_REQUEST), says(PLACE_ASK)])
+  await expect(banner(page)).toContainText(`Selecione ${PLACE_LABEL} no canvas.`)
+  await expect(bannerStatus(page)).toHaveText(ANY_STATUS)
+  await expect(bannerButton(page, 'Confirmar')).toBeDisabled()
+  await expectMarks(page, NODE_IDS, marks(BASE_OUTLETS, 'candidate'))
+  await expect(markOf(page, BASE_END), 'o componente sem saída fica fora da seleção').toHaveAttribute('data-pick', 'dimmed')
+  await expect(selection(panel)).toContainText(PLACE_LIST)
+  await expect(proposedLine(panel), 'sem sugestão quando o componente sugerido não tem saída').toHaveCount(0)
+  await expect(selection(panel).getByRole('button', { pressed: true })).toHaveCount(0)
+  await expect(confirmChoice(panel)).toBeDisabled()
+  await expect(chips(panel)).toHaveCount(0)
+  expect(ai.buildCalls()).toHaveLength(0)
+
+  await settle(page)
+  await nodeAt(page, FAREWELL).click()
+  await expect(markOf(page, FAREWELL)).toHaveAttribute('data-pick', 'selected')
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MESSAGE_KIND, SNIPPETS[FAREWELL], FAREWELL))
+  ai.builds.push({ steps: [FAREWELL_NOTICE] })
+  await bannerButton(page, 'Confirmar').click()
+  await expectPickOver(page, panel)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel), 'o componente com uma saída vai direto para a edição').toHaveText([you(PLACE_REQUEST), says(PLACE_ASK), chosen])
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
+  await expect(nodeAt(page, FAREWELL).locator('[data-pick-focus]'), 'o componente escolhido fica marcado na prévia').toHaveCount(1)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(lastUser(ai.buildCalls()[0]), 'o pedido de edição leva o plano e o componente escolhido').toMatch(editRequest(PLACE_DRAFT, MESSAGE_KIND, SNIPPETS[FAREWELL], FAREWELL))
+
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: idsOf(final) })
+  const applied = await stored(page)
+  expect(applied.edges.filter((edge) => edge.source === FAREWELL).map((edge) => edge.target), 'o aviso entra logo depois do componente escolhido').toEqual([notice])
+  expect(applied.edges.some((edge) => edge.source === notice && edge.target === BASE_END), 'o caminho segue para o encerramento como antes').toBe(true)
 })

@@ -42,13 +42,17 @@ const node = require('../src/flow/nodes/atendimento-node.tsx')
 const builder = require('../src/flow/workflow-builder.tsx')
 const { nodeSubject, nodeText } = require('../src/flow/ai/generation-client.ts')
 const { componentCatalog, getComponentLabel } = require('../lib/atendimento/catalog.ts')
-const { newNode } = require('../lib/atendimento/format.ts')
+const { newNode, outputHandles } = require('../lib/atendimento/format.ts')
+const { arrangeFlow } = require('../lib/atendimento/ai/arrange.ts')
+const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
+const { layoutBox } = require('../lib/atendimento/ai/layout.ts')
 
 const LIMITS = { minZoom: 0.05, maxZoom: 1, padding: 0.15 }
 const CARD = { width: 280, height: 160 }
 const PT_TEXT = /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ][^!—–]*\.$/
 const card = (x, y) => ({ x, y, ...CARD })
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} ≈ ${expected}`)
+const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 function reactFlowFit(bounds, width, height, minZoom, maxZoom, padding) {
   const zoom = Math.min(maxZoom, Math.max(minZoom, Math.min(width / (bounds.width * (1 + padding)), height / (bounds.height * (1 + padding)))))
@@ -70,6 +74,39 @@ function renderNode(shown, { pick = null, focus = null } = {}) {
 const MENU = flowNode('envio_mensagem', '3', { title: 'Financeiro: escolha uma opção' })
 const OTHER_MENU = flowNode('envio_mensagem', '4', { title: 'Como podemos ajudar?' })
 const MESSAGE = flowNode('envio_pergunta', '5', { template: 'Os pagamentos são confirmados em até 2 dias úteis.' })
+
+const PLACE_LABEL = 'o componente que vem antes do componente novo'
+const FINANCE = finalizeFlow(assembleFlow({
+  name: 'Atendimento Financeiro',
+  description: 'Menu do financeiro com boletos e notas',
+  nodes: [
+    { id: 'boas_vindas', type: 'envio_pergunta', config: [{ key: 'template', value: 'Olá, #NAME. Você está no financeiro.' }] },
+    { id: 'menu', type: 'envio_mensagem', config: [{ key: 'title', value: 'Financeiro: escolha uma opção' }, { key: 'options', value: JSON.stringify([{ text: 'Boletos' }, { text: 'Notas fiscais' }, { text: 'Encerrar' }]) }] },
+    { id: 'boletos', type: 'envio_pergunta', config: [{ key: 'template', value: 'Os boletos chegam por e-mail todo dia 5.' }] },
+    { id: 'notas', type: 'envio_pergunta', config: [{ key: 'template', value: 'As notas ficam no portal do cliente.' }] },
+    { id: 'despedida', type: 'envio_pergunta', config: [{ key: 'template', value: 'Obrigado pelo contato.' }] },
+    { id: 'fim', type: 'finalizar', config: [] },
+  ],
+  edges: [
+    { from: 'inicio', output: '', to: 'boas_vindas' },
+    { from: 'boas_vindas', output: '', to: 'menu' },
+    { from: 'menu', output: 'Boletos', to: 'boletos' },
+    { from: 'menu', output: 'Notas fiscais', to: 'notas' },
+    { from: 'menu', output: 'Encerrar', to: 'despedida' },
+    { from: 'despedida', output: '', to: 'fim' },
+  ],
+}, { now: new Date('2026-10-16T12:00:00.000Z') })).flow
+const idOf = (flow, text) => flow.nodes.find((entry) => entry.data.data.template === text || entry.data.data.title === text).id
+const FAREWELL = idOf(FINANCE, 'Obrigado pelo contato.')
+const ANCHORS = FINANCE.nodes.filter((entry) => entry.data.type !== 'note' && outputHandles(entry).length > 0).map((entry) => entry.id)
+const boxesOf = (flow, ids = flow.nodes.map((entry) => entry.id)) => new Map(flow.nodes.filter((entry) => ids.includes(entry.id)).map((entry) => [entry.id, { ...entry.position, ...layoutBox(entry) }]))
+const copyOf = (value) => JSON.parse(JSON.stringify(value))
+
+function lShape(flow) {
+  const ids = flow.nodes.map((entry) => entry.id)
+  const down = Math.ceil(ids.length / 2)
+  return ids.map((id, index) => (index < down ? { id, col: 0, row: index } : { id, col: index - down + 1, row: down - 1 }))
+}
 
 test('the canvas pick needs at least 360 by 300 pixels, below that the panel keeps the list', () => {
   assert.equal(frame.PICK_MIN_WIDTH, 360)
@@ -359,4 +396,99 @@ test('a listed pick fades the connections, a pick open to any component keeps th
   assert.deepEqual(builder.edgeLock(true, true, true), locked)
   assert.deepEqual(builder.edgeLock(false, false, true), locked)
   assert.equal(builder.edgeLock(false, false, false), null)
+})
+
+test('a pick request with the suggested component starts with it selected, also when every component with an output is a candidate', () => {
+  const shown = new Set(FINANCE.nodes.map((entry) => entry.id))
+  assert.equal(ANCHORS.length, 6)
+  assert.ok(ANCHORS.includes('inicio') && ANCHORS.includes(FAREWELL))
+  const opened = builder.pickStart({ label: `${PLACE_LABEL}.`, candidates: ANCHORS, selected: FAREWELL, any: true }, shown)
+  assert.deepEqual(opened, { label: PLACE_LABEL, order: ANCHORS, candidates: new Set(ANCHORS), selected: FAREWELL, any: true })
+  const listed = builder.pickStart({ label: 'o menu de opções', candidates: [MENU.id, OTHER_MENU.id], selected: OTHER_MENU.id }, new Set([MENU.id, OTHER_MENU.id, MESSAGE.id]))
+  assert.equal(listed.selected, OTHER_MENU.id)
+  assert.equal(listed.any, false)
+  const end = FINANCE.nodes.find((entry) => outputHandles(entry).length === 0).id
+  assert.equal(builder.pickStart({ label: PLACE_LABEL, candidates: ANCHORS, selected: end, any: true }, shown).selected, null)
+  assert.equal(builder.pickStart({ label: PLACE_LABEL, candidates: ANCHORS, selected: null, any: true }, shown).selected, null)
+  const gone = builder.pickStart({ label: PLACE_LABEL, candidates: ANCHORS, selected: FAREWELL, any: true }, new Set([...shown].filter((id) => id !== FAREWELL)))
+  assert.equal(gone.selected, null)
+  assert.deepEqual(gone.order, ANCHORS.filter((id) => id !== FAREWELL))
+  assert.deepEqual(builder.pickStart({ label: ' ', candidates: ['3', '3', 4, null, '5', '9'], selected: '5' }, new Set(['3', '5'])), { label: 'o componente', order: ['3', '5'], candidates: new Set(['3', '5']), selected: '5', any: false })
+  assert.equal(builder.pickStart({ label: PLACE_LABEL, candidates: ['99'], selected: '99', any: true }, shown), null)
+  const subject = node.pickSubject(FAREWELL, FINANCE.nodes.find((entry) => entry.id === FAREWELL).data)
+  const banner = renderToStaticMarkup(React.createElement(builder.PickBanner, { hintId: 'dica', label: opened.label, selection: subject, steps: opened.order.length, any: opened.any, onStep: () => undefined, onCancel: () => undefined, onConfirm: () => undefined }))
+  assert.match(banner, /Selecione o componente que vem antes do componente novo no canvas\./)
+  assert.match(banner, new RegExp(`Selecionado: <span[^>]*>${escape(subject)}</span>`))
+  assert.doesNotMatch(banner, /<button[^>]*disabled=""[^>]*>Confirmar<\/button>/)
+})
+
+test('the canvas pick starts framed on the suggested component instead of the first candidate, also beside the minimap', () => {
+  const boxes = boxesOf(FINANCE, ANCHORS)
+  const area = { x: 0, y: 92, width: 560, height: 420 }
+  const first = builder.pickFrame(boxes, ANCHORS, null, area, null)
+  assert.ok(frame.shownIn(boxes.get('inicio'), first.view, area, 16))
+  assert.equal(frame.shownIn(boxes.get(FAREWELL), first.view, area, 16), false)
+  const suggested = builder.pickFrame(boxes, ANCHORS, FAREWELL, area, null)
+  assert.ok(frame.shownIn(boxes.get(FAREWELL), suggested.view, area, 16))
+  assert.equal(frame.shownIn(boxes.get('inicio'), suggested.view, area, 16), false)
+  assert.ok(suggested.count > 1)
+  assert.ok(suggested.view.zoom >= 0.4)
+  const anchor = boxes.get(FAREWELL)
+  assert.deepEqual(suggested, frame.frameAround(anchor, [...boxes.values()].filter((box) => box !== anchor), area, LIMITS, 0.4))
+  const corner = { x: 360, y: 362 }
+  assert.ok(frame.overlapsCorner(suggested.bounds, suggested.view, corner))
+  const beside = builder.pickFrame(boxes, ANCHORS, FAREWELL, area, corner)
+  assert.ok(frame.shownIn(boxes.get(FAREWELL), beside.view, area, 16, corner))
+  assert.equal(frame.overlapsCorner(beside.bounds, beside.view, corner), false)
+  assert.deepEqual(builder.pickFrame(boxes, ANCHORS, 'sumiu', area, null), first)
+  assert.equal(builder.pickFrame(new Map(), ANCHORS, FAREWELL, area, null), null)
+})
+
+test('an arranged preview is a new layout of the same components, and an edit, a new component or a new connection is not', () => {
+  const arranged = arrangeFlow(FINANCE, lShape(FINANCE))
+  assert.equal(arranged.moved.length, FINANCE.nodes.length - 1)
+  assert.deepEqual(builder.relaidIds(FINANCE, arranged.flow), arranged.moved)
+  const column = arrangeFlow(arranged.flow, arranged.flow.nodes.map((entry, index) => ({ id: entry.id, col: 0, row: index })))
+  assert.ok(column.moved.length > 0)
+  assert.deepEqual(builder.relaidIds(arranged.flow, column.flow), column.moved)
+  assert.deepEqual(builder.relaidIds(FINANCE, copyOf(FINANCE)), [])
+  assert.deepEqual(builder.relaidIds(arranged.flow, arranged.flow), [])
+  const reordered = copyOf(arranged.flow)
+  for (const entry of reordered.nodes) {
+    entry.data.data = Object.fromEntries(Object.entries(entry.data.data).reverse())
+    entry.data.html = '<p>outro html</p>'
+  }
+  assert.deepEqual(builder.relaidIds(FINANCE, reordered), arranged.moved)
+  const rewritten = copyOf(arranged.flow)
+  rewritten.nodes.find((entry) => entry.id === FAREWELL).data.data.template = 'Até logo.'
+  assert.deepEqual(builder.relaidIds(FINANCE, rewritten), [])
+  const grown = copyOf(arranged.flow)
+  grown.nodes.push(newNode('envio_pergunta', { x: 0, y: 0 }, '40'))
+  assert.deepEqual(builder.relaidIds(FINANCE, grown), [])
+  const rewired = copyOf(arranged.flow)
+  const exit = rewired.edges.find((edge) => edge.source === FAREWELL)
+  exit.target = rewired.nodes.find((entry) => outputHandles(entry).length === 0 && entry.id !== exit.target).id
+  assert.deepEqual(builder.relaidIds(FINANCE, rewired), [])
+  const twin = copyOf(arranged.flow)
+  twin.nodes[1] = { ...twin.nodes[0] }
+  assert.deepEqual(builder.relaidIds(FINANCE, twin), [])
+})
+
+test('an arranged preview frames every component at its new position, where the old view and the focus framing cut the shape', () => {
+  const arranged = arrangeFlow(FINANCE, lShape(FINANCE)).flow
+  const boxes = boxesOf(arranged)
+  const area = { x: 0, y: 92, width: 1000, height: 608 }
+  const untouched = () => assert.fail('o enquadramento do fluxo inteiro não consulta os componentes editados')
+  const whole = builder.previewFrame(boxes, FAREWELL, true, untouched, area)
+  for (const [id, box] of boxes) assert.ok(frame.shownIn(box, whole.view, area, 16), `componente ${id}`)
+  assert.deepEqual(whole, builder.previewFrame(boxes, null, false, untouched, area))
+  assert.deepEqual(whole, builder.previewFrame(boxes, 'sumiu', false, untouched, area))
+  const before = builder.previewFrame(boxesOf(FINANCE), null, false, untouched, area)
+  assert.ok([...boxes.values()].some((box) => !frame.shownIn(box, before.view, area, 16)))
+  const moved = new Set(builder.relaidIds(FINANCE, arranged))
+  const focused = builder.previewFrame(boxes, FAREWELL, false, () => moved, area)
+  assert.ok(frame.shownIn(boxes.get(FAREWELL), focused.view, area, 16))
+  assert.ok(focused.view.zoom >= 0.5)
+  assert.ok([...boxes.values()].some((box) => !frame.shownIn(box, focused.view, area, 16)))
+  assert.equal(builder.previewFrame(new Map(), null, false, untouched, area), null)
 })

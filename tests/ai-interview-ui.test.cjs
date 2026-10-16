@@ -197,6 +197,21 @@ test('edição sem fluxo aberto vira geração e montar agora força o plano atu
   assert.ok(text(state).includes('system:Nenhuma alteração foi necessária no fluxo.'))
 })
 
+test('na montagem, arrange fica como pergunta e não chama a montagem', async () => {
+  const { store, calls } = harness({
+    flow: FLOW,
+    turns: [{ ok: true, turn: { action: 'arrange', message: 'Qual formato você quer para o fluxo?', suggestions: ['Em L', 'Em coluna'], plan: 'Fluxo de boleto.', layout: [{ id: 'n1', col: 0, row: 1 }] } }],
+  })
+  store.send('Organize o fluxo em L')
+  const state = await idle(store)
+  assert.equal(calls.run.length, 0)
+  assert.equal(state.status, 'idle')
+  assert.equal(state.building, null)
+  assert.equal(text(state).at(-1), 'assistant:Qual formato você quer para o fluxo?')
+  assert.deepEqual(state.suggestions, ['Em L', 'Em coluna'])
+  assert.equal(state.plan, 'Fluxo de boleto.')
+})
+
 test('finish encerra com a despedida e encerrar conversa fecha sem chamar a IA', async () => {
   const { store, calls } = harness({ turns: [ask('Qual o nome da empresa?', ['lucas-lima.xyz'], 'Fluxo.'), act('finish', 'Combinado, até a próxima.', '')] })
   store.send('Crie um fluxo')

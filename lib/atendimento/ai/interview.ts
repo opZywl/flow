@@ -4,6 +4,8 @@ import { z } from "zod"
 import { NOTE_TYPE, START_ID, START_TYPE, categories, componentCatalog, getComponentLabel } from "../catalog"
 import { importFlow, outputHandles } from "../format"
 import type { AtendimentoFlow } from "../types"
+import { ARRANGE_LIMIT } from "./arrange"
+import type { LayoutCell } from "./arrange"
 import { DEFAULT_FILL, LIMITS, RI_LIMITS } from "./contracts"
 import type { Effort, GenerateFailure } from "./contracts"
 import { flowToRi } from "./edit"
@@ -19,7 +21,7 @@ export interface InterviewMessage {
   text: string
 }
 
-export type InterviewAction = "ask" | "generate" | "edit" | "finish"
+export type InterviewAction = "ask" | "generate" | "edit" | "finish" | "arrange"
 
 export type InterviewScope = "builder" | "copilot"
 
@@ -28,6 +30,7 @@ export interface InterviewPick {
   candidates: string[]
   ready: boolean
   any: boolean
+  selected?: string
 }
 
 export interface InterviewTurn {
@@ -36,6 +39,12 @@ export interface InterviewTurn {
   action: InterviewAction
   plan: string
   pick?: InterviewPick | null
+  layout?: LayoutCell[]
+}
+
+export interface InterviewReply extends InterviewTurn {
+  adds?: boolean
+  after?: string
 }
 
 export interface SettleContext {
@@ -72,6 +81,13 @@ export type InterviewMessagesInput = Pick<InterviewInput, "history" | "flow" | "
 
 export const INTERVIEW_ACTIONS: readonly InterviewAction[] = ["ask", "generate", "edit", "finish"]
 
+const COPILOT_ACTIONS: readonly InterviewAction[] = [...INTERVIEW_ACTIONS, "arrange"]
+
+export const PLACE_LABEL = "o componente que vem antes do componente novo"
+export const PLACE_PROPOSED = "Antes de editar, confirme no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado, e a minha sugestão já está marcada."
+export const PLACE_ASK = "Antes de editar, selecione no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado."
+export const ARRANGE_LOST = "Qual formato você quer para o fluxo? Por exemplo: em L, em coluna ou como uma casa."
+
 export const INTERVIEW_SCHEMA_NAME = "turno_conversa"
 export const INTERVIEW_SCHEMA_DESCRIPTION = "Próxima fala do assistente que monta o fluxo de atendimento conversando"
 
@@ -88,8 +104,9 @@ const TURN_FIELDS = {
 
 export const interviewSchema: z.ZodType<InterviewTurn> = z.object(TURN_FIELDS)
 
-export const copilotSchema: z.ZodType<InterviewTurn> = z.object({
+export const copilotSchema: z.ZodType<InterviewReply> = z.object({
   ...TURN_FIELDS,
+  action: z.enum(["ask", "generate", "edit", "finish", "arrange"]).describe("ask pergunta, edit altera o fluxo aberto, arrange muda só as posições dos componentes no canvas, finish encerra a conversa"),
   pick: z
     .object({
       label: z.string().describe("O que o usuário seleciona no canvas, com o artigo, como o menu de opções ou a mensagem"),
@@ -99,6 +116,17 @@ export const copilotSchema: z.ZodType<InterviewTurn> = z.object({
     })
     .nullable()
     .describe("Seleção no canvas, com ask, quando mais de um componente do resumo serve para o pedido ou quando o pedido cria um componente sem dizer o ponto do fluxo; null nas outras respostas"),
+  adds: z.boolean().describe("true quando plan cria componentes novos no caminho do atendimento; false nas outras respostas"),
+  after: z.string().describe("ID do resumo do fluxo do componente que fica logo antes dos componentes novos: o ponto que o usuário indicou ou a sua sugestão; vazio quando nada novo é criado"),
+  layout: z
+    .array(
+      z.object({
+        id: z.string().describe("ID do componente, como aparece no resumo do fluxo"),
+        col: z.number().int().describe(`Coluna da célula, de 0 a ${ARRANGE_LIMIT}, crescendo para a direita`),
+        row: z.number().int().describe(`Linha da célula, de 0 a ${ARRANGE_LIMIT}, crescendo para baixo`),
+      }),
+    )
+    .describe("Com arrange, uma célula para cada componente do resumo, o Início inclusive, desenhando o formato pedido e seguindo o caminho a partir do Início; vazio nas outras respostas"),
 })
 
 const HISTORY_MESSAGES = 80
@@ -115,7 +143,7 @@ const FLOW_INVALID = "Não foi possível ler o fluxo aberto. Confira o fluxo e t
 const COPILOT_FLOW_MISSING = "Abra um fluxo para o Copiloto editar."
 const CONTINUE = "Continue a conversa a partir do último registro."
 const FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action e plan."
-const COPILOT_FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action, plan e pick."
+const COPILOT_FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action, plan, pick, adds, after e layout."
 const PICK_FALLBACK = "o componente"
 const PICK_LOST = "Em qual componente você quer fazer essa mudança? Escreva o texto que aparece nele."
 const PICK_MESSAGE = "Mais de um componente serve para esse pedido. Em qual deles você quer fazer a mudança?"
@@ -126,6 +154,19 @@ const PICK_CANDIDATE_KEYS = ["candidates", "candidatos", "ids"]
 const PICK_READY_KEYS = ["ready", "pronto", "pronta"]
 const PICK_ANY_KEYS = ["any", "qualquer", "todos"]
 const READY_WORDS = new Set(["true", "sim"])
+const ADDS_KEYS = ["adds", "cria", "novos"]
+const AFTER_KEYS = ["after", "depois", "apos", "após"]
+const LAYOUT_KEYS = ["layout", "celulas", "células", "cells"]
+const CELL_ID_KEYS = ["id", "componente"]
+const CELL_COL_KEYS = ["col", "coluna", "column"]
+const CELL_ROW_KEYS = ["row", "linha"]
+const ARRANGE_MIN = 2
+const PLACE_MARKS = ["Proposta pronta no canvas", "Organização pronta no canvas", "Alterações aplicadas no fluxo"]
+const PLACE_PICKED = "selecionei no canvas"
+const PLACE_WORDS = /(?:^| )(?:depois|antes|apos|entre|no inicio|no comeco|no fim|no final|logo depois|logo apos|em seguida|no lugar de)(?= |$)/
+const PLACE_SELECTED = /(?:^| )(?:logo )?(?:depois|antes|apos) (?:d[oa]|o|a) (?:componente )?selecionad[oa](?= |$)/g
+const PLACE_LOOSE_ID = /(?:\bid\s*[:#]?\s*|#)\d+(?![\p{L}\p{N}_-])/iu
+const PLACE_NAME_MIN = 6
 const ARTICLES = new Set(["o", "a", "os", "as", "um", "uma"])
 const OMITTED = "Mensagens anteriores da conversa foram resumidas no plano."
 const ABORTED = "A resposta foi cancelada."
@@ -136,6 +177,7 @@ const DEFAULT_MESSAGES: Readonly<Record<InterviewAction, string>> = {
   generate: "Vou montar o fluxo com o que combinamos.",
   edit: "Vou aplicar essa mudança no fluxo.",
   finish: "Combinado. Quando precisar de outro ajuste, é só escrever aqui.",
+  arrange: "Vou organizar os componentes no canvas.",
 }
 
 const COPILOT_MESSAGES: Readonly<Record<InterviewAction, string>> = {
@@ -143,6 +185,7 @@ const COPILOT_MESSAGES: Readonly<Record<InterviewAction, string>> = {
   generate: "Vou aplicar essa mudança no fluxo.",
   edit: "Vou aplicar essa mudança no fluxo.",
   finish: "Combinado. Quando precisar de outro ajuste, é só escrever aqui.",
+  arrange: "Vou organizar os componentes no canvas.",
 }
 
 const PREFERRED_KEYS = [
@@ -316,6 +359,10 @@ const COPILOT_LINES = [
   "1. Quando a situação atual indica uma proposta em revisão, o resumo já inclui a proposta, e o pedido seguinte ajusta essa proposta: plan traz só o ajuste.",
   "2. O usuário aplica ou descarta a proposta com os botões Aplicar e Descartar, no cartão da proposta. Quando ele pede para aplicar ou descartar, devolva finish e lembre em uma frase que basta clicar em Aplicar ou em Descartar no cartão.",
   "",
+  "# Ponto do componente novo",
+  "1. O ponto de cada componente novo no caminho do atendimento vem do usuário: dito na conversa, como logo depois da mensagem de boas-vindas, ou escolhido na seleção no canvas. Quando a resposta é edit e o ponto ainda está em aberto, a interface pede a seleção no canvas antes de editar, com a sua sugestão já marcada.",
+  "2. Preencha adds e after em toda resposta. adds fica true quando plan cria componentes novos no caminho do atendimento. after traz o ID, como aparece no resumo, do componente que fica logo antes dos componentes novos: o ponto que o usuário indicou ou, enquanto ele está em aberto, a sua sugestão. Quando nada novo é criado, adds fica false e after fica vazio.",
+  "",
   "# Componente novo sem ponto no fluxo",
   "1. Quando o pedido cria um componente para o caminho do atendimento, como uma mensagem, uma tag ou um menu, sem dizer o ponto do fluxo, antes ou depois de qual componente, peça para o usuário selecionar no canvas o componente que fica antes do novo, mesmo quando um ponto parece o mais provável: devolva ask com pick, com any true e candidates vazio. Servem para essa seleção os componentes que têm saída, o Início inclusive, porque o componente novo se liga à saída do selecionado. A opção nova de um menu entra no menu, e o caminho dela segue dessa opção.",
   "2. Nessa pergunta, message traz a sua proposta para o componente novo, diz que ele entra logo depois do componente selecionado, ou logo antes dele, se o usuário preferir, e termina perguntando o ponto, como: Pensei na mensagem Obrigado pelo contato, volte sempre. Ela entra logo depois do componente que você selecionar, ou logo antes dele, se preferir. Depois de qual componente ela entra?",
@@ -338,14 +385,24 @@ const COPILOT_LINES = [
   "4. Na remoção, plan cita cada componente que sai do fluxo pelo texto e pelo ID que aparecem no resumo, como em: Remova a mensagem Aguarde um instante, ID 7, e ligue a opção Boletos direto à mensagem com o link do boleto, ID 9. Quando o usuário pede para limpar o fluxo, plan pede para remover todos os componentes, citando o ID de cada um, e manter o Início e as notas, como em: Remova todos os componentes, IDs 2, 3, 4, 5 e 6, mantendo o Início e as notas.",
   "",
   "# Ações",
-  "Nesta conversa, as ações são ask, edit e finish.",
+  "Nesta conversa, as ações são ask, edit, arrange e finish.",
   "- ask: falta uma decisão. message traz a proposta e a pergunta, suggestions traz as respostas sugeridas e pick traz a seleção no canvas quando ela se aplica.",
   "- edit: a mudança está clara. message diz em uma frase o que vai mudar, suggestions fica vazio e plan traz o pedido de mudança completo.",
+  "- arrange: o usuário pediu para organizar os componentes no canvas em um formato. message diz em uma frase como os componentes ficam, suggestions e plan ficam vazios e layout traz as células.",
   "- finish: o usuário já tem o que precisa, inclusive quando decide manter o fluxo como está. message traz uma despedida curta e suggestions fica vazio.",
+  "",
+  "# Organização no canvas",
+  `1. Quando o usuário pede para organizar, arrumar ou posicionar os componentes em um formato, como L, U, T, casa, coluna, linha, grade, escada, zigue-zague, círculo ou qualquer desenho, devolva arrange com layout: uma célula para cada componente do resumo, o Início inclusive, com col e row inteiros, de 0 a ${ARRANGE_LIMIT}, que desenham o formato. col cresce para a direita e row cresce para baixo.`,
+  "2. Distribua as células seguindo o caminho a partir do Início, com cada componente ao lado do anterior no desenho. Quando o pedido vem sem formato, organize em colunas pelo caminho: col cresce a cada passo a partir do Início, e cada saída de um menu segue em uma row.",
+  "3. Um L é uma coluna que desce e, no fim, a última linha seguindo para a direita. Com 6 componentes: col 0 de row 0 a row 3 e, na row 3, col 1 e col 2.",
+  "4. Uma casa tem paredes em quadrado e um telhado em triângulo em cima delas, desenhados pelo contorno a partir do Início. Com 12 componentes: a parede da esquerda em col 0, de row 4 a row 2, o telhado em col 1 row 1, col 2 row 0 e col 3 row 1, a parede da direita em col 4, de row 2 a row 4, e a base em row 4, de col 3 a col 1.",
+  "5. A organização muda só as posições no canvas. Quando o pedido também cria, altera ou remove componentes, faça a edição primeiro e organize depois que o usuário aplicar a proposta.",
+  "6. Nas outras respostas, layout fica vazio.",
   "",
   "# Registros da interface",
   "A interface escreve no histórico, como falas suas, o que acontece com cada pedido:",
   "- proposta pronta no canvas, com a contagem das mudanças: Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.",
+  "- organização pronta no canvas, com a contagem dos componentes movidos: Organização pronta no canvas: 5 componentes movidos.",
   "- proposta aplicada ao fluxo aberto: Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.",
   "- proposta descartada: Proposta descartada. O fluxo aberto não mudou.",
   "- pedido cancelado antes de a proposta ficar pronta: Pedido cancelado. O fluxo aberto não mudou.",
@@ -575,18 +632,42 @@ function coercePick(value: unknown): InterviewPick | null {
   }
 }
 
-function coerceTurn(value: unknown, copilot = false): InterviewTurn | null {
+function cellIndex(value: unknown): number | null {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN
+  return Number.isFinite(number) ? Math.min(ARRANGE_LIMIT, Math.max(0, Math.round(number))) : null
+}
+
+function coerceLayout(value: unknown): LayoutCell[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return []
+    const id = asText(pick(entry, CELL_ID_KEYS)).trim()
+    const col = cellIndex(pick(entry, CELL_COL_KEYS))
+    const row = cellIndex(pick(entry, CELL_ROW_KEYS))
+    return id && col !== null && row !== null ? [{ id, col, row }] : []
+  })
+}
+
+function coerceTurn(value: unknown, copilot = false): InterviewReply | null {
   if (!isRecord(value)) return null
   const rawSuggestions = pick(value, ["suggestions", "sugestoes", "sugestões", "options", "opcoes", "opções"])
   const suggestions = Array.isArray(rawSuggestions) ? rawSuggestions.map(asText) : typeof rawSuggestions === "string" && rawSuggestions.trim() ? [rawSuggestions] : []
   const rawAction = asText(pick(value, ["action", "acao", "ação"])).trim().toLowerCase()
+  const actions: readonly string[] = copilot ? COPILOT_ACTIONS : INTERVIEW_ACTIONS
   const turn: InterviewTurn = {
     message: asText(pick(value, ["message", "mensagem", "pergunta", "question", "text"])),
     suggestions,
-    action: (INTERVIEW_ACTIONS as readonly string[]).includes(rawAction) ? (rawAction as InterviewAction) : "ask",
+    action: actions.includes(rawAction) ? (rawAction as InterviewAction) : "ask",
     plan: asText(pick(value, ["plan", "plano", "description", "descricao", "descrição"])),
   }
-  return copilot ? { ...turn, pick: coercePick(pick(value, PICK_KEYS)) } : turn
+  if (!copilot) return turn
+  return {
+    ...turn,
+    pick: coercePick(pick(value, PICK_KEYS)),
+    adds: READY_WORDS.has(asText(pick(value, ADDS_KEYS)).trim().toLowerCase()),
+    after: asText(pick(value, AFTER_KEYS)).trim(),
+    layout: coerceLayout(pick(value, LAYOUT_KEYS)),
+  }
 }
 
 function repairTurnText(text: string, copilot = false): string | null {
@@ -603,16 +684,29 @@ function partialPick(value: unknown): InterviewPick | null | undefined {
   return { label: typeof value.label === "string" ? tidy(value.label) : "", candidates: candidates.map((entry) => entry.trim()).filter(Boolean), ready: value.ready === true, any: value.any === true }
 }
 
-function partialTurn(value: unknown, copilot = false): Partial<InterviewTurn> | null {
+function partialLayout(value: readonly unknown[]): LayoutCell[] {
+  return value.flatMap((entry) => {
+    if (!isRecord(entry) || typeof entry.id !== "string" || !entry.id.trim() || typeof entry.col !== "number" || typeof entry.row !== "number") return []
+    const col = cellIndex(entry.col)
+    const row = cellIndex(entry.row)
+    return col === null || row === null ? [] : [{ id: entry.id.trim(), col, row }]
+  })
+}
+
+function partialTurn(value: unknown, copilot = false): Partial<InterviewReply> | null {
   if (!isRecord(value)) return null
-  const partial: Partial<InterviewTurn> = {}
+  const partial: Partial<InterviewReply> = {}
+  const actions: readonly string[] = copilot ? COPILOT_ACTIONS : INTERVIEW_ACTIONS
   if (typeof value.message === "string") partial.message = tidy(value.message)
   if (Array.isArray(value.suggestions)) partial.suggestions = cleanSuggestions(value.suggestions.filter((entry): entry is string => typeof entry === "string"))
-  if (typeof value.action === "string" && (INTERVIEW_ACTIONS as readonly string[]).includes(value.action)) partial.action = value.action as InterviewAction
+  if (typeof value.action === "string" && actions.includes(value.action)) partial.action = value.action as InterviewAction
   if (typeof value.plan === "string") partial.plan = value.plan
   if (copilot) {
     const selection = partialPick(value.pick)
     if (selection !== undefined) partial.pick = selection
+    if (typeof value.adds === "boolean") partial.adds = value.adds
+    if (typeof value.after === "string") partial.after = value.after.trim()
+    if (Array.isArray(value.layout)) partial.layout = partialLayout(value.layout)
   }
   return partial
 }
@@ -657,9 +751,13 @@ function pickLabel(value: unknown): string {
   return ARTICLES.has(first.toLowerCase()) ? `${first.toLowerCase()}${label.slice(first.length)}` : label
 }
 
+function distinct(ids: readonly string[]): number {
+  return new Set(ids.filter((id) => typeof id === "string" && id.trim())).size
+}
+
 function settlePick(value: unknown, ids: readonly string[], plan: string, anchors: readonly string[] = ids): InterviewPick | null {
   if (!isRecord(value)) return null
-  if (value.any === true) return new Set(anchors.filter((id) => typeof id === "string" && id.trim())).size < PICK_LIMITS.min ? null : { label: pickLabel(value.label), candidates: [], ready: value.ready === true && plan !== "", any: true }
+  if (value.any === true) return distinct(anchors) < PICK_LIMITS.min ? null : { label: pickLabel(value.label), candidates: [], ready: value.ready === true && plan !== "", any: true }
   if (!Array.isArray(value.candidates)) return null
   const resolve = idResolver(ids)
   const candidates: string[] = []
@@ -680,9 +778,95 @@ function asksSelection(text: string): boolean {
   return (/\b(selecione|selecionar|escolha|escolher|clique)\b/i.test(text) && /\bcanvas\b/i.test(text)) || (/\bselecione\b/i.test(text) && /\bconfirm(e|ar)\b/i.test(text))
 }
 
+const escapeId = (id: string) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
 function citesId(plan: string, id: string): boolean {
-  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  return new RegExp(`\\b[Ii][Dd][Ss]?(?!\\p{L})\\s*[:#]?\\s*(?:[^\\s,;:.()]+\\s*(?:,|\\be\\b|\\bou\\b)\\s*)*${escaped}(?![\\p{L}\\p{N}_-])`, "u").test(plan)
+  return new RegExp(`\\b[Ii][Dd][Ss]?(?!\\p{L})\\s*[:#]?\\s*(?:[^\\s,;:.()]+\\s*(?:,|\\be\\b|\\bou\\b)\\s*)*${escapeId(id)}(?![\\p{L}\\p{N}_-])`, "u").test(plan)
+}
+
+function hashesId(text: string, id: string): boolean {
+  return new RegExp(`#${escapeId(id)}(?![\\p{L}\\p{N}_-])`, "u").test(text)
+}
+
+function plainText(text: string): string {
+  return foldText(text).replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+}
+
+function spoken(message: unknown, role: InterviewMessage["role"]): string | null {
+  return isRecord(message) && message.role === role && typeof message.text === "string" ? message.text : null
+}
+
+function placeWindow(history: readonly InterviewMessage[]): string[] {
+  if (!Array.isArray(history)) return []
+  let start = 0
+  history.forEach((message, index) => {
+    const text = spoken(message, "assistant")
+    if (text !== null && PLACE_MARKS.some((mark) => text.includes(mark))) start = index + 1
+  })
+  return history.slice(start).flatMap((message) => {
+    const text = spoken(message, "user")
+    return text === null ? [] : [text]
+  })
+}
+
+function placeNames(texts: ReadonlyMap<string, string> | undefined, known: readonly string[] | null): string[] {
+  if (!(texts instanceof Map)) return []
+  const names = new Set<string>()
+  for (const [id, text] of texts) {
+    if (typeof text !== "string" || (known && !known.includes(id))) continue
+    const quoted = [...text.matchAll(/“([^”]*)”/g)].map((match) => match[1])
+    for (const part of quoted.length ? quoted : [text]) {
+      const name = plainText(part)
+      if (name.length >= PLACE_NAME_MIN) names.add(name)
+    }
+  }
+  return [...names]
+}
+
+export function placeGiven(history: readonly InterviewMessage[], texts?: ReadonlyMap<string, string>, ids?: Iterable<string>): boolean {
+  const said = placeWindow(history)
+  if (!said.length) return false
+  const known = ids === undefined || ids === null ? null : [...ids].filter((id) => typeof id === "string" && id.trim() !== "")
+  const names = placeNames(texts, known)
+  return said.some((text) => {
+    if (text.split("\n").some((line) => plainText(line).startsWith(PLACE_PICKED))) return true
+    const plain = plainText(text)
+    if (PLACE_WORDS.test(plain.replace(PLACE_SELECTED, " "))) return true
+    if (known ? known.some((id) => citesId(text, id) || hashesId(text, id)) : PLACE_LOOSE_ID.test(text)) return true
+    const padded = ` ${plain} `
+    return names.some((name) => padded.includes(` ${name} `))
+  })
+}
+
+function placeTurn(said: string, plan: string, after: unknown, anchors: readonly string[]): InterviewTurn {
+  const proposed = idResolver(anchors)(asText(after))
+  const pick: InterviewPick = { label: PLACE_LABEL, candidates: [], ready: true, any: true, ...(proposed === undefined ? {} : { selected: proposed }) }
+  const message = said.endsWith("?") ? said : proposed === undefined ? PLACE_ASK : PLACE_PROPOSED
+  return { message, suggestions: [], action: "ask", plan, pick }
+}
+
+function settleLayout(value: unknown, ids: readonly string[]): LayoutCell[] {
+  if (!Array.isArray(value)) return []
+  const resolve = idResolver(ids)
+  const cells: LayoutCell[] = []
+  const seen = new Set<string>()
+  for (const entry of value) {
+    if (!isRecord(entry)) continue
+    const id = resolve(asText(entry.id))
+    const col = cellIndex(entry.col)
+    const row = cellIndex(entry.row)
+    if (id === undefined || col === null || row === null || seen.has(id)) continue
+    seen.add(id)
+    cells.push({ id, col, row })
+  }
+  return cells
+}
+
+function settleArrange(raw: InterviewReply, ids: readonly string[], said: string, plan: string, chips: readonly string[]): InterviewTurn {
+  const layout = settleLayout(raw.layout, ids)
+  if (layout.length >= ARRANGE_MIN) return { message: said || COPILOT_MESSAGES.arrange, suggestions: [], action: "arrange", plan: "", layout }
+  if (said.endsWith("?")) return { message: said, suggestions: cleanSuggestions(chips), action: "ask", plan }
+  return { message: ARRANGE_LOST, suggestions: [], action: "ask", plan }
 }
 
 function wordsOf(text: string): Set<string> {
@@ -712,23 +896,34 @@ function settleMessage(said: string, fallback: string, selection: InterviewPick 
   return selection ? (selection.any ? PICK_ANY_MESSAGE : PICK_MESSAGE) : fallback
 }
 
-export function settleTurn(raw: InterviewTurn, context: SettleContext): InterviewTurn {
+function placeOpen(context: SettleContext, ids: readonly string[], anchors: readonly string[]): boolean {
+  return distinct(anchors) >= PICK_LIMITS.min && !placeGiven(context.history, context.texts, context.ids === undefined ? undefined : ids)
+}
+
+export function settleTurn(raw: InterviewReply, context: SettleContext): InterviewTurn {
   const copilot = context.scope === "copilot"
   const ids = [...(context.ids ?? [])]
+  const chips = Array.isArray(raw.suggestions) ? raw.suggestions.filter((entry): entry is string => typeof entry === "string") : []
   let action = raw.action
+  if (action === "arrange" && !copilot) action = "ask"
   if (action === "generate" && (copilot || context.hasFlow)) action = "edit"
   else if (action === "edit" && !copilot && !context.hasFlow) action = "generate"
-  let plan = clipPlan(raw.plan)
+  let plan = clipPlan(asText(raw.plan))
   if ((action === "generate" || action === "edit") && !plan && !copilot) plan = clipPlan(userText(context.history, action === "edit"))
-  let said = tidy(raw.message)
-  const offered = copilot && action !== "finish" ? settlePick(raw.pick, ids, plan, context.anchors === undefined ? ids : [...context.anchors]) : null
-  if (offered && action === "edit" && !(offered.any ? ids : offered.candidates).some((id) => citesId(plan, id))) {
+  let said = tidy(asText(raw.message))
+  if (action === "arrange") return settleArrange(raw, ids, said, plan, chips)
+  const anchors = context.anchors === undefined ? ids : [...context.anchors]
+  const offered = copilot && action !== "finish" ? settlePick(raw.pick, ids, plan, anchors) : null
+  const unplaced = offered !== null && action === "edit" && !(offered.any ? ids : offered.candidates).some((id) => citesId(plan, id))
+  const listed = unplaced && offered !== null && !offered.any
+  if (copilot && action === "edit" && raw.adds === true && !listed && placeOpen(context, ids, anchors)) return placeTurn(said, plan, raw.after, anchors)
+  if (unplaced) {
     action = "ask"
     if (!asksSelection(said) && !said.endsWith("?")) said = ""
   }
   const selection = action === "ask" ? offered : null
   const lost = copilot && action === "ask" && !selection && (wantedPick(raw.pick) || asksSelection(said))
-  const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : selection && !selection.any ? pickSuggestions(raw.suggestions, selection.candidates, context.texts) : cleanSuggestions(raw.suggestions)
+  const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : selection && !selection.any ? pickSuggestions(chips, selection.candidates, context.texts) : cleanSuggestions(chips)
   const message = settleMessage(said, (copilot ? COPILOT_MESSAGES : DEFAULT_MESSAGES)[action], selection, lost)
   return selection ? { message, suggestions, action, plan, pick: selection } : { message, suggestions, action, plan }
 }
@@ -788,12 +983,12 @@ export function interviewMessages(input: InterviewMessagesInput, systemOptions?:
 }
 
 interface TurnAttempt {
-  turn?: InterviewTurn
+  turn?: InterviewReply
   error?: unknown
 }
 
 interface TurnFormat {
-  schema: z.ZodType<InterviewTurn>
+  schema: z.ZodType<InterviewReply>
   copilot: boolean
   retry: string
 }
@@ -801,8 +996,8 @@ interface TurnFormat {
 const BUILDER_FORMAT: TurnFormat = { schema: interviewSchema, copilot: false, retry: FORMAT_RETRY }
 const COPILOT_FORMAT: TurnFormat = { schema: copilotSchema, copilot: true, retry: COPILOT_FORMAT_RETRY }
 
-async function settleObject(object: PromiseLike<InterviewTurn>, watch: StreamWatch, signal: AbortSignal): Promise<InterviewTurn> {
-  let turn: InterviewTurn
+async function settleObject(object: PromiseLike<InterviewReply>, watch: StreamWatch, signal: AbortSignal): Promise<InterviewReply> {
+  let turn: InterviewReply
   try {
     turn = await Promise.race([object, unfinished()])
   } catch (error) {
@@ -852,7 +1047,7 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
   }
 }
 
-async function converse(setup: ModelSetup, messages: ModelMessage[], hooks: InterviewHooks, format: TurnFormat): Promise<InterviewTurn> {
+async function converse(setup: ModelSetup, messages: ModelMessage[], hooks: InterviewHooks, format: TurnFormat): Promise<InterviewReply> {
   let relaxed = 0
   let corrected = false
   let dropped = 0

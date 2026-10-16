@@ -22,8 +22,10 @@ Module._load = function loadStub(request, ...rest) {
 }
 
 const copilot = require('../src/flow/ai/copilot-store.ts')
-const { importFlow, newFlow, newNode } = require('../lib/atendimento/format.ts')
+const { behaviorSignature, importFlow, newFlow, newNode } = require('../lib/atendimento/format.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
+const { arrangeFlow } = require('../lib/atendimento/ai/arrange.ts')
+const { PLACE_LABEL, PLACE_PROPOSED } = require('../lib/atendimento/ai/interview.ts')
 const { applyEdit, diffFlows, flowToRi } = require('../lib/atendimento/ai/edit.ts')
 const { previewEdit } = require('../lib/atendimento/ai/preview.ts')
 const { documentKey, keyWarning, nodeSubject, nodeText } = require('../src/flow/ai/generation-client.ts')
@@ -1366,6 +1368,7 @@ test('an ask with pick keeps the question, the suggestions and the plan and list
       { id: FAREWELL.id, text: nodeSubject(FAREWELL) },
     ],
     selected: null,
+    proposed: null,
     ready: false,
     any: false,
   })
@@ -2538,13 +2541,14 @@ test('the pick box shows the hint, one pressed button per candidate and confirms
   const React = require('react')
   const { renderToStaticMarkup } = require('react-dom/server')
   const panel = loadPanel()
-  const pick = { label: 'a mensagem', candidates: [{ id: WELCOME.id, text: nodeSubject(WELCOME) }, { id: FAREWELL.id, text: nodeSubject(FAREWELL) }], selected: null }
+  const pick = { label: 'a mensagem', candidates: [{ id: WELCOME.id, text: nodeSubject(WELCOME) }, { id: FAREWELL.id, text: nodeSubject(FAREWELL) }], selected: null, proposed: null }
   const render = (extra = {}) =>
     renderToStaticMarkup(React.createElement(panel.PickBox, { id: 'escolha', pick, onCanvas: true, disabled: false, onSelect: () => undefined, onCancel: () => undefined, onConfirm: () => undefined, ...extra }))
   let html = render()
   assert.equal(panel.PICK_REGION, 'Seleção do componente')
   assert.match(html, /^<div role="region" aria-label="Seleção do componente"/)
   assert.ok(html.includes('Selecione a mensagem no canvas ou na lista e confirme.'))
+  assert.ok(!html.includes('Sugestão do Copiloto'))
   assert.doesNotMatch(html, /[!—–]/)
   let buttons = markupButtons(html)
   assert.deepEqual(buttons.map((button) => button.text), [nodeSubject(WELCOME), nodeSubject(FAREWELL), 'Cancelar seleção', 'Confirmar seleção'])
@@ -2816,12 +2820,12 @@ test('flowOrder lists the components from Iniciar Fluxo along the outputs in ord
 
 test('a pick with any true takes every component with an output as a candidate, Iniciar Fluxo included, the notes and the components without an output left out, whatever candidates come listed', () => {
   const all = { label: 'o componente', candidates: [], ready: true, any: true }
-  assert.deepEqual(copilot.readPick(all, NOTED), { label: 'o componente', candidates: offered(BASE), selected: null, ready: true, any: true })
+  assert.deepEqual(copilot.readPick(all, NOTED), { label: 'o componente', candidates: offered(BASE), selected: null, proposed: null, ready: true, any: true })
   assert.equal(copilot.readPick(all, NOTED).candidates[0].text, START_SUBJECT)
   assert.deepEqual(copilot.readPick(all, NOTED).candidates.map((candidate) => candidate.id), OUTLETS.map((node) => node.id))
   assert.ok(![AGENDA.id, END.id].some((id) => copilot.readPick(all, NOTED).candidates.some((candidate) => candidate.id === id)), 'Transferir para Departamento e Encerrar Conversa não têm saída')
   assert.deepEqual(copilot.readPick({ ...all, candidates: [FAREWELL.id, NOTE.id, 'nao_existe'] }, NOTED).candidates, offered(BASE))
-  assert.deepEqual(copilot.readPick({ ...all, candidates: undefined, ready: false, label: '' }, BASE), { label: copilot.PICK_LABEL, candidates: offered(BASE), selected: null, ready: false, any: true })
+  assert.deepEqual(copilot.readPick({ ...all, candidates: undefined, ready: false, label: '' }, BASE), { label: copilot.PICK_LABEL, candidates: offered(BASE), selected: null, proposed: null, ready: false, any: true })
   assert.equal(copilot.readPick(all, BLANK), null)
   assert.equal(copilot.readPick(all, NOTES_ONLY), null)
   assert.deepEqual(copilot.readPick(all, STARTED).candidates.map((candidate) => candidate.id), copilot.anchors(STARTED).map((node) => node.id))
@@ -2836,7 +2840,7 @@ test('an any pick lists the components with an output, and Iniciar Fluxo confirm
   store.send(ANY_REQUEST)
   let state = await settled(store)
   assert.deepEqual(texts(state), [`user:${ANY_REQUEST}`, `assistant:${ANY_QUESTION}`])
-  assert.deepEqual(state.pick, { label: 'o componente', candidates: offered(BASE), selected: null, ready: true, any: true })
+  assert.deepEqual(state.pick, { label: 'o componente', candidates: offered(BASE), selected: null, proposed: null, ready: true, any: true })
   assert.deepEqual(state.pick.candidates.map((candidate) => candidate.id), OUTLETS.map((node) => node.id))
   assert.equal(state.plan, ANY_READY)
   assert.deepEqual(state.suggestions, ANY_CHIPS)
@@ -3140,4 +3144,505 @@ test('a refinement of a pending proposal reserves the ids the proposal removed, 
   assert.equal(env.requests.length, 2)
   assert.deepEqual(env.requests[1].request.base.nodes.map((node) => node.id), without.nodes.map((node) => node.id))
   assert.deepEqual([...env.requests[1].request.reserved].sort(), [...gone].sort())
+})
+
+const PLACE_REQUEST = 'acrescente uma pergunta de CPF'
+const PLACE_ASKED = 'Qual texto você quer na pergunta de CPF?'
+const FAREWELL_PLAN = `Logo depois da despedida, ID ${FAREWELL.id}, acrescente uma pergunta pedindo o CPF do cliente.`
+const MENU_PLAN = `Na opção Encerrar do menu Como podemos ajudar?, ID ${MENU_NODE.id}, acrescente um aviso antes da despedida.`
+const placed = (selected, plan = ANY_PLAN, extra = {}) => ({
+  ok: true,
+  turn: { action: 'ask', message: PLACE_PROPOSED, suggestions: [], plan, pick: { label: PLACE_LABEL, candidates: [], ready: true, any: true, ...(selected === undefined ? {} : { selected }), ...extra } },
+})
+const ARRANGE_REQUEST = 'organiza o fluxo em L'
+const ARRANGE_MESSAGE = 'Organizei o fluxo em L: o Início e os passos seguintes descem em coluna, e a última linha segue para a direita.'
+const L_CELLS = [
+  { id: START.id, col: 0, row: 0 },
+  { id: WELCOME.id, col: 0, row: 1 },
+  { id: MENU_NODE.id, col: 0, row: 2 },
+  { id: AGENDA.id, col: 0, row: 3 },
+  { id: FAREWELL.id, col: 1, row: 3 },
+  { id: END.id, col: 2, row: 3 },
+]
+const columnOf = (flow) => copilot.flowOrder(flow).map((node, row) => ({ id: node.id, col: 0, row }))
+const arranging = (layout = L_CELLS, message = ARRANGE_MESSAGE) => ({ ok: true, turn: { action: 'arrange', message, suggestions: [], plan: '', layout } })
+const positions = (flow) => flow.nodes.map((node) => [node.id, node.position.x, node.position.y])
+const listItems = (html) => [...html.matchAll(/<li([^>]*)>(.*?)<\/li>/g)].map((match) => stripTags(match[2]))
+
+test('readPick takes the component the Copiloto suggests as the selected and proposed one only when it is one of the candidates', () => {
+  const place = { label: PLACE_LABEL, candidates: [], ready: true, any: true }
+  assert.equal(PLACE_LABEL, 'o componente que vem antes do componente novo')
+  assert.deepEqual(copilot.readPick({ ...place, selected: WELCOME.id }, NOTED), { label: PLACE_LABEL, candidates: offered(BASE), selected: WELCOME.id, proposed: WELCOME.id, ready: true, any: true })
+  assert.equal(copilot.readPick({ ...place, selected: START.id }, BASE).proposed, START.id)
+  for (const selected of [AGENDA.id, END.id, NOTE.id, 'nao_existe', '', null, undefined, 7, {}]) {
+    const pick = copilot.readPick({ ...place, selected }, NOTED)
+    assert.deepEqual([pick.selected, pick.proposed], [null, null], `selected ${JSON.stringify(selected)}`)
+  }
+  const listed = { label: 'a mensagem', candidates: [WELCOME.id, FAREWELL.id] }
+  assert.deepEqual(copilot.readPick({ ...listed, selected: FAREWELL.id }, BASE), {
+    label: 'a mensagem',
+    candidates: [
+      { id: WELCOME.id, text: nodeSubject(WELCOME) },
+      { id: FAREWELL.id, text: nodeSubject(FAREWELL) },
+    ],
+    selected: FAREWELL.id,
+    proposed: FAREWELL.id,
+    ready: false,
+    any: false,
+  })
+  const outside = copilot.readPick({ ...listed, selected: MENU_NODE.id }, BASE)
+  assert.deepEqual([outside.selected, outside.proposed], [null, null])
+  assert.equal(copilot.readPick({ ...place, selected: WELCOME.id }, BLANK), null)
+})
+
+test('a place question arrives with the suggestion of the Copiloto selected, and Confirmar seleção on it edits right away with the plan, the selection and the focus on it', async () => {
+  const { store, env } = harness({ turns: [placed(WELCOME.id)], outcomes: [received(CPF_AFTER)] })
+  assert.equal(store.send(PLACE_REQUEST), true)
+  let state = await settled(store)
+  assert.deepEqual(texts(state), [`user:${PLACE_REQUEST}`, `assistant:${PLACE_PROPOSED}`])
+  assert.deepEqual(state.pick, { label: PLACE_LABEL, candidates: offered(BASE), selected: WELCOME.id, proposed: WELCOME.id, ready: true, any: true })
+  assert.equal(state.plan, ANY_PLAN)
+  assert.deepEqual(state.suggestions, [])
+  assert.equal(state.thinking, false)
+  assert.equal(env.requests.length, 0)
+  assert.deepEqual(env.previews, [])
+
+  assert.equal(store.selectPick(FAREWELL.id), true)
+  assert.equal(store.selectPick(null), true)
+  assert.equal(store.confirmPick(), false)
+  assert.equal(store.selectPick(WELCOME.id), true)
+  assert.equal(store.getState().pick.proposed, WELCOME.id)
+  assert.equal(store.confirmPick(), true)
+  state = store.getState()
+  assert.equal(state.running, true)
+  assert.equal(state.thinking, false)
+  assert.equal(state.pick, null)
+  assert.deepEqual(texts(state), [`user:${PLACE_REQUEST}`, `assistant:${PLACE_PROPOSED}`, `user:${choice(WELCOME)}`])
+  assert.deepEqual(env.focus, [WELCOME.id])
+  assert.equal(store.confirmPick(), false)
+
+  state = await settled(store)
+  assert.equal(env.turns.length, 1)
+  assert.equal(env.requests.length, 1)
+  assert.equal(env.requests[0].request.prompt, `${ANY_PLAN}\n\n${choice(WELCOME)}`)
+  assert.equal(env.requests[0].request.base, BASE)
+  const proposal = proposals(state)[0].proposal
+  assert.equal(proposal.focus, WELCOME.id)
+  assert.equal(proposal.missed, false)
+  assert.deepEqual(lastPreview(env), { flow: CPF_AFTER, done: true })
+})
+
+test('Confirmar seleção on a component other than the suggestion asks the AI once more, so does a suggestion without a plan or a pick not ready, and a suggested menu still edits right away', async () => {
+  const other = harness({ turns: [placed(WELCOME.id), edited(FAREWELL_PLAN, PICK_EDIT)], outcomes: [received(CHANGED)] })
+  other.store.send(PLACE_REQUEST)
+  await settled(other.store)
+  assert.equal(copilot.branching(BASE, FAREWELL.id), false)
+  other.store.selectPick(FAREWELL.id)
+  let state = other.store.getState()
+  assert.equal(state.pick.selected, FAREWELL.id)
+  assert.equal(state.pick.proposed, WELCOME.id)
+  assert.equal(other.store.confirmPick(), true)
+  state = other.store.getState()
+  assert.equal(state.thinking, true)
+  assert.equal(state.running, false)
+  assert.equal(state.pick, null)
+  assert.equal(other.env.turns.length, 2)
+  assert.deepEqual(other.env.turns[1].history, [
+    { role: 'user', text: PLACE_REQUEST },
+    { role: 'assistant', text: PLACE_PROPOSED },
+    { role: 'user', text: choice(FAREWELL) },
+  ])
+  assert.equal(other.env.turns[1].flow, BASE)
+  assert.equal(other.env.requests.length, 0)
+  state = await settled(other.store)
+  assert.equal(other.env.requests[0].request.prompt, FAREWELL_PLAN)
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+  assert.equal(proposals(state)[0].proposal.missed, false)
+
+  const unplanned = harness({ turns: [placed(WELCOME.id, ''), asked(PLACE_ASKED, [], ANY_PLAN)] })
+  unplanned.store.send(PLACE_REQUEST)
+  await settled(unplanned.store)
+  assert.equal(unplanned.store.getState().plan, '')
+  assert.equal(unplanned.store.getState().pick.proposed, WELCOME.id)
+  assert.equal(unplanned.store.confirmPick(), true)
+  assert.equal(unplanned.store.getState().thinking, true)
+  assert.equal(unplanned.store.getState().running, false)
+  assert.deepEqual(unplanned.env.turns[1].history.at(-1), { role: 'user', text: choice(WELCOME) })
+  await settled(unplanned.store)
+  assert.equal(unplanned.env.requests.length, 0)
+
+  const unready = harness({ turns: [placed(WELCOME.id, ANY_PLAN, { ready: false }), asked(PLACE_ASKED, [], ANY_PLAN)] })
+  unready.store.send(PLACE_REQUEST)
+  await settled(unready.store)
+  assert.equal(unready.store.getState().pick.ready, false)
+  assert.equal(unready.store.confirmPick(), true)
+  assert.equal(unready.store.getState().thinking, true)
+  await settled(unready.store)
+  assert.equal(unready.env.turns.length, 2)
+  assert.equal(unready.env.requests.length, 0)
+
+  const menu = harness({ turns: [placed(MENU_NODE.id, MENU_PLAN)], outcomes: [received(NOTICE_BEFORE)] })
+  menu.store.send(PLACE_REQUEST)
+  await settled(menu.store)
+  assert.equal(copilot.branching(BASE, MENU_NODE.id), true)
+  assert.equal(menu.store.getState().pick.proposed, MENU_NODE.id)
+  assert.equal(menu.store.confirmPick(), true)
+  assert.equal(menu.store.getState().running, true)
+  assert.equal(menu.store.getState().thinking, false)
+  state = await settled(menu.store)
+  assert.equal(menu.env.turns.length, 1)
+  assert.equal(menu.env.requests[0].request.prompt, `${MENU_PLAN}\n\n${choice(MENU_NODE)}`)
+  assert.equal(proposals(state)[0].proposal.focus, MENU_NODE.id)
+})
+
+test('linkPick opens the place pick on the canvas with the suggestion already selected, confirming it there edits right away and confirming another component asks the AI', async () => {
+  const { store, env } = harness({ turns: [placed(WELCOME.id)], outcomes: [received(CPF_AFTER)] })
+  const canvas = fakeCanvas()
+  const unlink = copilot.linkPick(store, canvas)
+  store.send(PLACE_REQUEST)
+  await settled(store)
+  await tick()
+  assert.deepEqual(canvas.calls, [['start', PLACE_LABEL, OUTLETS.map((node) => node.id), WELCOME.id]])
+  assert.equal(canvas.request.any, true)
+  leave(canvas).onConfirm(WELCOME.id)
+  let state = store.getState()
+  assert.equal(state.running, true)
+  assert.equal(state.thinking, false)
+  assert.equal(state.pick, null)
+  assert.equal(state.entries.at(-1).text, choice(WELCOME))
+  assert.deepEqual(env.focus, [WELCOME.id])
+  state = await settled(store)
+  assert.equal(env.turns.length, 1)
+  assert.equal(env.requests[0].request.prompt, `${ANY_PLAN}\n\n${choice(WELCOME)}`)
+  assert.equal(proposals(state)[0].proposal.focus, WELCOME.id)
+  await tick()
+  assert.equal(canvas.calls.length, 1)
+  unlink()
+
+  const other = harness({ turns: [placed(WELCOME.id), asked(PLACE_ASKED, [], FAREWELL_PLAN)] })
+  const board = fakeCanvas()
+  const off = copilot.linkPick(other.store, board)
+  other.store.send(PLACE_REQUEST)
+  await settled(other.store)
+  await tick()
+  board.request.onSelect(FAREWELL.id)
+  state = other.store.getState()
+  assert.equal(state.pick.selected, FAREWELL.id)
+  assert.equal(state.pick.proposed, WELCOME.id)
+  leave(board).onConfirm(FAREWELL.id)
+  assert.equal(other.store.getState().thinking, true)
+  assert.equal(other.store.getState().running, false)
+  await settled(other.store)
+  assert.deepEqual(other.env.turns[1].history.at(-1), { role: 'user', text: choice(FAREWELL) })
+  assert.equal(other.env.requests.length, 0)
+  off()
+})
+
+test('an arrange turn builds the proposal locally, without a generation request, and shows it on the canvas like any proposal', async () => {
+  const panel = loadPanel()
+  const { store, env } = harness({ turns: [arranging(), asked('Quer mudar mais alguma coisa na organização?', ['Pode deixar assim'], '')] })
+  assert.equal(store.send(ARRANGE_REQUEST), true)
+  let state = await settled(store)
+  const expected = arrangeFlow(BASE, L_CELLS)
+  assert.ok(expected.moved.length > 0)
+  assert.equal(env.turns.length, 1)
+  assert.equal(env.requests.length, 0)
+  assert.deepEqual(texts(state), [`user:${ARRANGE_REQUEST}`, `assistant:${ARRANGE_MESSAGE}`, 'proposal:pending'])
+  const entry = proposals(state)[0]
+  const { proposal } = entry
+  assert.equal(state.pending, entry.id)
+  assert.equal(proposal.arranged, true)
+  assert.equal(proposal.moved, expected.moved.length)
+  assert.deepEqual(proposal.flow, expected.flow)
+  assert.notDeepEqual(positions(proposal.flow), positions(BASE))
+  assert.equal(behaviorSignature(proposal.flow), behaviorSignature(BASE))
+  assert.equal(documentKey(proposal.original), documentKey(BASE))
+  assert.equal(documentKey(proposal.base), documentKey(BASE))
+  assert.equal(copilot.proposalApplicable(proposal), true)
+  assert.equal(copilot.proposalTitle(proposal), copilot.ARRANGED_TITLE)
+  assert.equal(copilot.proposalTone(proposal), 'success')
+  assert.equal(copilot.proposalSummary(proposal), `Organização pronta no canvas: ${copilot.movedLabel(expected.moved.length)}.`)
+  assert.equal(state.thinking, false)
+  assert.equal(state.running, false)
+  assert.equal(state.plan, '')
+  assert.deepEqual(state.suggestions, [])
+  assert.equal(state.pick, null)
+  assert.equal(state.attention, null)
+  assert.deepEqual(env.notified, [])
+  assert.deepEqual(lastPreview(env), { flow: proposal.flow, done: true })
+  assert.equal(env.fresh.at(-1), true)
+  assert.equal(env.flow, BASE)
+  assert.deepEqual(env.applied, [])
+  assert.equal(panel.landing(state.entries, state.pending), 'apply')
+  assert.equal(store.editNow(), false)
+
+  store.setVisible(false)
+  assert.equal(lastPreview(env), null)
+  store.setVisible(true)
+  assert.deepEqual(lastPreview(env), { flow: proposal.flow, done: true })
+
+  assert.equal(store.send('Ficou bom'), true)
+  assert.equal(env.turns[1].proposal, true)
+  assert.equal(env.turns[1].flow, proposal.flow)
+  assert.deepEqual(env.turns[1].history, [
+    { role: 'user', text: ARRANGE_REQUEST },
+    { role: 'assistant', text: `${ARRANGE_MESSAGE}\n\n${copilot.proposalSummary(proposal)}` },
+    { role: 'user', text: 'Ficou bom' },
+  ])
+  state = await settled(store)
+  assert.equal(state.pending, entry.id)
+  assert.equal(env.requests.length, 0)
+})
+
+test('an arrangement that arrives with the panel closed asks for attention and reaches the canvas only after the panel opens again', async () => {
+  const answer = delayed(arranging())
+  const { store, env } = harness({ turns: [answer.turn] })
+  store.send(ARRANGE_REQUEST)
+  store.setVisible(false)
+  answer.release.open()
+  const state = await settled(store)
+  const { proposal } = proposals(state)[0]
+  assert.equal(state.pending, proposals(state)[0].id)
+  assert.equal(state.attention, 'ready')
+  assert.deepEqual(env.notified, ['ready'])
+  assert.deepEqual(env.previews, [])
+  assert.equal(env.requests.length, 0)
+  store.setVisible(true)
+  assert.equal(store.getState().attention, null)
+  assert.deepEqual(lastPreview(env), { flow: proposal.flow, done: true })
+})
+
+test('Aplicar applies the arrangement in one step with only the positions changed, and Descartar puts the canvas back on the open flow', async () => {
+  const { store, env } = harness({ turns: [arranging(), turn('finish', 'Combinado.')] })
+  store.send(ARRANGE_REQUEST)
+  let state = await settled(store)
+  const { proposal } = proposals(state)[0]
+  env.flow = { ...BASE, viewport: { x: 120, y: -40, zoom: 0.6 } }
+  const shown = env.previews.length
+  assert.equal(store.apply(), true)
+  assert.equal(env.applied.length, 1)
+  const [applied] = env.applied
+  assert.equal(documentKey(applied), documentKey(importFlow(proposal.flow)))
+  assert.deepEqual(positions(applied), positions(proposal.flow))
+  assert.equal(behaviorSignature(applied), behaviorSignature(BASE))
+  assert.equal(env.previews.length, shown)
+  state = store.getState()
+  assert.equal(state.pending, null)
+  assert.deepEqual(kinds(state), ['user', 'assistant', 'proposal:applied', `note:${copilot.COPILOT_TEXT.applied}`, 'assistant'])
+  assert.equal(state.entries.at(-1).text, copilot.FOLLOW_UP_TEXT)
+  assert.equal(store.apply(), false)
+  assert.equal(store.discard(), false)
+  assert.equal(env.applied.length, 1)
+  assert.equal(env.requests.length, 0)
+
+  store.send('Era só isso')
+  await settled(store)
+  assert.equal(env.turns[1].flow, env.flow)
+  assert.equal(env.turns[1].proposal, false)
+  assert.deepEqual(env.turns[1].history, [
+    { role: 'user', text: ARRANGE_REQUEST },
+    { role: 'assistant', text: [ARRANGE_MESSAGE, copilot.proposalSummary(proposal), copilot.COPILOT_TEXT.applied, copilot.FOLLOW_UP_TEXT].join('\n\n') },
+    { role: 'user', text: 'Era só isso' },
+  ])
+
+  const dropped = harness({ turns: [arranging()] })
+  dropped.store.send(ARRANGE_REQUEST)
+  await settled(dropped.store)
+  assert.ok(lastPreview(dropped.env))
+  assert.equal(dropped.store.discard(), true)
+  state = dropped.store.getState()
+  assert.equal(lastPreview(dropped.env), null)
+  assert.equal(dropped.env.flow, BASE)
+  assert.deepEqual(dropped.env.applied, [])
+  assert.equal(state.pending, null)
+  assert.deepEqual(kinds(state), ['user', 'assistant', 'proposal:discarded', `note:${copilot.COPILOT_TEXT.discarded}`])
+  assert.equal(dropped.store.apply(), false)
+  assert.equal(dropped.env.requests.length, 0)
+})
+
+test('an arrangement asked over a pending proposal arranges the proposal shown on the canvas, marks it as adjusted and applies over the open flow', async () => {
+  const { store, env } = harness({ turns: [edited(), ({ input }) => arranging(columnOf(input.flow), 'Organizei o fluxo em uma coluna.')], outcomes: [received(FIRST)] })
+  store.send('Acrescente a opção Segunda via de boleto')
+  await settled(store)
+  const first = proposals(store.getState())[0]
+  store.send('organiza tudo em coluna')
+  assert.equal(env.turns[1].flow, FIRST)
+  assert.equal(env.turns[1].proposal, true)
+  const state = await settled(store)
+  const expected = arrangeFlow(FIRST, columnOf(FIRST))
+  assert.equal(env.requests.length, 1)
+  assert.deepEqual(kinds(state), ['user', 'assistant', 'proposal:refined', 'user', 'assistant', 'proposal:pending'])
+  assert.equal(state.entries[2].id, first.id)
+  const { proposal } = proposals(state).at(-1)
+  assert.equal(proposal.arranged, true)
+  assert.deepEqual(proposal.flow, expected.flow)
+  assert.equal(proposal.moved, expected.moved.length)
+  assert.equal(documentKey(proposal.original), documentKey(BASE))
+  assert.equal(documentKey(proposal.base), documentKey(FIRST))
+  assert.equal(behaviorSignature(proposal.flow), behaviorSignature(FIRST))
+  assert.deepEqual(lastPreview(env), { flow: proposal.flow, done: true })
+  assert.equal(store.apply(), true)
+  assert.equal(env.applied.length, 1)
+  assert.equal(documentKey(env.applied[0]), documentKey(importFlow(expected.flow)))
+})
+
+test('an arrangement answered after the open flow changed arranges nothing and leaves the outdated note, and a moved component still arranges the open flow', async () => {
+  const late = delayed(arranging())
+  const changed = harness({ turns: [late.turn] })
+  changed.store.send(ARRANGE_REQUEST)
+  changed.env.flow = CHANGED
+  late.release.open()
+  let state = await settled(changed.store)
+  assert.equal(state.pending, null)
+  assert.deepEqual(kinds(state), ['user', `note:${copilot.COPILOT_TEXT.outdated}`])
+  assert.deepEqual(changed.env.previews, [])
+  assert.equal(changed.env.requests.length, 0)
+  assert.deepEqual(changed.env.applied, [])
+
+  const shifted = delayed(arranging())
+  const moved = harness({ turns: [shifted.turn] })
+  moved.store.send(ARRANGE_REQUEST)
+  moved.env.flow = MOVED
+  shifted.release.open()
+  state = await settled(moved.store)
+  const { proposal } = proposals(state)[0]
+  assert.deepEqual(proposal.flow, arrangeFlow(MOVED, L_CELLS).flow)
+  assert.equal(documentKey(proposal.original), documentKey(MOVED))
+  assert.equal(moved.store.apply(), true)
+  assert.equal(documentKey(moved.env.applied[0]), documentKey(importFlow(proposal.flow)))
+})
+
+test('an arrangement that cannot be built shows the error without touching the canvas, and Tentar de novo repeats the turn', async () => {
+  const broken = { get id() { throw new Error('célula inválida') }, col: 0, row: 0 }
+  const { store, env } = harness({ turns: [arranging([broken, ...L_CELLS]), arranging()] })
+  store.send(ARRANGE_REQUEST)
+  let state = await settled(store)
+  assert.deepEqual(kinds(state), ['user', 'error'])
+  const error = state.entries[1]
+  assert.deepEqual(error.failure, copilot.ARRANGE_FAILURE)
+  assert.equal(error.turn, true)
+  assert.equal(state.retry, error.id)
+  assert.equal(state.pending, null)
+  assert.deepEqual(env.previews, [])
+  assert.equal(env.requests.length, 0)
+  for (const text of [copilot.ARRANGE_FAILURE.title, copilot.ARRANGE_FAILURE.details]) assert.match(text, PT_TEXT)
+
+  assert.equal(store.retry(), true)
+  state = await settled(store)
+  assert.equal(env.turns.length, 2)
+  assert.deepEqual(env.turns[1].history, env.turns[0].history)
+  assert.deepEqual(texts(state), [`user:${ARRANGE_REQUEST}`, `assistant:${ARRANGE_MESSAGE}`, 'proposal:pending'])
+  assert.deepEqual(proposals(state)[0].proposal.flow, arrangeFlow(BASE, L_CELLS).flow)
+  assert.equal(env.requests.length, 0)
+})
+
+test('the card of an arrangement shows Organização pronta and a single chip with the moved components, without the change chips or the removed list', () => {
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const panel = loadPanel()
+  const expected = arrangeFlow(BASE, L_CELLS)
+  const label = copilot.movedLabel(expected.moved.length)
+  const render = (extra = {}, status = 'pending') =>
+    renderToStaticMarkup(
+      React.createElement(panel.ProposalCard, {
+        entryId: 'p1',
+        proposal: cardOf({ flow: expected.flow, prompt: '', changes: null, diff: null, arranged: true, moved: expected.moved.length, ...extra }),
+        status,
+        meta: 'GPT',
+        applyId: 'aplicar',
+        canApply: true,
+        canDiscard: true,
+        onApply: () => undefined,
+        onDiscard: () => undefined,
+      }),
+    )
+  let html = render()
+  assert.match(html, new RegExp(`<h3 id="p1-title"[^>]*>${copilot.ARRANGED_TITLE}</h3>`))
+  assert.ok(!html.includes('Edição pronta'))
+  assert.ok(html.includes('border-flow-success/40'))
+  assert.deepEqual(listItems(html), [label])
+  assert.deepEqual(markupButtons(html).map((button) => button.text), ['Descartar', 'Aplicar'])
+  assert.doesNotMatch(stripTags(html), /[!—–]/)
+
+  html = render({ changes: { added: 2, changed: 1, removed: 1 }, removed: [FAREWELL] })
+  assert.deepEqual(listItems(html), [label])
+  assert.ok(!html.includes('Componentes removidos'))
+  assert.doesNotMatch(stripTags(html), /componentes? novos?|alterados?|removidos?/)
+
+  assert.deepEqual(listItems(render({ moved: 1 })), ['1 componente movido'])
+
+  html = render({}, 'applied')
+  assert.ok(html.includes(`>${copilot.ARRANGED_TITLE}</h3>`))
+  assert.ok(html.includes(copilot.STATUS_LABELS.applied))
+  assert.deepEqual(markupButtons(html), [])
+
+  html = renderToStaticMarkup(React.createElement(panel.ProposalCard, { entryId: 'p2', proposal: cardOf(), status: 'pending', meta: 'GPT', applyId: 'aplicar', canApply: true, canDiscard: true, onApply: () => undefined, onDiscard: () => undefined }))
+  assert.deepEqual(listItems(html), ['2 componentes novos', '1 alterado', '0 removidos'])
+  assert.ok(html.includes('>Edição pronta</h3>'))
+})
+
+test('the pick box shows the suggestion of the Copiloto under the hint while a suggestion is set, whatever is selected', () => {
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const panel = loadPanel()
+  const pick = copilot.readPick({ label: PLACE_LABEL, candidates: [], ready: true, any: true, selected: WELCOME.id }, BASE)
+  const render = (extra = {}) =>
+    renderToStaticMarkup(
+      React.createElement(panel.PickBox, { id: 'escolha', pick, onCanvas: true, disabled: false, onSelect: () => undefined, onCancel: () => undefined, onConfirm: () => undefined, onAnswer: () => true, ...extra }),
+    )
+  const line = panel.pickProposed(nodeSubject(WELCOME))
+  assert.equal(line, `Sugestão do Copiloto: ${nodeSubject(WELCOME)}.`)
+  const hint = panel.pickHint(PLACE_LABEL, true, false, true)
+  const subjects = OUTLETS.map((node) => nodeSubject(node))
+  const pressed = (html) => markupButtons(html).flatMap((button) => (button.attrs.includes('aria-pressed="true"') ? [button.text] : []))
+
+  let html = render()
+  let text = stripTags(html)
+  assert.equal(text.split(line).length - 1, 1)
+  assert.ok(text.indexOf(hint) >= 0)
+  assert.ok(text.indexOf(hint) < text.indexOf(line))
+  assert.ok(text.indexOf(line) < text.indexOf(subjects[0]))
+  assert.ok(html.indexOf('Sugestão do Copiloto') < html.indexOf('<ul'))
+  assert.deepEqual(markupButtons(html).map((button) => button.text), [...subjects, 'Cancelar seleção', panel.PICK_OTHER, 'Confirmar seleção'])
+  assert.deepEqual(pressed(html), [nodeSubject(WELCOME)])
+  assert.equal(markupButtons(html).at(-1).disabled, false)
+  assert.doesNotMatch(text, /[!—–]/)
+
+  html = render({ pick: { ...pick, selected: FAREWELL.id } })
+  assert.equal(stripTags(html).split(line).length - 1, 1)
+  assert.deepEqual(pressed(html), [nodeSubject(FAREWELL)])
+
+  html = render({ pick: { ...pick, selected: null } })
+  assert.equal(stripTags(html).split(line).length - 1, 1)
+  assert.deepEqual(pressed(html), [])
+  assert.equal(markupButtons(html).at(-1).disabled, true)
+
+  html = render({ pick: { ...pick, selected: null, proposed: null } })
+  assert.ok(!html.includes('Sugestão do Copiloto'))
+
+  const menu = copilot.readPick({ label: PLACE_LABEL, candidates: [], ready: true, any: true, selected: MENU_NODE.id }, BASE)
+  text = stripTags(render({ pick: menu }))
+  assert.ok(text.includes(panel.pickProposed(nodeSubject(MENU_NODE))))
+  assert.ok(!text.includes(line))
+})
+
+test('the arrangement and suggestion texts are in PT-BR without exclamation marks or dashes', () => {
+  const panel = loadPanel()
+  assert.equal(copilot.ARRANGED_TITLE, 'Organização pronta')
+  assert.match(`${copilot.ARRANGED_TITLE}.`, PT_TEXT)
+  assert.equal(copilot.movedLabel(1), '1 componente movido')
+  assert.equal(copilot.movedLabel(4), '4 componentes movidos')
+  assert.equal(copilot.movedLabel(0), '0 componentes movidos')
+  const arranged = cardOf({ changes: null, diff: null, arranged: true, moved: 4 })
+  assert.equal(copilot.proposalTitle(arranged), copilot.ARRANGED_TITLE)
+  assert.equal(copilot.proposalTitle({ ...arranged, issues: [ISSUE] }), copilot.ARRANGED_TITLE)
+  assert.equal(copilot.proposalSummary(arranged), 'Organização pronta no canvas: 4 componentes movidos.')
+  assert.equal(copilot.proposalSummary({ ...arranged, moved: 1 }), 'Organização pronta no canvas: 1 componente movido.')
+  assert.equal(copilot.proposalSummary({ ...arranged, changes: { added: 0, changed: 4, removed: 0 } }), 'Organização pronta no canvas: 4 componentes movidos.')
+  for (const moved of [1, 4]) assert.match(copilot.proposalSummary({ ...arranged, moved }), PT_TEXT)
+  assert.equal(copilot.proposalTitle(cardOf()), 'Edição pronta')
+  assert.equal(copilot.proposalSummary(cardOf()), 'Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.')
+  assert.equal(panel.pickProposed('o menu de opções'), 'Sugestão do Copiloto: o menu de opções.')
+  for (const node of OUTLETS) assert.match(panel.pickProposed(nodeSubject(node)), PT_TEXT)
+  assert.match(PLACE_PROPOSED, PT_TEXT)
 })
