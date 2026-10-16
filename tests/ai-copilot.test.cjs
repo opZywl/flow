@@ -1327,8 +1327,18 @@ test('the panel renders the empty conversation, the examples, the composer and t
   for (const example of panel.COPILOT_EXAMPLES) assert.doesNotMatch(example, /[!—–]/)
 })
 
+const stripTags = (markup) => {
+  let text = markup
+  let previous
+  do {
+    previous = text
+    text = text.replace(/<[^>]*>|<([a-zA-Z]+)/g, '')
+  } while (text !== previous)
+  return text
+}
+
 const markupButtons = (html) =>
-  [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/g)].map((match) => ({ attrs: match[1], text: match[2].replace(/<[^>]*>/g, '').replace(/</g, ''), disabled: / disabled=""/.test(match[1]) }))
+  [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/g)].map((match) => ({ attrs: match[1], text: stripTags(match[2]), disabled: / disabled=""/.test(match[1]) }))
 
 test('a candidate names the component, a short main text and the ID', () => {
   assert.equal(nodeSubject(FAREWELL), `Enviar Mensagem “Obrigado pelo contato. Até logo.” · ID ${FAREWELL.id}`)
