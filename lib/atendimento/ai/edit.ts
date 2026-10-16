@@ -349,13 +349,18 @@ function sequentialDigits(data: JsonObject): boolean {
 }
 
 function keepDigits(old: JsonObject, data: JsonObject): void {
-  const previous = new Map(optionIndices(old).map((index) => [labelKey(text(old[`text-${index}`])), text(old[`opt-${index}`]).trim()]))
   const indices = optionIndices(data)
+  if (sequentialDigits(old)) {
+    indices.forEach((index, position) => {
+      data[`opt-${index}`] = String(position + 1)
+    })
+    return
+  }
+  const previous = new Map(optionIndices(old).map((index) => [labelKey(text(old[`text-${index}`])), text(old[`opt-${index}`]).trim()]))
   const digits = indices.map((index) => previous.get(labelKey(text(data[`text-${index}`]))) || text(data[`opt-${index}`]).trim())
   if (digits.some((digit) => !digit) || new Set(digits).size !== digits.length) return
-  const order = sequentialDigits(old) && digits.every((digit) => /^\d+$/.test(digit)) ? [...digits].sort((a, b) => Number(a) - Number(b)) : undefined
   indices.forEach((index, position) => {
-    data[`opt-${index}`] = order ? String(order.indexOf(digits[position]) + 1) : digits[position]
+    data[`opt-${index}`] = digits[position]
   })
 }
 
@@ -596,7 +601,8 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
   }
 
   const removal = new Set<string>()
-  const leaving = new Set<string>()
+  const leaving = new Set([...gone].map((id) => id.toLowerCase()))
+  for (const [name, value] of options.ids ?? []) if (gone.has(value)) leaving.add(name.toLowerCase())
   for (const reference of ri.remove) {
     const id = lookup(reference, false)
     const node = id ? nodes.get(id) : undefined
@@ -1040,7 +1046,7 @@ function startLinked(flow: AtendimentoFlow): boolean {
 }
 
 function cleared(original: AtendimentoFlow, result: Pick<EditResult, "flow"> & Partial<Pick<EditResult, "detached">>): boolean {
-  return startLinked(original) && !startLinked(result.flow) && !result.detached?.nodes.length
+  return startLinked(original) && !startLinked(result.flow) && !result.detached?.nodes.length && result.flow.nodes.every((node) => isStart(node) || node.data.type === NOTE_TYPE)
 }
 
 export function reviewEdit(original: AtendimentoFlow, result: Pick<EditResult, "flow" | "notes" | "ids"> & Partial<Pick<EditResult, "detached">>, options: EditFillOptions = {}): EditReview {

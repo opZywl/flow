@@ -315,15 +315,22 @@ test('conexão nova de volta a um menu que já recebe conexão vira Retornar ao 
   assertReturnsValid(result.flow)
 })
 
-test('opções do menu reordenadas acompanham as conexões pelo rótulo e os números das opções se mantêm', () => {
+test('opções do menu reordenadas acompanham as conexões pelo rótulo, e os números seguem a ordem nova no menu em sequência ou ficam com a opção quando são próprios', () => {
   const delta = { nodes: [{ id: MENU.id, type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify([{ text: 'Encerrar' }, { text: 'Agendar consulta' }, { text: 'Boletos' }]) }] }], edges: [] }
   const result = applyEdit(BASE, delta, { now: NOW })
   assert.deepEqual(result.changes, { added: 0, changed: 1, removed: 0 })
   const outputs = Object.fromEntries(result.flow.edges.filter((edge) => edge.source === MENU.id).map((edge) => [edge.sourceHandle, edge.target]))
   assert.deepEqual(outputs, { 'output-0': BYE.id, 'output-1': NOTICE.id, 'output-2': BOLETOS.id })
-  const data = result.flow.nodes.find((node) => node.id === MENU.id).data.data
-  assert.deepEqual([data['opt-1'], data['opt-2'], data['opt-3']], [MENU.data.data['opt-3'], MENU.data.data['opt-1'], MENU.data.data['opt-2']])
+  const digitsOf = (flow) => {
+    const data = flow.nodes.find((node) => node.id === MENU.id).data.data
+    return [data['opt-1'], data['opt-2'], data['opt-3']]
+  }
+  assert.deepEqual(digitsOf(BASE), ['1', '2', '3'])
+  assert.deepEqual(digitsOf(result.flow), ['1', '2', '3'])
   assertNoNewErrors(BASE, result.flow)
+  const custom = JSON.parse(JSON.stringify(BASE))
+  Object.assign(custom.nodes.find((node) => node.id === MENU.id).data.data, { 'opt-1': '7', 'opt-2': '8', 'opt-3': '0' })
+  assert.deepEqual(digitsOf(applyEdit(custom, delta, { now: NOW }).flow), ['0', '7', '8'])
 })
 
 test('trocar o tipo mantém id e posição e atualiza o html', () => {
@@ -599,6 +606,11 @@ test('remove tira um componente do meio com as conexões, e a saída anterior se
   assert.equal(JSON.stringify(fixed.flow.nodes.find((node) => node.id === AGENDA.id)), JSON.stringify(AGENDA))
   assert.deepEqual(fixed.detached, { nodes: [], edges: [], removed: [NOTICE.id] })
   assert.equal(needsEditCorrection(reviewEdit(BASE, fixed)), false)
+
+  const resent = applyEdit(cut.flow, { remove: [NOTICE.id], edges: [{ from: NOTICE.id, output: '', to: AGENDA.id }, { from: MENU.id, output: 'Agendar consulta', to: AGENDA.id }] }, { now: NOW, ids: cut.ids, detached: cut.detached })
+  assert.deepEqual(diffFlows(BASE, resent.flow), { added: [], changed: [MENU.id], removed: [NOTICE.id] })
+  assert.equal(resent.notes.some((note) => note.message.includes('não existe')), false)
+  assert.equal(needsEditCorrection(reviewEdit(BASE, resent)), false)
 })
 
 test('tirar uma opção do menu com remove leva o ramo dela, e as outras opções seguem para os mesmos destinos', () => {
@@ -637,6 +649,8 @@ test('tirar uma opção de um menu numerado em sequência renumera as que ficam,
   const custom = JSON.parse(JSON.stringify(BASE))
   custom.nodes.find((node) => node.id === MENU.id).data.data['opt-3'] = '0'
   assert.deepEqual(digitsOf(applyEdit(custom, delta, { now: NOW }).flow), ['1', '0'])
+  const mixed = { ...delta, nodes: [{ ...menu, config: [menu.config[0], { key: 'options', value: JSON.stringify([{ text: 'Encerrar' }, { text: 'Financeiro' }]) }] }], edges: [{ from: MENU.id, output: 'Encerrar', to: BYE.id }, { from: MENU.id, output: 'Financeiro', to: NOTICE.id }], remove: [BOLETOS.id, VOLTA.id] }
+  assert.deepEqual(digitsOf(applyEdit(BASE, mixed, { now: NOW }).flow), ['1', '2'])
 })
 
 test('limpar o fluxo com remove deixa só o Início e as notas, e o Início sem destino não pede correção', () => {
@@ -676,6 +690,13 @@ test('limpar o fluxo com remove deixa só o Início e as notas, e o Início sem 
   assert.deepEqual(second.detached.nodes, [])
   assert.deepEqual([...second.detached.removed].sort(), [...COMPONENTS].sort())
   assert.equal(needsEditCorrection(reviewEdit(BASE, second)), false)
+
+  const kept = applyEdit(BASE, { remove: COMPONENTS.filter((id) => id !== LOOSE_ID) }, { now: NOW })
+  assert.deepEqual(idsOf(kept.flow), [START_ID, NOTE_ID, LOOSE_ID])
+  assert.deepEqual(kept.detached.nodes, [])
+  const unlinked = reviewEdit(BASE, kept)
+  assert.ok(unlinked.issues.some((issue) => issue.nodeId === START_ID && issue.message.startsWith('Conecte a saída')))
+  assert.equal(needsEditCorrection(unlinked), true)
 })
 
 test('remove ignora ids desconhecidos e o Início, resolve os ids como as conexões e o pedido só com eles continua sem mudança', () => {
