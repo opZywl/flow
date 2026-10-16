@@ -622,6 +622,23 @@ test('tirar uma opção do menu com remove leva o ramo dela, e as outras opçõe
   assert.ok([BOLETOS.id, VOLTA.id].every((id) => idsOf(kept).includes(id)))
 })
 
+test('tirar uma opção de um menu numerado em sequência renumera as que ficam, e números próprios se mantêm', () => {
+  const menu = { id: MENU.id, type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify([{ text: 'Agendar consulta' }, { text: 'Encerrar' }]) }] }
+  const delta = { name: '', description: '', nodes: [menu], edges: [{ from: MENU.id, output: 'Agendar consulta', to: NOTICE.id }, { from: MENU.id, output: 'Encerrar', to: BYE.id }], remove: [BOLETOS.id, VOLTA.id] }
+  const digitsOf = (flow) => {
+    const data = flow.nodes.find((node) => node.id === MENU.id).data.data
+    return Object.keys(data).filter((key) => /^opt-\d+$/.test(key)).map((key) => data[key])
+  }
+  assert.deepEqual(digitsOf(BASE), ['1', '2', '3'])
+  const result = applyEdit(BASE, delta, { now: NOW })
+  assert.deepEqual(digitsOf(result.flow), ['1', '2'])
+  assert.deepEqual(outputsOf(result.flow, MENU.id), { 'output-0': NOTICE.id, 'output-1': BYE.id })
+  assertRoundTrip(result.flow)
+  const custom = JSON.parse(JSON.stringify(BASE))
+  custom.nodes.find((node) => node.id === MENU.id).data.data['opt-3'] = '0'
+  assert.deepEqual(digitsOf(applyEdit(custom, delta, { now: NOW }).flow), ['1', '0'])
+})
+
 test('limpar o fluxo com remove deixa só o Início e as notas, e o Início sem destino não pede correção', () => {
   const delta = { name: '', description: '', nodes: [], edges: [], remove: COMPONENTS }
   const result = applyEdit(BASE, delta, { now: NOW })

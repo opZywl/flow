@@ -344,13 +344,18 @@ function rejectedField(type: string, field: FieldSpec, entries: RiConfigEntry[],
   return fieldSnapshot(field, single.data) === fieldSnapshot(field, baseline)
 }
 
+function sequentialDigits(data: JsonObject): boolean {
+  return optionIndices(data).every((index, position) => text(data[`opt-${index}`]).trim() === String(position + 1))
+}
+
 function keepDigits(old: JsonObject, data: JsonObject): void {
   const previous = new Map(optionIndices(old).map((index) => [labelKey(text(old[`text-${index}`])), text(old[`opt-${index}`]).trim()]))
   const indices = optionIndices(data)
   const digits = indices.map((index) => previous.get(labelKey(text(data[`text-${index}`]))) || text(data[`opt-${index}`]).trim())
   if (digits.some((digit) => !digit) || new Set(digits).size !== digits.length) return
+  const order = sequentialDigits(old) && digits.every((digit) => /^\d+$/.test(digit)) ? [...digits].sort((a, b) => Number(a) - Number(b)) : undefined
   indices.forEach((index, position) => {
-    data[`opt-${index}`] = digits[position]
+    data[`opt-${index}`] = order ? String(order.indexOf(digits[position]) + 1) : digits[position]
   })
 }
 
