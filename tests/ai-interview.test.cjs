@@ -540,7 +540,7 @@ test('o prompt do Copiloto segue as regras da casa: pergunta antes de editar, pr
   for (const text of ['Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.', 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.', 'Proposta descartada. O fluxo aberto não mudou.', 'Pedido cancelado. O fluxo aberto não mudou.', 'Precisa mudar mais alguma coisa no fluxo?', 'Aplicar']) assert.ok(prompt.includes(text), text)
   const listed = componentCatalog.filter((definition) => ![START_TYPE, NOTE_TYPE].includes(definition.nativeType ?? definition.id))
   for (const definition of listed) assert.ok(prompt.includes(`- ${definition.label}`), definition.label)
-  assert.ok(prompt.length < 16000, String(prompt.length))
+  assert.ok(prompt.length < 20000, String(prompt.length))
 })
 
 test('interviewMessages traz exatamente o que o provedor recebe no turno do Copiloto', async () => {
@@ -595,7 +595,7 @@ const MENUS = importFlow(JSON.parse(JSON.stringify(finalizeFlow(assembleFlow(MEN
 const MENUS_IDS = MENUS.nodes.map((node) => node.id)
 const MENU_IDS = MENUS.nodes.filter((node) => node.data.type === 'envio_mensagem').map((node) => node.id)
 const MESSAGE_IDS = MENUS.nodes.filter((node) => node.data.type === 'envio_pergunta').map((node) => node.id)
-const MENU_PICK = { label: 'o menu de opções', candidates: MENU_IDS, ready: false }
+const MENU_PICK = { label: 'o menu de opções', candidates: MENU_IDS, ready: false, any: false }
 const READY_PICK = { ...MENU_PICK, ready: true }
 const PICK_ASK = {
   message: 'O fluxo tem dois menus de opções. Selecione no canvas o menu da opção nova e clique em Confirmar.',
@@ -635,7 +635,7 @@ test('o esquema do Copiloto acrescenta pick, objeto estrito ou null com descriç
   assert.deepEqual(Object.keys(jsonSchema.properties).sort(), ['action', 'message', 'pick', 'plan', 'suggestions'])
   const { pick } = jsonSchema.properties
   assert.deepEqual(pick.anyOf[1], { type: 'null' })
-  assert.deepEqual(Object.keys(pick.anyOf[0].properties), ['label', 'candidates', 'ready'])
+  assert.deepEqual(Object.keys(pick.anyOf[0].properties), ['label', 'any', 'candidates', 'ready'])
   assert.equal(pick.anyOf[0].properties.label.type, 'string')
   assert.equal(pick.anyOf[0].properties.candidates.items.type, 'string')
   assert.equal(pick.anyOf[0].properties.ready.type, 'boolean')
@@ -691,7 +691,7 @@ test('settleTurn guarda pick só no ask do Copiloto, com 2 ou mais IDs do fluxo,
   const ask = (pick, extra = {}, context = PICK_CONTEXT) => settleTurn({ ...PICK_ASK, ...extra, pick }, context)
   assert.deepEqual(ask(MENU_PICK), { ...PICK_ASK, pick: MENU_PICK })
   assert.deepEqual(ask({ label: 'o menu', candidates: [second, first, second, 'x', first] }).pick.candidates, [second, first])
-  assert.deepEqual(ask({ label: 'a mensagem', candidates: MESSAGE_IDS }).pick, { label: 'a mensagem', candidates: MESSAGE_IDS, ready: false })
+  assert.deepEqual(ask({ label: 'a mensagem', candidates: MESSAGE_IDS }).pick, { label: 'a mensagem', candidates: MESSAGE_IDS, ready: false, any: false })
   for (const candidates of [[], [first], [first, first, ` ${first}`], [first, 'x'], ['x', 'y'], 'abc']) assert.equal('pick' in ask({ label: 'o menu', candidates }), false, JSON.stringify(candidates))
   for (const pick of [null, undefined, 'o menu', [first, second], { label: 'o menu' }, { label: 'o menu', candidates: [] }]) assert.deepEqual(ask(pick), { ...PICK_ASK, message: PICK_LOST }, JSON.stringify(pick))
   const typed = 'Em qual menu entra a opção nova, Como podemos ajudar ou Qual boleto você quer?'
@@ -798,7 +798,7 @@ test('os candidatos valem pelos IDs do fluxo enviado com o turno, inclusive os c
   const proposal = { ...MENUS, nodes: [...MENUS.nodes, added] }
   const answer = JSON.stringify({ ...PICK_ASK, pick: { label: 'o menu de opções', candidates: [first, '900'] } })
   let result = await interviewTurn(menusInput('openai', { flow: proposal, proposal: true }), hooks(() => reply.openai(answer)))
-  assert.deepEqual(result.turn.pick, { label: 'o menu de opções', candidates: [first, '900'], ready: false })
+  assert.deepEqual(result.turn.pick, { label: 'o menu de opções', candidates: [first, '900'], ready: false, any: false })
   assert.ok(bodyText(calls[0]).includes('- 900 (Menu de Opções)'))
   calls.length = 0
   result = await interviewTurn(menusInput('openai'), hooks(() => reply.openai(answer)))
@@ -989,7 +989,7 @@ test('o resumo do Copiloto marca com reticências o texto cortado, e a conversa 
   assert.match(builder, /“Como podemos ajudar\?” opções: Boletos, Suporte técnico, Planos, Cancelamento, Financeiro, \| Boletos -> \S+; /)
   assert.match(builder, /“Mensagem com um texto bem mais longo do que cabe no resumo, para” \| -> /)
   assert.ok(!builder.includes('…'))
-  assert.match(copilot, /“Como podemos ajudar\?” opções: Boletos, Suporte técnico, Planos, Cancelamento, Financeiro… \| Boletos -> \S+; .*Ouvidoria -> \S+; Encerrar -> \S+$/m)
+  assert.match(copilot, /“Como podemos ajudar\?” opções \(7\): Boletos, Suporte técnico, Planos, Cancelamento, Financeiro… \| Boletos -> \S+; .*Ouvidoria -> \S+; Encerrar -> \S+$/m)
   assert.match(copilot, /“Mensagem com um texto bem mais longo do que cabe no resumo, para…” \| -> /)
   assert.match(copilot, /“Obrigado pelo contato\.”/)
   assert.equal(copilot.split('\n').filter((line) => line.includes('…')).length, 2)
@@ -1046,6 +1046,121 @@ test('no Copiloto, o ask com a seleção pronta chega com ready true, e a respos
   calls.length = 0
   const blank = await interviewTurn(menusInput('openai'), hooks(() => reply.openai(JSON.stringify({ ...PICK_ASK, plan: ' ', pick: READY_PICK }))))
   assert.deepEqual(blank.turn, { ...PICK_ASK, plan: '', pick: MENU_PICK })
+})
+
+const ANY_PICK = { label: 'o componente que vem antes da mensagem nova', any: true, candidates: [], ready: false }
+const ANY_ASK = {
+  message: 'Pensei na mensagem Obrigado pelo contato, volte sempre. Ela entra logo depois do componente que você selecionar, ou logo antes dele, se preferir. Depois de qual componente ela entra?',
+  suggestions: ['Logo depois do selecionado', 'Logo antes do selecionado'],
+  action: 'ask',
+  plan: 'Acrescente a mensagem Obrigado pelo contato, volte sempre, logo depois do componente que o usuário selecionar, na saída dele, e o caminho segue como antes.',
+}
+const ANY_MESSAGE = 'O componente novo entra logo depois do componente que você selecionar, ou logo antes dele, se preferir. Depois de qual componente ele entra?'
+const THANKS = [{ role: 'user', text: 'adicione uma mensagem de agradecimento' }]
+
+test('no Copiloto, o componente novo sem ponto no fluxo pede a seleção no canvas inteiro, com any true, candidates vazio e as sugestões de posição', async () => {
+  for (const provider of PROVIDERS) {
+    calls.length = 0
+    const result = await interviewTurn(menusInput(provider, { history: THANKS }), hooks(() => reply[provider](JSON.stringify({ ...ANY_ASK, pick: ANY_PICK }))))
+    assert.deepEqual([result.turn, calls.length], [{ ...ANY_ASK, pick: ANY_PICK }, 1], provider)
+    const body = calls[0].body
+    const schema = provider === 'openai' || provider === 'xai' ? body.text.format.schema : provider === 'anthropic' ? body.output_config.format.schema : body.generationConfig.responseSchema
+    const selection = provider === 'google' ? schema.properties.pick : schema.properties.pick.anyOf[0]
+    assert.deepEqual([selection.properties.any.type, selection.required.includes('any')], ['boolean', true], provider)
+  }
+  const { jsonSchema } = zodSchema(copilotSchema)
+  const selection = jsonSchema.properties.pick.anyOf[0]
+  assert.match(selection.properties.any.description, /^true quando o pedido cria um componente sem dizer o ponto do fluxo: o usuário seleciona qualquer componente, o Início inclusive, candidates fica vazio e ready fica false/)
+  assert.match(selection.properties.candidates.description, /; vazio com any true$/)
+  assert.match(jsonSchema.properties.pick.description, /ou quando o pedido cria um componente sem dizer o ponto do fluxo; null nas outras respostas$/)
+  assert.equal(zodSchema(interviewSchema).jsonSchema.properties.pick, undefined)
+})
+
+test('settleTurn guarda a seleção com any só no ask do Copiloto, com candidates vazio e ready false, e mantém o edit quando o plano já cita o componente', () => {
+  const [farewell] = MESSAGE_IDS
+  const settle = (extra = {}, context = PICK_CONTEXT) => settleTurn({ ...ANY_ASK, pick: ANY_PICK, ...extra }, context)
+  assert.deepEqual(settle(), { ...ANY_ASK, pick: ANY_PICK })
+  assert.deepEqual(settle({ pick: { ...ANY_PICK, ready: true } }).pick, ANY_PICK)
+  assert.deepEqual(settle({ pick: { ...ANY_PICK, candidates: [...MENU_IDS, 'inicio'] } }).pick, ANY_PICK)
+  assert.deepEqual(settle({ pick: { ...ANY_PICK, label: 'Selecione no canvas O componente anterior.' } }).pick.label, 'o componente anterior')
+  assert.deepEqual(settle({ pick: { ...ANY_PICK, label: '' } }).pick.label, 'o componente')
+  assert.deepEqual(settle({ suggestions: ['Logo depois do selecionado', 'Logo antes do selecionado', 'Logo depois do selecionado.', 'Pode editar agora'] }).suggestions, ['Logo depois do selecionado', 'Logo antes do selecionado', 'Pode editar agora'])
+  assert.equal(settle({ message: '' }).message, ANY_MESSAGE)
+  assert.ok(!/canvas/i.test(ANY_MESSAGE))
+  const edit = { action: 'edit', message: 'Vou colocar a mensagem nova.', suggestions: [] }
+  for (const action of ['edit', 'generate']) assert.deepEqual(settle({ ...edit, action }), { message: ANY_MESSAGE, suggestions: [], action: 'ask', plan: ANY_ASK.plan, pick: ANY_PICK }, action)
+  assert.equal(settle({ ...edit, message: 'Depois de qual componente ela entra?' }).message, 'Depois de qual componente ela entra?')
+  const cited = `Acrescente a mensagem Obrigado pelo contato logo depois do componente ID ${farewell}, na saída dele.`
+  assert.deepEqual(settle({ ...edit, plan: cited }), { message: edit.message, suggestions: [], action: 'edit', plan: cited })
+  assert.deepEqual(settle({ ...edit, plan: 'Acrescente a mensagem logo depois do Início, ID inicio.' }).action, 'edit')
+  assert.deepEqual(settle({ action: 'finish' }), { message: ANY_ASK.message, suggestions: [], action: 'finish', plan: ANY_ASK.plan })
+  for (const scope of [undefined, 'builder']) assert.equal('pick' in settle({}, { ...PICK_CONTEXT, scope }), false, String(scope))
+  for (const ids of [undefined, [], ['inicio'], ['inicio', ' ', 'inicio']]) assert.deepEqual(settle({}, { ...PICK_CONTEXT, ids }), { ...ANY_ASK, message: PICK_LOST }, JSON.stringify(ids))
+  assert.deepEqual(settle({}, { ...PICK_CONTEXT, ids: ['inicio', 'x'] }).pick, ANY_PICK)
+  for (const any of ['true', 1, null]) {
+    assert.deepEqual(settle({ pick: { ...ANY_PICK, any } }), ANY_ASK, String(any))
+    assert.deepEqual(settle({ pick: { ...ANY_PICK, any }, message: 'Selecione no canvas o componente que vem antes da mensagem nova.' }), { ...ANY_ASK, message: PICK_LOST }, String(any))
+  }
+  assert.deepEqual(settle({ pick: { ...MENU_PICK } }).pick, MENU_PICK)
+})
+
+test('no Copiloto, a seleção com any chega no parcial e a resposta reparada lê any, qualquer ou todos', async () => {
+  const partials = []
+  const result = await interviewTurn(menusInput('xai', { history: THANKS }), hooks(() => reply.xai(JSON.stringify({ ...ANY_ASK, pick: ANY_PICK })), { onPartial: (turn) => partials.push(turn) }))
+  assert.deepEqual(result.turn, { ...ANY_ASK, pick: ANY_PICK })
+  assert.ok(partials.some((turn) => turn.pick && turn.pick.any === true && turn.pick.ready === false), JSON.stringify(partials.at(-1)))
+  assert.ok(partials.every((turn) => turn.pick === undefined || turn.pick === null || typeof turn.pick.any === 'boolean'))
+  const repaired = async (selection) => {
+    calls.length = 0
+    const text = JSON.stringify({ mensagem: ANY_ASK.message, sugestoes: ANY_ASK.suggestions, acao: 'ask', plano: ANY_ASK.plan, selecao: { rotulo: 'O componente que vem antes da mensagem nova', ...selection } })
+    const turn = await interviewTurn(menusInput('anthropic', { history: THANKS }), hooks(() => reply.anthropic(`\`\`\`json\n${text}\n\`\`\``)))
+    assert.equal(calls.length, 1, JSON.stringify(selection))
+    return turn.turn
+  }
+  for (const selection of [{ any: true }, { qualquer: 'sim' }, { todos: 'true', candidatos: [MENU_IDS[0]] }]) assert.deepEqual(await repaired(selection), { ...ANY_ASK, pick: ANY_PICK }, JSON.stringify(selection))
+  assert.deepEqual(await repaired({ qualquer: 'talvez' }), ANY_ASK)
+})
+
+test('o prompt do Copiloto pede o canvas inteiro para o componente novo sem ponto, confere quantidades e limites e propõe caminhos válidos antes de editar', () => {
+  const prompt = copilotSystemPrompt()
+  const start = prompt.indexOf('# Componente novo sem ponto no fluxo')
+  const middle = prompt.indexOf('# Quantidades e limites')
+  assert.ok(prompt.indexOf('# Proposta em revisão') < start && start < middle && middle < prompt.indexOf('# Plano'), 'ordem das seções')
+  const position = prompt.slice(start, middle)
+  const limits = prompt.slice(middle, prompt.indexOf('# Plano'))
+  const numbers = (section) => section.split('\n').filter((line) => /^\d+\. /.test(line)).map((line) => Number(line.split('.')[0]))
+  assert.deepEqual([numbers(position), numbers(limits)], [[1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6]])
+  for (const text of ['sem dizer o ponto do fluxo, antes ou depois de qual componente, peça para o usuário selecionar no canvas o componente que fica antes do novo', 'mesmo quando um ponto parece o mais provável', 'devolva ask com pick, com any true e candidates vazio', 'Todos os componentes do fluxo servem para essa seleção, o Início inclusive', 'A opção nova de um menu entra no menu', 'diz que ele entra logo depois do componente selecionado, ou logo antes dele, se o usuário preferir', 'Depois de qual componente ela entra?', 'ready fica false', 'suggestions traz Logo depois do selecionado e Logo antes do selecionado', 'A mensagem que começa com Selecionei no canvas traz o componente escolhido', 'na saída dele, e o caminho segue como antes', 'ele entra logo antes, na entrada dele', 'com o Início escolhido, ele entra logo depois do Início', 'pergunte em qual saída o componente novo entra, propondo a mais provável', 'Cite em plan o ID do componente escolhido', 'Quando o fluxo tem só o Início, o componente novo entra logo depois dele, sem seleção']) assert.ok(position.includes(text), text)
+  for (const text of ['plan e o resultado trazem exatamente esse número', 'As opções a mais, como Voltar e Encerrar, entram quando o usuário pede ou aceita a sua proposta delas', 'escreva com quantas opções cada menu novo ou alterado fica no fim, contando todas, como em: o menu Como podemos ajudar? fica com 8 opções', 'o Menu de Opções tem de 1 a 10 opções, mostra até 3 como botões e, com mais opções, vai como lista', 'a mensagem do menu tem até 1024 caracteres', 'a Múltipla Condição tem até 20 condições', 'o Randomizador tem ao menos 2 caminhos, com pesos que somam 100', 'o Solicitar Dados faz de 1 a 5 tentativas', 'somando os itens que o componente já tem no resumo com os que o pedido acrescenta', 'opções (12) diz quantas opções o menu tem quando a lista vem cortada', 'diga quantos itens o componente tem e quantos cabem', 'trocar as opções atuais pelas novas, avisando que as opções atuais e os passos que só elas alcançam saem do fluxo', 'dividir em dois menus, com uma opção que leva ao segundo', 'ou reduzir o número de opções', 'Edite depois que o usuário escolher um caminho', 'O menu Como podemos ajudar? tem 6 opções e aceita até 10, então cabem mais 4.', 'Trocar as opções atuais, Dividir em dois menus e Acrescentar só 4 opções', 'explique o limite em uma frase e proponha alternativas que cabem nele', 'plan e a edição seguem sempre o formato da plataforma, também quando o usuário insiste']) assert.ok(limits.includes(text), text)
+  for (const section of [position, limits]) {
+    assert.ok(!/[—–!]/.test(section))
+    assert.ok(!/\b(nunca|jamais|evite|proibido)\b|\bnão (faça|use|invente|edite|pergunte|escreva|mude|coloque|repita|deixe|devolva|crie|altere|remova|responda|aplique)\b/i.test(section))
+  }
+  const builder = interviewSystemPrompt()
+  for (const text of ['any true', 'Logo antes do selecionado', 'Quantidades e limites', 'fica com 8 opções', 'Dividir em dois menus']) assert.ok(!builder.includes(text), text)
+})
+
+test('o resumo do Copiloto diz quantas opções o menu tem quando a lista vem cortada, e o resumo da montagem segue sem o número', () => {
+  const options = Array.from({ length: 12 }, (_, index) => `Assunto número ${index + 1}`)
+  const ri = {
+    name: 'Muitos assuntos',
+    description: '',
+    nodes: [
+      { id: 'menu', type: 'envio_mensagem', config: [{ key: 'title', value: 'Sobre qual assunto?' }, { key: 'options', value: JSON.stringify(options.map((text) => ({ text }))) }] },
+      { id: 'curto', type: 'envio_mensagem', config: [{ key: 'title', value: 'Confirma?' }, { key: 'options', value: JSON.stringify([{ text: 'Sim' }, { text: 'Não' }]) }] },
+    ],
+    edges: [{ from: 'inicio', output: '', to: 'menu' }, { from: 'menu', output: '1', to: 'curto' }],
+  }
+  const flow = importFlow(JSON.parse(JSON.stringify(finalizeFlow(assembleFlow(ri, { now: NOW })).flow)))
+  const crowded = JSON.parse(JSON.stringify(flow))
+  const data = crowded.nodes.find((node) => node.data.data.title === 'Sobre qual assunto?').data.data
+  for (let index = 11; index <= 12; index++) Object.assign(data, { [`opt-${index}`]: String(index), [`text-${index}`]: `Assunto número ${index}`, [`description-${index}`]: '' })
+  const copilot = interviewFlowSummary(crowded, true)
+  assert.match(copilot, /“Sobre qual assunto\?” opções \(12\): Assunto número 1, Assunto número 2, [^|]*… \| /)
+  assert.match(copilot, /“Confirma\?” opções: Sim, Não \| /)
+  assert.equal(copilot.split('\n').filter((line) => /opções \(\d+\)/.test(line)).length, 1)
+  assert.ok(!/opções \(\d+\)/.test(interviewFlowSummary(crowded)))
+  assert.match(interviewFlowSummary(crowded), /“Sobre qual assunto\?” opções: Assunto número 1, /)
 })
 
 test('o prompt do Copiloto pede ready true quando só falta o componente, com o plano escrito para o componente que o usuário selecionar', () => {

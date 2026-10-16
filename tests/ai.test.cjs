@@ -17,7 +17,7 @@ const { exportFlow, importFlow, validateFlow, outputHandles, outputLabel, stampE
 const { componentCatalog, getDefinition, mirrorKeys, START_ID, START_TYPE } = require('../lib/atendimento/catalog.ts')
 const { RI_TYPES, riSchema, riEditSchema, repairRiText, repairDeltaText, coerceRi, coerceDelta, canonicalType, countRi, RI_PROVIDER_OPTIONS, RI_SCHEMA_NAME, RI_SCHEMA_DESCRIPTION, RI_EDIT_SCHEMA_NAME, RI_EDIT_SCHEMA_DESCRIPTION } = require('../lib/atendimento/ai/ri.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
-const { configureNode, acceptedKeys, fixedKeys, balanceWeights, daysOf, timeOf } = require('../lib/atendimento/ai/values.ts')
+const { configureNode, acceptedKeys, fixedKeys, balanceWeights, daysOf, timeOf, listSizes, trimList } = require('../lib/atendimento/ai/values.ts')
 const { layoutBox } = require('../lib/atendimento/ai/layout.ts')
 const { reviewFlow, correctionItems, scoreOf, compareScores, evaluateRi, pickBetter, needsCorrection, concludeGeneration, platformScope } = require('../lib/atendimento/ai/review.ts')
 const { systemPrompt, componentBlock, requestPrompt, sizeInstruction, correctionPrompt, formatCorrectionPrompt, formatFailurePrompt, describeFormatProblem, PROMPT_EXAMPLES, DELIVERY, CORRECTION_RULES } = require('../lib/atendimento/ai/prompt.ts')
@@ -578,6 +578,37 @@ test('dynamic outputs follow menu options, conditions, weighted paths and agent 
   const many = configure('multiple_condicional_api', { conditions: JSON.stringify(Array.from({ length: 22 }, (_, index) => ({ var: 'faixa', value: String(index) }))) })
   assert.equal(Object.keys(many.data).length, 40)
   assert.deepEqual(many.notes.map(note => note.message), ['A Múltipla Condição aceita até 20 condições; 2 foram descartadas.'])
+})
+
+test('in edits the values keep every menu option and condition for the review, while the creation keeps cutting at the limit', () => {
+  const options = JSON.stringify(Array.from({ length: 12 }, (_, index) => ({ text: `Item ${index + 1}` })))
+  const conditions = JSON.stringify(Array.from({ length: 22 }, (_, index) => ({ var: 'faixa', value: String(index) })))
+  const edit = { ruleId: () => 'rule-1', edit: true }
+  const menu = configureNode('envio_mensagem', pairs({ title: 'Escolha', buttons: 'true', options }), edit)
+  assert.deepEqual([menu.data['opt-12'], menu.data['text-12'], menu.data['description-12']], ['12', 'Item 12', ''])
+  assert.deepEqual(menu.notes, [])
+  const many = configureNode('multiple_condicional_api', pairs({ conditions }), edit)
+  assert.deepEqual([many.data['var-22'], many.data['value-22']], ['faixa', '21'])
+  assert.deepEqual(many.notes, [])
+  const created = configure('envio_mensagem', { title: 'Escolha', options })
+  assert.equal(created.data['text-11'], undefined)
+  assert.deepEqual(created.notes.map((note) => note.message), ['O menu aceita até 10 opções; 2 foram descartadas.'])
+  assert.deepEqual(configure('multiple_condicional_api', { conditions }).notes.map((note) => note.message), ['A Múltipla Condição aceita até 20 condições; 2 foram descartadas.'])
+
+  assert.deepEqual(listSizes('envio_mensagem', menu.data), [{ key: 'options', kind: 'menuOptions', count: 12, max: 10 }])
+  assert.deepEqual(listSizes('multiple_condicional_api', many.data), [{ key: 'conditions', kind: 'conditionPairs', count: 22, max: 20 }])
+  assert.deepEqual(listSizes('envio_pergunta', { template: 'x' }), [])
+  assert.deepEqual(listSizes('tipo_inexistente', {}), [])
+  const data = { ...menu.data }
+  assert.deepEqual(trimList(data, 'menuOptions', 10), ['Item 11', 'Item 12'])
+  assert.equal(listSizes('envio_mensagem', data)[0].count, 10)
+  assert.equal(Object.keys(data).some((key) => /-(11|12)$/.test(key)), false)
+  assert.deepEqual([data.title, data.buttons, data['text-10']], ['Escolha', 'true', 'Item 10'])
+  assert.deepEqual(trimList(data, 'menuOptions', 10), [])
+  const pairsData = { ...many.data }
+  assert.deepEqual(trimList(pairsData, 'conditionPairs', 20), ['faixa = 20', 'faixa = 21'])
+  assert.deepEqual([pairsData['var-20'], pairsData['var-21'], pairsData['value-22']], ['faixa', undefined, undefined])
+  assert.deepEqual(trimList({ 'opt-1': '1', 'text-1': 'A', 'opt-2': '2', 'text-2': '' }, 'menuOptions', 1), ['Opção 2'])
 })
 
 test('connections resolve outputs by index, by label and by name, and report what cannot be linked', () => {

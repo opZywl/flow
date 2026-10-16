@@ -9,12 +9,12 @@ import { guideOf } from "./guide"
 import { LAYOUT, layoutBox, notePosition } from "./layout"
 import { FILL_CORRECTION, systemPrompt } from "./prompt"
 import type { PromptOptions } from "./prompt"
-import { compareScores, correctionItems, reviewFlow, scoreOf } from "./review"
+import { capLists, compareScores, correctionItems, planNotes, reviewFlow, scoreOf } from "./review"
 import type { Score } from "./review"
 import { canonicalType, coerceDelta } from "./ri"
 import type { RiConfigEntry, RiDelta, RiEdge, RiFlow, RiNode } from "./ri"
 import { compactKey, foldText, listQuoted, quote, shorten } from "./text"
-import { acceptedKeys, configureNode, fixedKeys, settleData } from "./values"
+import { acceptedKeys, configureNode as configureValues, fixedKeys, settleData } from "./values"
 import type { ConfigContext, ValueNote } from "./values"
 
 export interface EditChanges {
@@ -96,6 +96,7 @@ const handleIndex = (handle: string) => Number(OUTPUT_HANDLE.exec(handle)?.[1] ?
 const byHandle = (a: { sourceHandle: string }, b: { sourceHandle: string }) => handleIndex(a.sourceHandle) - handleIndex(b.sourceHandle)
 const edgeKey = (source: string, handle: string, target: string) => `${source}\u0000${handle}\u0000${target}`
 const isStart = (node: AtendimentoNode) => node.id === START_ID || node.data.type === START_TYPE
+const configureNode = (type: string, config: readonly RiConfigEntry[], context: ConfigContext) => configureValues(type, config, { ...context, edit: true })
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
@@ -928,6 +929,7 @@ export function concludeEdit(original: AtendimentoFlow, result: EditResult, opti
   const flow = copy(result.flow)
   const notes = [...result.notes]
   const name = namer(result.ids)
+  notes.push(...capLists(original, flow, name))
   const diff = diffFlows(original, flow)
   const added = new Set(diff.added)
   const roots = [START_ID, ...flow.nodes.filter((node) => !added.has(node.id)).map((node) => node.id)]
@@ -1058,7 +1060,7 @@ export function reviewEdit(original: AtendimentoFlow, result: Pick<EditResult, "
   const riIds = new Map(result.flow.nodes.map((node) => [node.id, name(node.id)]))
   const touched = new Set([...diff.added, ...diff.changed])
   const request = fill ? requestText(options.prompt, knownText(original)) : ""
-  const notes = [...result.notes.filter((note) => !note.nodeId || present.has(note.nodeId)), ...requiredNotes(result.flow, touched, name, fill), ...provisionalNotes(result.flow, touched, name, request)]
+  const notes = [...result.notes.filter((note) => !note.nodeId || present.has(note.nodeId)), ...requiredNotes(result.flow, touched, name, fill), ...provisionalNotes(result.flow, touched, name, request), ...planNotes(original, result.flow, name, options.prompt)]
   const assembled = { flow: result.flow, platformIds: new Map<string, string>(), riIds, notes, ...(fill ? {} : { fill: false }) }
   const known = issuesOf(original)
   const empty = cleared(original, result)
@@ -1096,11 +1098,18 @@ const EDIT_DELIVERY = "Responda só com as mudanças, no formato do modo de edi�
 
 const cachedEditSystem = new Map<string, string>()
 
+const EDIT_LIMITS: readonly string[] = [
+  "# Quantidades e limites",
+  "- Quando o pedido diz quantas opções um menu tem, como em fica com 8 opções, o menu fica com exatamente esse número, com as opções do pedido na ordem dele. As opções de voltar e de encerramento entram quando o pedido traz essas opções, e esta regra vale acima das regras de menus da seção Fluxo completo.",
+  "- Quando o pedido diz quantas mensagens, perguntas ou outros itens criar, crie exatamente esse número.",
+  `- Os limites da plataforma valem em toda edição: o Menu de Opções tem de 1 a ${RI_LIMITS.menuOptions} opções, e até 3 com buttons "true"; a Múltipla Condição tem até ${RI_LIMITS.conditions} condições. Quando o pedido passa de um limite, siga o caminho que o pedido indicar ou divida em dois menus, com uma opção que leva ao segundo.`,
+]
+
 export function editSystemPrompt(options: PromptOptions = {}): string {
   const base = systemPrompt(options)
   const known = cachedEditSystem.get(base)
   if (known) return known
-  const text = [base, EDIT_RULES.join("\n")].join("\n\n")
+  const text = [base, EDIT_RULES.join("\n"), EDIT_LIMITS.join("\n")].join("\n\n")
   cachedEditSystem.set(base, text)
   return text
 }

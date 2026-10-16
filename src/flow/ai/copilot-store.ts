@@ -11,9 +11,9 @@ import {
 import type { InterviewMessage, InterviewTurn } from "@/lib/atendimento/ai/interview"
 import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
 import { clip, shorten } from "@/lib/atendimento/ai/text"
-import { NOTE_TYPE } from "@/lib/atendimento/catalog"
+import { NOTE_TYPE, START_TYPE } from "@/lib/atendimento/catalog"
 import { behaviorSignature, importFlow, isObject, validateFlow } from "@/lib/atendimento/format"
-import type { AtendimentoFlow, AtendimentoNode } from "@/lib/atendimento/types"
+import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode, FlowIssue } from "@/lib/atendimento/types"
 import type { InterviewTurnResult } from "../ai-interview"
 import type { CanvasPick } from "../pick"
 import {
@@ -96,6 +96,8 @@ export interface CopilotProposal {
   prompt: string
   issues: GenerationIssue[]
   blocking: number
+  broken: GenerationIssue[]
+  unmet: GenerationIssue[]
   changes: GenerationChanges | null
   diff: FlowDiff | null
   removed: AtendimentoNode[]
@@ -132,6 +134,7 @@ export interface CopilotPick {
   candidates: CopilotPickCandidate[]
   selected: string | null
   ready: boolean
+  any: boolean
 }
 
 export interface CopilotState {
@@ -219,6 +222,8 @@ export const PICK_PREFIX = "Selecionei no canvas:"
 export const PICK_CANCELLED = "Seleção cancelada. Você pode responder por texto."
 export const PICK_LABEL = "o componente"
 export const FOCUS_MISSED = "A edição não mudou o componente que você selecionou. Confira se a mudança ficou no lugar certo antes de aplicar."
+export const BLOCKED_TITLE = "Edição com pendências que impedem aplicar"
+export const FAULTS_HEAD = "Pendências para corrigir:"
 
 export const STATUS_LABELS: Readonly<Record<Exclude<ProposalStatus, "pending">, string>> = {
   applied: "Aplicada",
@@ -256,7 +261,9 @@ const INITIAL_STATE: CopilotState = {
 
 const SUGGESTION_LIMIT = 6
 const PICK_LABEL_LIMIT = 60
+const FAULT_LIMIT = 5
 const ARTICLES = new Set(["o", "a", "os", "as", "um", "uma"])
+const OUTPUT_HANDLE = /^output-(\d+)$/
 
 export function credentialErrors(settings: CopilotSettings): FieldErrors {
   const info = PROVIDERS.find((entry) => entry.id === settings.provider) ?? PROVIDERS[0]
@@ -267,13 +274,18 @@ export function credentialErrors(settings: CopilotSettings): FieldErrors {
   return errors
 }
 
+export function proposalApplicable(proposal: CopilotProposal): boolean {
+  return proposal.broken.length === 0
+}
+
 export function proposalTitle(proposal: CopilotProposal): string {
   if (proposal.partial) return "Edição feita em parte"
+  if (!proposalApplicable(proposal)) return BLOCKED_TITLE
   return proposal.issues.length ? `Edição pronta com ${plural(proposal.issues.length, "pendência", "pendências")}` : "Edição pronta"
 }
 
 export function proposalTone(proposal: CopilotProposal): "success" | "warning" | "danger" {
-  if (proposal.blocking) return "danger"
+  if (proposal.blocking || proposal.broken.length || proposal.unmet.length) return "danger"
   return proposal.issues.length || proposal.partial ? "warning" : "success"
 }
 
@@ -285,10 +297,20 @@ export function proposalGroups(proposal: CopilotProposal): IssueGroup[] {
   })).filter((group) => group.items.length > 0)
 }
 
+function faultLine(issue: GenerationIssue): string {
+  const message = issue.message.trim()
+  const line = /[.?…]$/.test(message) ? message : `${message}.`
+  return issue.nodeId ? `ID ${issue.nodeId}: ${line}` : line
+}
+
 export function proposalSummary(proposal: CopilotProposal): string {
-  if (!proposal.changes) return "Proposta pronta no canvas."
-  const [added, changed, removed] = changeLabels(proposal.changes)
-  return `Proposta pronta no canvas: ${added}, ${changed} e ${removed}.`
+  let head = "Proposta pronta no canvas."
+  if (proposal.changes) {
+    const [added, changed, removed] = changeLabels(proposal.changes)
+    head = `Proposta pronta no canvas: ${added}, ${changed} e ${removed}.`
+  }
+  const faults = [...proposal.broken, ...proposal.unmet].filter((issue) => issue.message.trim()).slice(0, FAULT_LIMIT)
+  return faults.length ? `${head} ${FAULTS_HEAD} ${faults.map(faultLine).join(" ")}` : head
 }
 
 export function copilotHistory(entries: readonly CopilotEntry[]): InterviewMessage[] {
@@ -312,21 +334,50 @@ export function pickLabel(value: unknown): string {
   return ARTICLES.has(first.toLowerCase()) ? `${first.toLowerCase()}${text.slice(first.length)}` : text
 }
 
-export function readPick(value: unknown, flow: AtendimentoFlow): CopilotPick | null {
-  if (!isObject(value) || !Array.isArray(value.candidates)) return null
+function handleIndex(handle: string): number {
+  const match = OUTPUT_HANDLE.exec(handle)
+  return match ? Number(match[1]) : -1
+}
+
+export function flowOrder(flow: AtendimentoFlow): AtendimentoNode[] {
+  const nodes = new Map(flow.nodes.map((node) => [node.id, node]))
+  const outgoing = new Map<string, AtendimentoEdge[]>()
+  for (const edge of flow.edges) outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge])
+  const order = new Set(flow.nodes.flatMap((node) => (node.data.type === START_TYPE ? [node.id] : [])))
+  for (const id of order) {
+    const edges = [...(outgoing.get(id) ?? [])].sort((first, second) => handleIndex(first.sourceHandle) - handleIndex(second.sourceHandle))
+    for (const edge of edges) if (nodes.has(edge.target)) order.add(edge.target)
+  }
+  for (const node of flow.nodes) order.add(node.id)
+  return [...order].flatMap((id) => {
+    const node = nodes.get(id)
+    return node && node.data.type !== NOTE_TYPE ? [node] : []
+  })
+}
+
+function listedCandidates(items: readonly unknown[], flow: AtendimentoFlow): CopilotPickCandidate[] {
   const nodes = new Map(flow.nodes.map((node) => [node.id, node]))
   const candidates: CopilotPickCandidate[] = []
-  for (const item of value.candidates) {
+  for (const item of items) {
     const id = typeof item === "string" ? item.trim() : typeof item === "number" && Number.isFinite(item) ? String(item) : ""
     const node = nodes.get(id)
     if (!node || node.data.type === NOTE_TYPE || candidates.some((candidate) => candidate.id === id)) continue
     candidates.push({ id, text: nodeSubject(node) })
   }
-  return candidates.length < 2 ? null : { label: pickLabel(value.label), candidates, selected: null, ready: value.ready === true }
+  return candidates
+}
+
+export function readPick(value: unknown, flow: AtendimentoFlow): CopilotPick | null {
+  if (!isObject(value)) return null
+  const any = value.any === true
+  const listed = Array.isArray(value.candidates) ? value.candidates : null
+  if (!any && !listed) return null
+  const candidates = any ? flowOrder(flow).map((node) => ({ id: node.id, text: nodeSubject(node) })) : listedCandidates(listed ?? [], flow)
+  return candidates.length < 2 ? null : { label: pickLabel(value.label), candidates, selected: null, ready: value.ready === true, any }
 }
 
 export function pickKey(pick: CopilotPick | null | undefined): string {
-  return pick ? JSON.stringify([pick.label, pick.candidates.map((candidate) => candidate.id)]) : ""
+  return pick ? JSON.stringify([pick.label, pick.candidates.map((candidate) => candidate.id), pick.any === true]) : ""
 }
 
 function chipsOf(value: unknown): string[] {
@@ -371,8 +422,39 @@ function inbound(flow: AtendimentoFlow, id: string): string {
     .join("|")
 }
 
+function outbound(flow: AtendimentoFlow, id: string): string {
+  return flow.edges
+    .filter((edge) => edge.source === id)
+    .map((edge) => `${edge.sourceHandle}>${edge.target}`)
+    .sort()
+    .join("|")
+}
+
 export function touches(diff: FlowDiff, before: AtendimentoFlow, after: AtendimentoFlow, id: string): boolean {
-  return diff.changed.includes(id) || diff.removed.includes(id) || inbound(before, id) !== inbound(after, id)
+  return diff.changed.includes(id) || diff.removed.includes(id) || inbound(before, id) !== inbound(after, id) || outbound(before, id) !== outbound(after, id)
+}
+
+function flowErrors(flow: AtendimentoFlow): FlowIssue[] {
+  try {
+    return validateFlow(flow).filter((issue) => issue.severity === "error")
+  } catch {
+    return []
+  }
+}
+
+const errorPlace = (issue: { nodeId?: string; message: string }) => JSON.stringify(issue.nodeId ? ["node", issue.nodeId] : ["flow", issue.message])
+
+const errorKey = (issue: { nodeId?: string; message: string }) => JSON.stringify([issue.nodeId ?? "", issue.message])
+
+export function introducedErrors(before: readonly FlowIssue[], after: readonly FlowIssue[]): FlowIssue[] {
+  const left = new Map<string, number>()
+  for (const issue of before) left.set(errorPlace(issue), (left.get(errorPlace(issue)) ?? 0) + 1)
+  return after.filter((issue) => {
+    const place = errorPlace(issue)
+    const count = left.get(place) ?? 0
+    if (count > 0) left.set(place, count - 1)
+    return count === 0
+  })
 }
 
 export function createCopilot(read: () => CopilotOptions): CopilotStore {
@@ -667,12 +749,12 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       const node = before.get(id)
       return node ? [node] : []
     })
-    let blocking: ReturnType<typeof validateFlow> = []
-    try {
-      blocking = validateFlow(received.flow).filter((issue) => issue.severity === "error")
-    } catch {
-      blocking = []
-    }
+    const blocking = flowErrors(received.flow)
+    const known = new Set(blocking.map(errorKey))
+    const broken = introducedErrors(flowErrors(job.original), blocking).map(
+      (issue): GenerationIssue => ({ severity: "error", scope: "ia", message: issue.message, ...(issue.nodeId ? { nodeId: issue.nodeId } : {}) }),
+    )
+    const unmet = received.issues.filter((issue) => issue.severity === "error" && !known.has(errorKey(issue)))
     const proposal: CopilotProposal = {
       flow: received.flow,
       original: job.original,
@@ -680,6 +762,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       prompt: job.prompt,
       issues: mergeIssues([...warned, ...received.issues], blocking),
       blocking: blocking.length,
+      broken,
+      unmet,
       changes,
       diff,
       removed,
@@ -696,6 +780,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     const id = nextId()
     const entries = job.refines ? mark(job.refines, "refined") : state.entries
     const unseen = !state.visible
+    const attention: CopilotAttention = proposalApplicable(proposal) ? "ready" : "failed"
     set({
       entries: [...entries, { id, kind: "proposal", proposal, status: "pending" }],
       pending: id,
@@ -704,11 +789,11 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       refining: false,
       progress: null,
       startedAt: null,
-      ...(unseen ? { attention: "ready" as const } : {}),
+      ...(unseen ? { attention } : {}),
     })
     if (active()) show(received.flow, true, true, job.focus)
     else hide()
-    if (unseen) notify("ready")
+    if (unseen) notify(attention)
   }
 
   const fail = (current: Run, rejection: Rejection) => {
@@ -876,7 +961,8 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     send(text, withSelection = true) {
       const prompt = text.trim()
       if (!prompt || prompt.length > LIMITS.prompt || busy() || state.blocked) return false
-      const choice = withSelection && state.pick && planned && current(planned) ? choiceOf(state.pick) : null
+      const pick = state.pick
+      const choice = pick && (withSelection || pick.any) && planned && current(planned) ? choiceOf(pick) : null
       return listen(() => {
         if (choice) chosen = choice
         return [...state.entries, ...(choice ? [choiceEntry(choice)] : []), { id: nextId(), kind: "user", text: prompt }]
@@ -968,6 +1054,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
         dropStale()
         return false
       }
+      if (!proposalApplicable(proposal)) return false
       let flow: AtendimentoFlow
       try {
         flow = importFlow(proposal.flow)
@@ -1132,6 +1219,7 @@ export function linkPick(store: CopilotStore, canvas: CanvasPick, hooks: PickLin
         label: pick.label,
         candidates: known,
         selected: pick.selected,
+        any: pick.any === true,
         onSelect: (id) => {
           if (!live()) return
           selected = id

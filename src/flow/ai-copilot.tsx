@@ -36,7 +36,7 @@ import { toast } from "@/hooks/use-toast"
 import { EFFORTS, LIMITS, type GenerationIssue } from "@/lib/atendimento/ai/contracts"
 import type { InterviewInput } from "@/lib/atendimento/ai/interview"
 import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
-import { getComponentLabel } from "@/lib/atendimento/catalog"
+import { START_TYPE, getComponentLabel } from "@/lib/atendimento/catalog"
 import type { AtendimentoFlow, AtendimentoNode } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
 import {
@@ -67,6 +67,7 @@ import {
   createCopilot,
   linkPick,
   pickKey,
+  proposalApplicable,
   proposalGroups,
   proposalTitle,
   proposalTone,
@@ -125,6 +126,7 @@ const EDIT_NOW_LABEL = "Editar agora com o que já foi decidido"
 const FOLLOW_GAP = 160
 
 export const PICK_REGION = "Seleção do componente"
+export const ANY_PICK_NOTE = `Você pode escolher qualquer componente do fluxo, inclusive o ${getComponentLabel(START_TYPE)}.`
 
 const iconButton =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
@@ -194,9 +196,18 @@ export function copilotTurnInput({ history, flow, proposal, settings }: CopilotT
   }
 }
 
-export function pickHint(label: string, onCanvas: boolean, blocked = false): string {
+export function pickHint(label: string, onCanvas: boolean, blocked = false, any = false): string {
   if (blocked) return `Aguarde a geração do Gerar com IA terminar para selecionar ${label}.`
-  return onCanvas ? `Selecione ${label} no canvas ou na lista e confirme.` : `Selecione ${label} na lista e confirme.`
+  const hint = onCanvas ? `Selecione ${label} no canvas ou na lista e confirme.` : `Selecione ${label} na lista e confirme.`
+  return any ? `${hint} ${ANY_PICK_NOTE}` : hint
+}
+
+export function brokenText(count: number): string {
+  return `${plural(count, "pendência criada nesta edição quebra", "pendências criadas nesta edição quebram")} o formato do JSON. Peça um ajuste para corrigir ou descarte a proposta.`
+}
+
+export function unmetText(count: number): string {
+  return `A edição ficou diferente do pedido em ${plural(count, "ponto", "pontos")}. Confira antes de aplicar ou peça um ajuste.`
 }
 
 export function canReply({ busy, dialogBusy }: { busy: boolean; dialogBusy: boolean }): boolean {
@@ -204,7 +215,9 @@ export function canReply({ busy, dialogBusy }: { busy: boolean; dialogBusy: bool
 }
 
 export function landing(entries: readonly CopilotEntry[], pending: string | null): "apply" | "prompt" {
-  return pending !== null && entries[entries.length - 1]?.id === pending ? "apply" : "prompt"
+  const last = entries[entries.length - 1]
+  if (pending === null || last?.id !== pending) return "prompt"
+  return last.kind !== "proposal" || proposalApplicable(last.proposal) ? "apply" : "prompt"
 }
 
 interface RepliesProps {
@@ -272,7 +285,7 @@ export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelec
     <div role="region" aria-label={PICK_REGION} className="rounded-xl border border-flow-accent/40 bg-flow-accent/10 px-3 py-2.5">
       <p id={hintId} className="flex items-start gap-2 text-xs font-medium leading-5 text-flow-fg">
         <MousePointerClick className="mt-0.5 h-3.5 w-3.5 shrink-0 text-flow-accent" aria-hidden="true" />
-        <span className="min-w-0">{pickHint(pick.label, onCanvas, blocked)}</span>
+        <span className="min-w-0">{pickHint(pick.label, onCanvas, blocked, pick.any === true)}</span>
       </p>
       <ul aria-labelledby={hintId} className="mt-2 max-h-56 space-y-1.5 overflow-y-auto overscroll-contain">
         {pick.candidates.map((candidate) => {
@@ -394,10 +407,28 @@ export function ProposalCard({ entryId, proposal, status, meta, applyId, canAppl
               A edição foi interrompida antes do fim. Confira as mudanças no canvas antes de aplicar.
             </p>
           ) : null}
-          {proposal.blocking ? (
+          {proposal.broken.length ? (
+            <p className="mt-0.5 text-[11px] font-medium leading-4 text-flow-danger">{brokenText(proposal.broken.length)}</p>
+          ) : proposal.blocking ? (
             <p className="mt-0.5 text-[11px] font-medium leading-4 text-flow-danger">
               {plural(proposal.blocking, "pendência impede", "pendências impedem")} a exportação do JSON. Corrija no editor depois de aplicar.
             </p>
+          ) : null}
+          {proposal.unmet.length ? (
+            <div className="mt-0.5 text-[11px] font-medium leading-4 text-flow-danger">
+              <p>{unmetText(proposal.unmet.length)}</p>
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+                {proposal.unmet.map((issue, index) => {
+                  const subject = issueSubject(issue, byId)
+                  return (
+                    <li key={`${issue.nodeId ?? "fluxo"}-${index}`} className="break-words">
+                      {subject ? `${subject}: ` : ""}
+                      {issue.message}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
           ) : null}
           {proposal.missed ? <p className="mt-0.5 text-[11px] font-medium leading-4 text-flow-warning">{FOCUS_MISSED}</p> : null}
         </div>
@@ -920,7 +951,7 @@ export default function AICopilot({
         status={entry.status}
         meta={proposalMeta(entry.proposal)}
         applyId={idFor("apply")}
-        canApply={isPending && !busy && !dialogBusy && !asked}
+        canApply={isPending && !busy && !dialogBusy && !asked && proposalApplicable(entry.proposal)}
         canDiscard={isPending && !busy}
         onApply={() => {
           store.apply()

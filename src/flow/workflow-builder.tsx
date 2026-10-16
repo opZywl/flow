@@ -57,6 +57,7 @@ interface PickSession extends PickHandlers {
   order: string[]
   candidates: ReadonlySet<string>
   selected: string | null
+  any: boolean
 }
 
 type Handlers = WorkflowActions & { undo: () => void; redo: () => void }
@@ -123,6 +124,7 @@ const LOCKED_EDGE = { selectable: false, deletable: false, focusable: false, upd
 const PICK_EDGE = { ...LOCKED_EDGE, className: "opacity-30 transition-opacity" }
 const PICK_FALLBACK_LABEL = "o componente"
 const PICK_HINT = "Enter ou Espaço seleciona o componente. Enter no selecionado ou duplo clique confirma."
+const PICK_STATUS = { listed: "Clique em um dos componentes destacados.", any: "Clique em qualquer componente do fluxo." } as const
 const LAYER_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]'
 const CANVAS_HINTS: ReadonlyArray<readonly [string, string]> = [
   ['[id^="react-flow__node-desc-"]', "Pressione Enter ou Espaço para selecionar o componente. Depois, use as setas para movê-lo, Delete para removê-lo e Esc para cancelar."],
@@ -147,6 +149,11 @@ const pickMinimapClass = (candidates: ReadonlySet<string>) => (node: Node<Atendi
 const boxOf = (node: Node): Box => {
   const point = node.positionAbsolute ?? node.position
   return { x: point.x, y: point.y, width: node.width || DEFAULT_NODE_SIZE.width, height: node.height || DEFAULT_NODE_SIZE.height }
+}
+
+export function edgeLock(picking: boolean, any: boolean, locked: boolean) {
+  if (picking) return any ? LOCKED_EDGE : PICK_EDGE
+  return locked ? LOCKED_EDGE : null
 }
 
 function safely(run: () => void) {
@@ -260,12 +267,13 @@ function PreviewBanner({ bannerRef, nodes, edges, done, kind }: { bannerRef?: (e
   )
 }
 
-export function PickBanner({ bannerRef, hintId, label, selection, steps, onStep, onCancel, onConfirm }: {
+export function PickBanner({ bannerRef, hintId, label, selection, steps, any = false, onStep, onCancel, onConfirm }: {
   bannerRef?: (element: HTMLElement | null) => void
   hintId?: string
   label: string
   selection: string
   steps: number
+  any?: boolean
   onStep: (step: number) => void
   onCancel: () => void
   onConfirm: () => void
@@ -278,7 +286,7 @@ export function PickBanner({ bannerRef, hintId, label, selection, steps, onStep,
       <div className="min-w-0 max-w-[26rem] flex-1">
         <p className="break-words text-xs font-semibold leading-5 text-flow-fg">Selecione {label} no canvas.</p>
         <p role="status" title={selection || undefined} className="truncate text-[11px] leading-4 text-flow-muted">
-          {selection ? <>Selecionado: <span className="font-semibold text-flow-muted-strong">{selection}</span></> : "Clique em um dos componentes destacados."}
+          {selection ? <>Selecionado: <span className="font-semibold text-flow-muted-strong">{selection}</span></> : any ? PICK_STATUS.any : PICK_STATUS.listed}
         </p>
         {hintId ? <p id={hintId} className="sr-only">{PICK_HINT}</p> : null}
       </div>
@@ -1193,6 +1201,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       order,
       candidates,
       selected: typeof request.selected === "string" && candidates.has(request.selected) ? request.selected : null,
+      any: request.any === true,
       onSelect: request.onSelect,
       onConfirm: request.onConfirm,
       onCancel: request.onCancel,
@@ -1831,6 +1840,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [canvasBusy, selectSaved])
 
   const pickCandidates = pick?.candidates ?? null
+  const pickAny = pick?.any === true
 
   const canvasNodes = useMemo<Node<AtendimentoData>[]>(() => {
     const lock = (id: string) => (pickCandidates ? (pickCandidates.has(id) ? PICK_CANDIDATE_NODE : PICK_DIMMED_NODE) : LOCKED_NODE)
@@ -1858,7 +1868,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
 
   const canvasEdges = useMemo<Edge[]>(() => {
     const selected = new Set(locked ? [] : selectedEdges)
-    const lock = picking ? PICK_EDGE : locked ? LOCKED_EDGE : null
+    const lock = edgeLock(picking, pickAny, locked)
     return display.edges.map((edge) => {
       const source = displayById.get(edge.source)
       return {
@@ -1873,7 +1883,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
         ariaLabel: `Conexão de ${source ? `${getComponentLabel(source.data.type)} ${source.id} (${outputLabel(source, edge.sourceHandle)})` : edge.source} para ${edge.target}`,
       }
     })
-  }, [display.edges, displayById, locked, picking, selectedEdges])
+  }, [display.edges, displayById, locked, pickAny, picking, selectedEdges])
 
   const nodePick = useMemo<NodePick | null>(() => (pick ? { candidates: pick.candidates, selected: pick.selected, select: chooseCandidate, confirm: confirmCandidate, hint: pickHintId } : null), [chooseCandidate, confirmCandidate, pick, pickHintId])
   const minimapNodeClass = useMemo(() => (pickCandidates ? pickMinimapClass(pickCandidates) : minimapClass), [pickCandidates])
@@ -2058,7 +2068,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
           )}
           {showIssues && !locked && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
           {preview && !pick && <PreviewBanner bannerRef={setBanner} nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} />}
-          {pick && <PickBanner bannerRef={setBanner} hintId={pickHintId} label={pick.label} selection={pickedText} steps={pickSteps} onStep={stepPick} onCancel={cancelPick} onConfirm={confirmPick} />}
+          {pick && <PickBanner bannerRef={setBanner} hintId={pickHintId} label={pick.label} selection={pickedText} steps={pickSteps} any={pick.any} onStep={stepPick} onCancel={cancelPick} onConfirm={confirmPick} />}
           <CanvasStatus container={canvas} count={display.nodes.length} start={startNode?.position} />
         </div>
         {panelNode && (

@@ -313,3 +313,50 @@ test('the canvas banner shows the main text of the selected component, Anterior 
   const bare = renderToStaticMarkup(React.createElement(builder.PickBanner, { ...props, hintId: undefined }))
   assert.doesNotMatch(bare, /sr-only/)
 })
+
+test('a pick open to any component asks on the canvas to click any component, and the chosen Iniciar Fluxo shows in the banner', () => {
+  const props = { hintId: 'dica', label: 'o componente', selection: '', steps: 6, onStep: () => undefined, onCancel: () => undefined, onConfirm: () => undefined }
+  const open = renderToStaticMarkup(React.createElement(builder.PickBanner, { ...props, any: true }))
+  assert.match(open, /Selecione o componente no canvas\./)
+  const status = /role="status"[^>]*>([^<]+)</.exec(open)
+  assert.ok(status)
+  assert.equal(status[1], 'Clique em qualquer componente do fluxo.')
+  assert.match(status[1], PT_TEXT)
+  assert.match(open, /<button[^>]*disabled=""[^>]*>Confirmar<\/button>/)
+  assert.doesNotMatch(open, /aria-label="(Anterior|Próximo)"[^>]*disabled=""/)
+  const listed = renderToStaticMarkup(React.createElement(builder.PickBanner, props))
+  assert.match(listed, /role="status"[^>]*>Clique em um dos componentes destacados\.</)
+  const start = flowNode('trigger_message', 'inicio')
+  const subject = node.pickSubject(start.id, start.data)
+  assert.equal(subject, `${getComponentLabel('trigger_message')} · ID inicio`)
+  const chosen = renderToStaticMarkup(React.createElement(builder.PickBanner, { ...props, any: true, selection: subject }))
+  assert.match(chosen, new RegExp(`Selecionado: <span[^>]*>${subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</span>`))
+  assert.doesNotMatch(chosen, /Clique em qualquer componente/)
+})
+
+test('with every component as candidate, Iniciar Fluxo and the messages carry the candidate mark and only the notes stay dimmed', () => {
+  const start = flowNode('trigger_message', 'inicio')
+  const note = flowNode('note', 'nota', { text: 'Revisar o menu com o time de cobrança.' })
+  const pick = { candidates: new Set(['inicio', MENU.id, OTHER_MENU.id, MESSAGE.id]), selected: null, select: () => undefined, confirm: () => undefined, hint: 'dica' }
+  const first = renderNode(start, { pick })
+  assert.match(first, /data-pick="candidate"/)
+  assert.match(first, /role="button"/)
+  assert.match(first, new RegExp(`aria-label="${getComponentLabel('trigger_message')}, ID inicio"`))
+  assert.match(first, /title="ID inicio"/)
+  for (const shown of [MENU, OTHER_MENU, MESSAGE]) assert.match(renderNode(shown, { pick }), /data-pick="candidate"/)
+  const dimmed = renderNode(note, { pick })
+  assert.match(dimmed, /data-pick="dimmed"/)
+  assert.match(dimmed, /opacity-40/)
+  assert.doesNotMatch(dimmed, /role="button"/)
+  const picked = renderNode(start, { pick: { ...pick, selected: 'inicio' } })
+  assert.match(picked, /data-pick="selected"/)
+  assert.match(picked, /aria-pressed="true"/)
+})
+
+test('a listed pick fades the connections, a pick open to any component keeps them readable, and both lock them', () => {
+  const locked = { selectable: false, deletable: false, focusable: false, updatable: false }
+  assert.deepEqual(builder.edgeLock(true, false, true), { ...locked, className: 'opacity-30 transition-opacity' })
+  assert.deepEqual(builder.edgeLock(true, true, true), locked)
+  assert.deepEqual(builder.edgeLock(false, false, true), locked)
+  assert.equal(builder.edgeLock(false, false, false), null)
+})

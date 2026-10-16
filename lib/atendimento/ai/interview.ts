@@ -4,7 +4,7 @@ import { z } from "zod"
 import { NOTE_TYPE, START_ID, START_TYPE, categories, componentCatalog, getComponentLabel } from "../catalog"
 import { importFlow } from "../format"
 import type { AtendimentoFlow } from "../types"
-import { DEFAULT_FILL, LIMITS } from "./contracts"
+import { DEFAULT_FILL, LIMITS, RI_LIMITS } from "./contracts"
 import type { Effort, GenerateFailure } from "./contracts"
 import { flowToRi } from "./edit"
 import { guideOf } from "./guide"
@@ -27,6 +27,7 @@ export interface InterviewPick {
   label: string
   candidates: string[]
   ready: boolean
+  any: boolean
 }
 
 export interface InterviewTurn {
@@ -91,11 +92,12 @@ export const copilotSchema: z.ZodType<InterviewTurn> = z.object({
   pick: z
     .object({
       label: z.string().describe("O que o usuário seleciona no canvas, com o artigo, como o menu de opções ou a mensagem"),
-      candidates: z.array(z.string()).describe("IDs do resumo do fluxo de todos os componentes que servem para o pedido"),
+      any: z.boolean().describe("true quando o pedido cria um componente sem dizer o ponto do fluxo: o usuário seleciona qualquer componente, o Início inclusive, candidates fica vazio e ready fica false; false quando candidates traz os componentes que servem"),
+      candidates: z.array(z.string()).describe("IDs do resumo do fluxo de todos os componentes que servem para o pedido; vazio com any true"),
       ready: z.boolean().describe("true quando plan já descreve a mudança inteira e só falta saber qual componente, com plan escrito para o componente que o usuário selecionar; false quando ainda falta outra decisão"),
     })
     .nullable()
-    .describe("Seleção no canvas, com ask, quando mais de um componente do resumo serve para o pedido; null nas outras respostas"),
+    .describe("Seleção no canvas, com ask, quando mais de um componente do resumo serve para o pedido ou quando o pedido cria um componente sem dizer o ponto do fluxo; null nas outras respostas"),
 })
 
 const HISTORY_MESSAGES = 80
@@ -116,10 +118,12 @@ const COPILOT_FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. 
 const PICK_FALLBACK = "o componente"
 const PICK_LOST = "Em qual componente você quer fazer essa mudança? Escreva o texto que aparece nele."
 const PICK_MESSAGE = "Mais de um componente serve para esse pedido. Em qual deles você quer fazer a mudança?"
+const PICK_ANY_MESSAGE = "O componente novo entra logo depois do componente que você selecionar, ou logo antes dele, se preferir. Depois de qual componente ele entra?"
 const PICK_KEYS = ["pick", "selecao", "seleção", "selection"]
 const PICK_LABEL_KEYS = ["label", "rotulo", "rótulo"]
 const PICK_CANDIDATE_KEYS = ["candidates", "candidatos", "ids"]
 const PICK_READY_KEYS = ["ready", "pronto", "pronta"]
+const PICK_ANY_KEYS = ["any", "qualquer", "todos"]
 const READY_WORDS = new Set(["true", "sim"])
 const ARTICLES = new Set(["o", "a", "os", "as", "um", "uma"])
 const OMITTED = "Mensagens anteriores da conversa foram resumidas no plano."
@@ -311,6 +315,21 @@ const COPILOT_LINES = [
   "1. Quando a situação atual indica uma proposta em revisão, o resumo já inclui a proposta, e o pedido seguinte ajusta essa proposta: plan traz só o ajuste.",
   "2. O usuário aplica ou descarta a proposta com os botões Aplicar e Descartar, no cartão da proposta. Quando ele pede para aplicar ou descartar, devolva finish e lembre em uma frase que basta clicar em Aplicar ou em Descartar no cartão.",
   "",
+  "# Componente novo sem ponto no fluxo",
+  "1. Quando o pedido cria um componente para o caminho do atendimento, como uma mensagem, uma tag ou um menu, sem dizer o ponto do fluxo, antes ou depois de qual componente, peça para o usuário selecionar no canvas o componente que fica antes do novo, mesmo quando um ponto parece o mais provável: devolva ask com pick, com any true e candidates vazio. Todos os componentes do fluxo servem para essa seleção, o Início inclusive. A opção nova de um menu entra no menu, e o caminho dela segue dessa opção.",
+  "2. Nessa pergunta, message traz a sua proposta para o componente novo, diz que ele entra logo depois do componente selecionado, ou logo antes dele, se o usuário preferir, e termina perguntando o ponto, como: Pensei na mensagem Obrigado pelo contato, volte sempre. Ela entra logo depois do componente que você selecionar, ou logo antes dele, se preferir. Depois de qual componente ela entra?",
+  "3. Em pick, label diz o que selecionar, como o componente que vem antes da mensagem nova, e ready fica false. suggestions traz Logo depois do selecionado e Logo antes do selecionado.",
+  "4. A mensagem que começa com Selecionei no canvas traz o componente escolhido: o componente novo entra logo depois dele, na saída dele, e o caminho segue como antes. Com Logo antes do selecionado na resposta, ele entra logo antes, na entrada dele, e com o Início escolhido, ele entra logo depois do Início. Quando o componente escolhido tem mais de uma saída, como um menu, pergunte em qual saída o componente novo entra, propondo a mais provável. Cite em plan o ID do componente escolhido e devolva edit quando o pedido fica completo.",
+  "5. Quando o fluxo tem só o Início, o componente novo entra logo depois dele, sem seleção.",
+  "",
+  "# Quantidades e limites",
+  "1. Quando o pedido diz quantos itens quer, como opções, mensagens ou perguntas, plan e o resultado trazem exatamente esse número. As opções a mais, como Voltar e Encerrar, entram quando o usuário pede ou aceita a sua proposta delas.",
+  "2. Em plan, escreva com quantas opções cada menu novo ou alterado fica no fim, contando todas, como em: o menu Como podemos ajudar? fica com 8 opções. Para um menu que já existe, cite também o ID dele nessa frase.",
+  `3. Limites da plataforma: o Menu de Opções tem de 1 a ${RI_LIMITS.menuOptions} opções, mostra até 3 como botões e, com mais opções, vai como lista; a mensagem do menu tem até 1024 caracteres; a Múltipla Condição tem até ${RI_LIMITS.conditions} condições; o Randomizador tem ao menos 2 caminhos, com pesos que somam 100; o Solicitar Dados faz de 1 a 5 tentativas. Os outros componentes seguem as chaves e os valores da plataforma.`,
+  "4. Antes de editar, confira se o pedido cabe nos limites, somando os itens que o componente já tem no resumo com os que o pedido acrescenta. No resumo, opções (12) diz quantas opções o menu tem quando a lista vem cortada.",
+  `5. Quando o pedido passa de um limite, diga quantos itens o componente tem e quantos cabem e proponha caminhos que respeitam o limite: trocar as opções atuais pelas novas, avisando que as opções atuais e os passos que só elas alcançam saem do fluxo; dividir em dois menus, com uma opção que leva ao segundo; ou reduzir o número de opções. Edite depois que o usuário escolher um caminho. Exemplo para o pedido crie 8 opções no menu Como podemos ajudar?, que já tem 6: O menu Como podemos ajudar? tem 6 opções e aceita até ${RI_LIMITS.menuOptions}, então cabem mais 4. Posso trocar as 6 opções atuais pelas 8 novas, e as atuais saem do fluxo com os passos que só elas alcançam, ou dividir em dois menus, com a opção Mais opções levando ao segundo. Qual caminho você prefere? Nesse exemplo, suggestions traz Trocar as opções atuais, Dividir em dois menus e Acrescentar só 4 opções.`,
+  "6. Quando o pedido pede algo fora do formato da plataforma, explique o limite em uma frase e proponha alternativas que cabem nele. plan e a edição seguem sempre o formato da plataforma, também quando o usuário insiste: explique de novo e ofereça as alternativas.",
+  "",
   "# Plano",
   "1. plan traz o pedido de mudança completo, escrito como um cliente pede a quem edita o fluxo: o que criar, alterar ou remover, citando os componentes pelo texto ou pelo nome que aparecem no resumo, os textos novos, as opções na ordem e o destino de cada saída.",
   "2. Atualize plan em toda resposta, inclusive nas perguntas, com as decisões tomadas e as suas propostas para o que falta.",
@@ -376,6 +395,11 @@ function marked(text: string, limit: number = PART_LIMIT): string {
   return cut.length < full.length ? `${cut.replace(/[\s,;:.]+$/, "")}…` : cut
 }
 
+function listCount(value: string): number {
+  const parsed = parseJsonText(value.trim())
+  return parsed.ok && Array.isArray(parsed.value) ? parsed.value.length : 0
+}
+
 function brief(node: RiNode, mark = false): string {
   const config = new Map(node.config.map((entry) => [entry.key, entry.value]))
   const keys = [...new Set([...(guideOf(node.type)?.required ?? []), ...PREFERRED_KEYS])]
@@ -385,7 +409,8 @@ function brief(node: RiNode, mark = false): string {
     if (!value) continue
     const text = mark ? marked(readable(value)) : shorten(readable(value), PART_LIMIT)
     if (!text) continue
-    parts.push(key === "options" ? `opções: ${text}` : key === "targetNodeId" ? `volta para ${text}` : quote(text))
+    const count = mark && key === "options" && text.endsWith("…") ? listCount(value) : 0
+    parts.push(key === "options" ? `opções${count ? ` (${count})` : ""}: ${text}` : key === "targetNodeId" ? `volta para ${text}` : quote(text))
     if (parts.length >= 2) break
   }
   return parts.join(" ")
@@ -545,6 +570,7 @@ function coercePick(value: unknown): InterviewPick | null {
     label: asText(pick(value, PICK_LABEL_KEYS)),
     candidates: candidateTexts(pick(value, PICK_CANDIDATE_KEYS)),
     ready: READY_WORDS.has(asText(pick(value, PICK_READY_KEYS)).trim().toLowerCase()),
+    any: READY_WORDS.has(asText(pick(value, PICK_ANY_KEYS)).trim().toLowerCase()),
   }
 }
 
@@ -573,7 +599,7 @@ function partialPick(value: unknown): InterviewPick | null | undefined {
   if (value === null) return null
   if (!isRecord(value)) return undefined
   const candidates = Array.isArray(value.candidates) ? value.candidates.filter((entry): entry is string => typeof entry === "string") : []
-  return { label: typeof value.label === "string" ? tidy(value.label) : "", candidates: candidates.map((entry) => entry.trim()).filter(Boolean), ready: value.ready === true }
+  return { label: typeof value.label === "string" ? tidy(value.label) : "", candidates: candidates.map((entry) => entry.trim()).filter(Boolean), ready: value.ready === true, any: value.any === true }
 }
 
 function partialTurn(value: unknown, copilot = false): Partial<InterviewTurn> | null {
@@ -630,8 +656,10 @@ function pickLabel(value: unknown): string {
   return ARTICLES.has(first.toLowerCase()) ? `${first.toLowerCase()}${label.slice(first.length)}` : label
 }
 
-function settlePick(value: unknown, ids: Iterable<string> | undefined, plan: string): InterviewPick | null {
-  if (!isRecord(value) || !Array.isArray(value.candidates)) return null
+function settlePick(value: unknown, ids: readonly string[], plan: string): InterviewPick | null {
+  if (!isRecord(value)) return null
+  if (value.any === true) return new Set(ids.filter((id) => typeof id === "string" && id.trim())).size < PICK_LIMITS.min ? null : { label: pickLabel(value.label), candidates: [], ready: false, any: true }
+  if (!Array.isArray(value.candidates)) return null
   const resolve = idResolver(ids)
   const candidates: string[] = []
   for (const entry of value.candidates) {
@@ -640,11 +668,11 @@ function settlePick(value: unknown, ids: Iterable<string> | undefined, plan: str
   }
   if (candidates.length < PICK_LIMITS.min) return null
   const ready = value.ready === true && plan !== "" && !candidates.some((id) => citesId(plan, id))
-  return { label: pickLabel(value.label), candidates, ready }
+  return { label: pickLabel(value.label), candidates, ready, any: false }
 }
 
 function wantedPick(value: unknown): boolean {
-  return isRecord(value) && Array.isArray(value.candidates) && value.candidates.some((entry) => asText(entry).trim() !== "")
+  return isRecord(value) && (value.any === true || (Array.isArray(value.candidates) && value.candidates.some((entry) => asText(entry).trim() !== "")))
 }
 
 function asksSelection(text: string): boolean {
@@ -680,25 +708,26 @@ function pickSuggestions(values: readonly string[], candidates: readonly string[
 function settleMessage(said: string, fallback: string, selection: InterviewPick | null, lost: boolean): string {
   if (lost && (!said || /canvas|selecion|confirmar/i.test(said))) return PICK_LOST
   if (said) return said
-  return selection ? PICK_MESSAGE : fallback
+  return selection ? (selection.any ? PICK_ANY_MESSAGE : PICK_MESSAGE) : fallback
 }
 
 export function settleTurn(raw: InterviewTurn, context: SettleContext): InterviewTurn {
   const copilot = context.scope === "copilot"
+  const ids = [...(context.ids ?? [])]
   let action = raw.action
   if (action === "generate" && (copilot || context.hasFlow)) action = "edit"
   else if (action === "edit" && !copilot && !context.hasFlow) action = "generate"
   let plan = clipPlan(raw.plan)
   if ((action === "generate" || action === "edit") && !plan && !copilot) plan = clipPlan(userText(context.history, action === "edit"))
   let said = tidy(raw.message)
-  const offered = copilot && action !== "finish" ? settlePick(raw.pick, context.ids, plan) : null
-  if (offered && action === "edit" && !offered.candidates.some((id) => citesId(plan, id))) {
+  const offered = copilot && action !== "finish" ? settlePick(raw.pick, ids, plan) : null
+  if (offered && action === "edit" && !(offered.any ? ids : offered.candidates).some((id) => citesId(plan, id))) {
     action = "ask"
     if (!asksSelection(said) && !said.endsWith("?")) said = ""
   }
   const selection = action === "ask" ? offered : null
   const lost = copilot && action === "ask" && !selection && (wantedPick(raw.pick) || asksSelection(said))
-  const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : selection ? pickSuggestions(raw.suggestions, selection.candidates, context.texts) : cleanSuggestions(raw.suggestions)
+  const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : selection && !selection.any ? pickSuggestions(raw.suggestions, selection.candidates, context.texts) : cleanSuggestions(raw.suggestions)
   const message = settleMessage(said, (copilot ? COPILOT_MESSAGES : DEFAULT_MESSAGES)[action], selection, lost)
   return selection ? { message, suggestions, action, plan, pick: selection } : { message, suggestions, action, plan }
 }

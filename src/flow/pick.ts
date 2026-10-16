@@ -8,6 +8,7 @@ export interface PickRequest extends PickHandlers {
   label: string
   candidates: string[]
   selected: string | null
+  any?: boolean
 }
 
 export interface CanvasPick {

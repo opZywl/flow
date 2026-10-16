@@ -377,6 +377,200 @@ test('a conclusão liga saídas novas sem destino a um Encerrar Conversa e não 
   assertRoundTrip(finished.flow)
 })
 
+const MENU_TEXTS = ['Agendar consulta', 'Boletos', 'Encerrar']
+const OVER_LIMIT = 'O menu ficou com 14 opções, e o limite é de 10. Deixe até 10 opções nele: divida em dois menus, com uma opção que leva ao segundo, ou reduza as opções, como o pedido indicar.'
+const menuDelta = (texts, extra = {}) => ({ id: MENU.id, type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify(texts.map((text) => ({ text }))) }], ...extra })
+const crowdedDelta = (total) => {
+  const texts = [...MENU_TEXTS, ...Array.from({ length: total - MENU_TEXTS.length }, (_, index) => `Assunto ${index + 4}`)]
+  return {
+    nodes: [menuDelta(texts), ...texts.slice(3).map((text, index) => ({ id: `info_${index + 4}`, type: 'envio_pergunta', config: [{ key: 'template', value: `Sobre ${text}.` }] }))],
+    edges: texts.slice(3).map((text, index) => ({ from: MENU.id, output: text, to: `info_${index + 4}` })),
+  }
+}
+const menuOf = (flow) => flow.nodes.find((node) => node.id === MENU.id)
+const optionCount = (node) => Object.keys(node.data.data).filter((key) => /^text-\d+$/.test(key)).length
+const ownIssues = (review, id = MENU.id) => review.issues.filter((issue) => issue.nodeId === id).map((issue) => `${issue.severity}/${issue.scope}: ${issue.message}`)
+
+test('no modo edição o menu acima do limite fica inteiro até a correção, vira pendência bloqueante e nenhuma opção some em silêncio', () => {
+  const result = applyEdit(BASE, crowdedDelta(14), { now: NOW })
+  const menu = menuOf(result.flow)
+  assert.equal(optionCount(menu), 14)
+  assert.equal(menu.data.data['text-14'], 'Assunto 14')
+  assert.equal(result.flow.edges.filter((edge) => edge.source === MENU.id).length, 14)
+  assert.equal(result.notes.some((note) => /descartad/.test(note.message)), false)
+  const review = reviewEdit(BASE, result, { prompt: 'No menu Como podemos ajudar?, acrescente 11 assuntos.' })
+  assert.deepEqual(ownIssues(review), [`error/ia: ${OVER_LIMIT}`, 'error/ia: O menu deve ter de 1 a 10 opções.'])
+  assert.ok(review.pending.includes(`[${MENU.id}] Menu de Opções: ${OVER_LIMIT}`))
+  assert.equal(needsEditCorrection(review), true)
+  assert.ok(review.score[0] >= 1)
+  assert.match(editCorrectionPrompt(review.pending), /O menu ficou com 14 opções, e o limite é de 10\./)
+
+  const texts = [...MENU_TEXTS.slice(0, 2), 'Mais assuntos', 'Encerrar']
+  const fix = {
+    nodes: [menuDelta(texts), { id: 'mais', type: 'envio_mensagem', config: [{ key: 'title', value: 'Mais assuntos:' }, { key: 'options', value: JSON.stringify(['Assunto 4', 'Assunto 5'].map((text) => ({ text }))) }] }],
+    edges: [{ from: MENU.id, output: 'Agendar consulta', to: NOTICE.id }, { from: MENU.id, output: 'Boletos', to: BOLETOS.id }, { from: MENU.id, output: 'Mais assuntos', to: 'mais' }, { from: MENU.id, output: 'Encerrar', to: BYE.id }, { from: 'mais', output: 'Assunto 4', to: 'info_4' }, { from: 'mais', output: 'Assunto 5', to: 'info_5' }],
+  }
+  const fixed = applyEdit(result.flow, fix, { now: NOW, ids: result.ids, detached: result.detached })
+  assert.equal(optionCount(menuOf(fixed.flow)), 4)
+  const after = reviewEdit(BASE, fixed, { prompt: 'No menu Como podemos ajudar?, acrescente 11 assuntos.' })
+  assert.deepEqual(ownIssues(after), [])
+  assert.equal(after.issues.some((issue) => /limite é de/.test(issue.message)), false)
+})
+
+test('a conclusão corta só as opções acima do limite, com as saídas e os passos que só elas alcançavam, e avisa quais ficaram de fora', () => {
+  const result = applyEdit(BASE, crowdedDelta(14), { now: NOW })
+  const finished = concludeEdit(BASE, result)
+  const menu = menuOf(finished.flow)
+  assert.equal(optionCount(menu), 10)
+  assert.equal(menu.data.data['text-10'], 'Assunto 10')
+  for (const key of ['opt-11', 'text-11', 'description-11', 'text-14']) assert.equal(menu.data.data[key], undefined, key)
+  assert.deepEqual(finished.flow.edges.filter((edge) => edge.source === MENU.id).map((edge) => edge.sourceHandle).sort(), Array.from({ length: 10 }, (_, index) => `output-${index}`).sort())
+  const templates = finished.flow.nodes.map((node) => node.data.data.template).filter((text) => /^Sobre Assunto/.test(text ?? ''))
+  assert.deepEqual(templates, Array.from({ length: 7 }, (_, index) => `Sobre Assunto ${index + 4}.`))
+  const cut = finished.notes.filter((note) => note.nodeId === MENU.id)
+  assert.deepEqual(cut.map((note) => [note.level, note.scope, note.message]), [['error', 'ajuste', 'O menu aceita até 10 opções, e a edição trouxe 14. As opções “Assunto 11”, “Assunto 12”, “Assunto 13”, “Assunto 14” ficaram de fora, com os passos que só elas alcançavam. Para manter todas, peça para dividir em dois menus, com uma opção que leva ao segundo.']])
+  const review = reviewEdit(BASE, finished)
+  assert.deepEqual(ownIssues(review), [`error/ajuste: ${cut[0].message}`])
+  assertNoNewErrors(BASE, finished.flow)
+  assertUntouched(BASE, finished.flow, [MENU.id])
+  assertRoundTrip(finished.flow)
+  const one = concludeEdit(BASE, applyEdit(BASE, crowdedDelta(11), { now: NOW }))
+  assert.equal(optionCount(menuOf(one.flow)), 10)
+  assert.ok(one.notes.some((note) => note.message.startsWith('O menu aceita até 10 opções, e a edição trouxe 11. A opção “Assunto 11” ficou de fora, com os passos que só ela alcançava.')))
+  const exact = concludeEdit(BASE, applyEdit(BASE, crowdedDelta(10), { now: NOW }))
+  assert.equal(optionCount(menuOf(exact.flow)), 10)
+  assert.equal(exact.notes.some((note) => /ficaram de fora|ficou de fora/.test(note.message)), false)
+})
+
+test('a Múltipla Condição acima do limite também fica inteira até a correção e a conclusão corta o excesso com aviso', () => {
+  const conditions = Array.from({ length: 22 }, (_, index) => ({ var: 'faixa', value: String(index + 1) }))
+  const delta = {
+    nodes: [{ id: 'faixas', type: 'multiple_condicional_api', config: [{ key: 'conditions', value: JSON.stringify(conditions) }] }, ...conditions.map((_, index) => ({ id: `faixa_${index + 1}`, type: 'envio_pergunta', config: [{ key: 'template', value: `Faixa ${index + 1}.` }] }))],
+    edges: [{ from: NOTICE.id, output: '', to: 'faixas' }, { from: 'faixas', output: '1', to: AGENDA.id }, ...conditions.slice(1).map((_, index) => ({ from: 'faixas', output: String(index + 2), to: `faixa_${index + 2}` }))],
+  }
+  const result = applyEdit(BASE, delta, { now: NOW })
+  const id = result.ids.get('faixas')
+  assert.equal(result.flow.nodes.find((node) => node.id === id).data.data['var-22'], 'faixa')
+  const review = reviewEdit(BASE, result)
+  assert.deepEqual(ownIssues(review, id), ['error/ia: A Múltipla Condição ficou com 22 condições, e o limite é de 20. Deixe até 20 condições nela.', 'warning/ia: O limite é de 20 condições.'])
+  assert.equal(needsEditCorrection(review), true)
+  const finished = concludeEdit(BASE, result)
+  const data = finished.flow.nodes.find((node) => node.id === id).data.data
+  assert.equal(data['var-20'], 'faixa')
+  assert.equal(data['var-21'], undefined)
+  assert.equal(data['value-22'], undefined)
+  assert.ok(finished.notes.some((note) => note.nodeId === id && note.level === 'error' && note.message === 'A Múltipla Condição aceita até 20 condições, e a edição trouxe 22. As condições “faixa = 21”, “faixa = 22” ficaram de fora, com os passos que só elas alcançavam.'))
+  assert.equal(finished.flow.nodes.some((node) => node.data.data.template === 'Faixa 21.' || node.data.data.template === 'Faixa 22.'), false)
+  assertNoNewErrors(BASE, finished.flow)
+})
+
+test('o menu que já passava do limite no fluxo aberto não perde opções quando a edição só muda o texto dele', () => {
+  const crowded = JSON.parse(JSON.stringify(BASE))
+  const data = crowded.nodes.find((node) => node.id === MENU.id).data.data
+  for (let index = 4; index <= 12; index++) Object.assign(data, { [`opt-${index}`]: String(index), [`text-${index}`]: `Extra ${index}`, [`description-${index}`]: '' })
+  const base = importFlow(crowded)
+  const result = applyEdit(base, { nodes: [{ id: MENU.id, type: 'envio_mensagem', config: [{ key: 'title', value: 'Escolha um assunto:' }] }], edges: [] }, { now: NOW })
+  assert.equal(optionCount(menuOf(result.flow)), 12)
+  const review = reviewEdit(base, result)
+  assert.equal(review.issues.some((issue) => /limite é de/.test(issue.message)), false)
+  const finished = concludeEdit(base, result)
+  assert.equal(optionCount(menuOf(finished.flow)), 12)
+  assert.equal(finished.notes.some((note) => /ficaram de fora/.test(note.message)), false)
+  const grown = applyEdit(base, { nodes: [menuDelta([...MENU_TEXTS, ...Array.from({ length: 10 }, (_, index) => `Extra ${index + 4}`)])], edges: [] }, { now: NOW })
+  assert.equal(optionCount(menuOf(grown.flow)), 13)
+  assert.ok(reviewEdit(base, grown).issues.some((issue) => issue.nodeId === MENU.id && issue.message.startsWith('O menu ficou com 13 opções, e o limite é de 10.')))
+  assert.equal(optionCount(menuOf(concludeEdit(base, grown).flow)), 12)
+})
+
+const countIssue = (asked, got) => `error/ia: O pedido pede ${asked} ${asked === 1 ? 'opção' : 'opções'} neste menu, e ele ficou com ${got}. Deixe o menu com exatamente ${asked} ${asked === 1 ? 'opção' : 'opções'}, as do pedido, na ordem dele.`
+const PLANS_DELTA = (texts) => ({
+  nodes: [
+    menuDelta(['Agendar consulta', 'Boletos', 'Planos', 'Encerrar']),
+    { id: 'planos', type: 'envio_mensagem', config: [{ key: 'title', value: 'Qual plano você quer?' }, { key: 'options', value: JSON.stringify(texts.map((text) => ({ text }))) }] },
+    ...texts.map((text, index) => ({ id: `plano_${index}`, type: 'envio_pergunta', config: [{ key: 'template', value: `Plano ${text}.` }] })),
+  ],
+  edges: [
+    { from: MENU.id, output: 'Agendar consulta', to: NOTICE.id },
+    { from: MENU.id, output: 'Boletos', to: BOLETOS.id },
+    { from: MENU.id, output: 'Planos', to: 'planos' },
+    { from: MENU.id, output: 'Encerrar', to: BYE.id },
+    ...texts.map((text, index) => ({ from: 'planos', output: text, to: `plano_${index}` })),
+  ],
+})
+
+test('quando o plano diz com quantas opções o menu fica, a revisão confere o número e bloqueia a opção a mais, como um Voltar que o pedido não trouxe', () => {
+  const exact = applyEdit(BASE, PLANS_DELTA(['Básico', 'Plus', 'Premium']), { now: NOW })
+  const extra = applyEdit(BASE, PLANS_DELTA(['Básico', 'Plus', 'Premium', 'Voltar']), { now: NOW })
+  const plan = 'No menu Como podemos ajudar?, acrescente a opção Planos antes de Encerrar, que leva ao menu Qual plano você quer?, com Básico, Plus e Premium. O menu Como podemos ajudar? fica com 4 opções. O menu Qual plano você quer? fica com 3 opções.'
+  const planos = (result) => result.ids.get('planos')
+  assert.deepEqual(reviewEdit(BASE, exact, { prompt: plan }).issues.filter((issue) => /pede/.test(issue.message)), [])
+  const review = reviewEdit(BASE, extra, { prompt: plan })
+  assert.deepEqual(ownIssues(review, planos(extra)), [countIssue(3, 4)])
+  assert.deepEqual(ownIssues(review), [])
+  assert.equal(review.issues.find((issue) => issue.nodeId === planos(extra) && /pede/.test(issue.message)).riId, 'planos')
+  assert.ok(review.pending.includes(`[planos] Menu de Opções: ${countIssue(3, 4).slice('error/ia: '.length)}`))
+  assert.equal(needsEditCorrection(review), true)
+  const cited = [
+    `No menu ID ${MENU.id}, acrescente a opção Planos, que leva ao menu Qual plano você quer?, que fica com 3 opções: Básico, Plus e Premium.`,
+    'O menu “Qual plano você quer?” fica com três opções.',
+    'O menu Qual plano você quer? passa a ter exatamente 3 opções; ele recebe Básico, Plus e Premium.',
+    'O menu Qual plano você quer? fica com 3 opções no total.',
+    'O menu *Qual plano você quer?* 😀 fica com 3 opções.',
+    'No menu Qual plano você quer?, troque as 4 opções atuais por estas 3 opções, nesta ordem: Básico, Plus e Premium.',
+    'Troque as opções do menu Qual plano você quer? pelas 3 novas: Básico, Plus e Premium.',
+    'Substitua todas as opções do menu Qual plano você quer? por estas 3: Básico, Plus e Premium.',
+  ]
+  for (const text of cited) assert.deepEqual(ownIssues(reviewEdit(BASE, extra, { prompt: text }), planos(extra)), [countIssue(3, 4)], text)
+  assert.deepEqual(ownIssues(reviewEdit(BASE, exact, { prompt: `O menu ID ${MENU.id} fica com 3 opções.` })), [countIssue(3, 4)])
+  assert.deepEqual(ownIssues(reviewEdit(BASE, exact, { prompt: `Os menus IDs ${MENU.id} e 999 ficam com 4 opções.` })), [])
+  const finished = concludeEdit(BASE, extra)
+  assert.deepEqual(ownIssues(reviewEdit(BASE, finished, { prompt: plan }), planos(extra)), [countIssue(3, 4)])
+})
+
+test('a contagem de opções só vale quando o plano diz o total do menu, e fica de fora quando o número não aponta um menu só', () => {
+  const extra = applyEdit(BASE, PLANS_DELTA(['Básico', 'Plus', 'Premium', 'Voltar']), { now: NOW })
+  const silent = [
+    'Acrescente uma opção Planos no menu, com um submenu de 3 opções.',
+    'No menu Como podemos ajudar?, com 3 opções, acrescente a opção Planos.',
+    'O menu Como podemos ajudar? fica com as 3 opções atuais e ganha a opção Planos.',
+    'Crie o submenu de planos com Básico, Plus e Premium; ele fica com três opções.',
+    'O menu Como podemos ajudar? fica com 4 opções, e o submenu de planos fica com 3 opções.',
+    'O menu Qual plano você quer? fica com 12 opções.',
+    'O menu Qual plano você quer? fica com 3 opções. O menu Qual plano você quer? fica com 4 opções.',
+    'No menu Qual plano você quer?, troque as opções Plus e Premium por estas 3 opções: Ouro, Prata e Bronze.',
+    'No menu Qual plano você quer?, troque a opção Plus por 3 opções: Ouro, Prata e Bronze.',
+    '',
+  ]
+  for (const plan of silent) assert.deepEqual(review(plan), [], plan)
+  function review(plan) {
+    return reviewEdit(BASE, extra, { prompt: plan }).issues.filter((issue) => /pede/.test(issue.message)).map((issue) => issue.message)
+  }
+  const counted = (result, prompt) => ownIssues(reviewEdit(BASE, result, { prompt })).filter((text) => text.includes('O pedido pede'))
+  const single = applyEdit(BASE, { nodes: [menuDelta([...MENU_TEXTS.slice(0, 2), 'Financeiro', 'Voltar', 'Encerrar'])], edges: [] }, { now: NOW })
+  assert.deepEqual(counted(single, 'Acrescente a opção Financeiro antes de Encerrar. Ele fica com 4 opções.'), [countIssue(4, 5)])
+  assert.deepEqual(counted(single, 'Acrescente a opção Financeiro antes de Encerrar. Ele fica com 5 opções.'), [])
+  const same = applyEdit(BASE, { nodes: [{ id: WELCOME.id, type: 'envio_pergunta', config: [{ key: 'template', value: 'Bem-vindo.' }] }], edges: [] }, { now: NOW })
+  assert.deepEqual(counted(same, 'Troque a saudação. O menu Como podemos ajudar? fica com 3 opções.'), [])
+  assert.deepEqual(counted(same, 'Troque a saudação. O menu Como podemos ajudar? fica com 1 opção.'), [countIssue(1, 3)])
+  const generic = applyEdit(BASE, { nodes: [menuDelta(MENU_TEXTS), { id: 'escolha', type: 'envio_mensagem', config: [{ key: 'title', value: 'Escolha uma das opções:' }, { key: 'options', value: JSON.stringify([{ text: 'A' }, { text: 'B' }]) }] }], edges: [{ from: BOLETOS.id, output: '', to: 'escolha' }] }, { now: NOW })
+  const plain = (prompt) => reviewEdit(BASE, generic, { prompt }).issues.filter((issue) => /pede/.test(issue.message)).map((issue) => issue.riId)
+  assert.deepEqual(plain('O menu Como podemos ajudar? fica com 2 opções.'), [MENU.id])
+  assert.deepEqual(plain('O menu de opções fica com 3 opções.'), ['escolha'])
+})
+
+test('o prompt de edição pede o número exato de opções, as opções de voltar só quando o pedido traz, e os limites da plataforma', () => {
+  for (const fill of [true, false]) {
+    const system = editSystemPrompt({ fill })
+    const section = system.slice(system.indexOf('# Quantidades e limites'))
+    assert.ok(system.indexOf('# Quantidades e limites') > system.indexOf('# Modo de edição'))
+    for (const text of ['o menu fica com exatamente esse número, com as opções do pedido na ordem dele', 'As opções de voltar e de encerramento entram quando o pedido traz essas opções', 'vale acima das regras de menus da seção Fluxo completo', 'crie exatamente esse número', 'o Menu de Opções tem de 1 a 10 opções, e até 3 com buttons "true"', 'a Múltipla Condição tem até 20 condições', 'divida em dois menus, com uma opção que leva ao segundo']) assert.ok(section.includes(text), text)
+    assert.equal(/[!—–]/.test(section), false)
+    assert.ok(!/\b(nunca|jamais|evite|proibido)\b|\bnão (faça|use|crie|deixe|coloque)\b/i.test(section))
+    assert.deepEqual(section.split('\n').slice(1).map((line) => line.slice(0, 2)), ['- ', '- ', '- '])
+    assert.ok(!systemPrompt({ fill }).includes('# Quantidades e limites'))
+  }
+})
+
 test('nome e descrição só mudam quando vêm preenchidos e diferentes', () => {
   assert.equal(applyEdit(BASE, { name: '  ', description: '', nodes: [], edges: [] }).flow.name, BASE.name)
   assert.equal(applyEdit(BASE, { name: BASE.name, description: BASE.description, nodes: [], edges: [] }).changes.changed, 0)

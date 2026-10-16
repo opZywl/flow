@@ -1,5 +1,5 @@
 import { API_TYPES, MENU_TYPE, expectedFieldTypes, getDefinition, mirrorKeys, weekDayOptions } from "../catalog"
-import { optionIndices } from "../format"
+import { conditionIndices, optionIndices } from "../format"
 import type { ComponentDefinition, FieldSpec, ItemFieldSpec, JsonObject, JsonValue } from "../types"
 import { RI_LIMITS } from "./contracts"
 import type { RiConfigEntry } from "./ri"
@@ -14,6 +14,16 @@ export interface ValueNote {
 
 export interface ConfigContext {
   ruleId: () => string
+  edit?: boolean
+}
+
+export type ListKind = "menuOptions" | "conditionPairs"
+
+export interface ListSize {
+  key: string
+  kind: ListKind
+  count: number
+  max: number
 }
 
 export interface ConfigOutcome {
@@ -720,7 +730,7 @@ export function configureNode(type: string, config: readonly RiConfigEntry[], co
           break
         }
         const limit = field.max ?? RI_LIMITS.menuOptions
-        if (options.length > limit) {
+        if (options.length > limit && !context.edit) {
           notes.push({ level: "warning", message: `O menu aceita até ${limit} opções; ${options.length - limit} foram descartadas.` })
           options = options.slice(0, limit)
         }
@@ -735,7 +745,7 @@ export function configureNode(type: string, config: readonly RiConfigEntry[], co
           break
         }
         const limit = field.max ?? RI_LIMITS.conditions
-        if (pairs.length > limit) {
+        if (pairs.length > limit && !context.edit) {
           notes.push({ level: "warning", message: `A Múltipla Condição aceita até ${limit} condições; ${pairs.length - limit} foram descartadas.` })
           pairs = pairs.slice(0, limit)
         }
@@ -802,4 +812,32 @@ export function settleData(type: string, data: JsonObject): void {
   if (type === "envio_imagem" && !filledText(data.filename)) data.filename = fileName(filledText(data.imagem) ? data.imagem : data.url)
   if (type === MENU_TYPE && data.buttons === "true" && optionIndices(data).length > 3) data.buttons = "false"
   if (type === "webchatHandoff" && filledText(data.message) && !data.message.includes("{{link}}")) data.message = `${data.message}\n{{link}}`
+}
+
+const listIndices = (kind: ListKind, data: JsonObject) => (kind === "menuOptions" ? optionIndices(data) : conditionIndices(data))
+
+export function listSizes(type: string, data: JsonObject): ListSize[] {
+  const sizes: ListSize[] = []
+  for (const field of getDefinition(type)?.fields ?? []) {
+    if (field.kind !== "menuOptions" && field.kind !== "conditionPairs") continue
+    const max = field.max ?? (field.kind === "menuOptions" ? RI_LIMITS.menuOptions : RI_LIMITS.conditions)
+    sizes.push({ key: field.key, kind: field.kind, count: listIndices(field.kind, data).length, max })
+  }
+  return sizes
+}
+
+export function trimList(data: JsonObject, kind: ListKind, keep: number): string[] {
+  const cut = listIndices(kind, data).slice(Math.max(0, keep))
+  if (!cut.length) return []
+  const labels = cut.map((index, position) => {
+    if (kind === "conditionPairs") return `${textOf(data[`var-${index}`])} = ${textOf(data[`value-${index}`])}`
+    return textOf(data[`text-${index}`]) || `Opção ${keep + position + 1}`
+  })
+  const removed = new Set(cut)
+  const pattern = INDEXED_PATTERNS[kind]
+  for (const key of Object.keys(data)) {
+    const match = pattern?.exec(key)
+    if (match && removed.has(Number(match[2]))) delete data[key]
+  }
+  return labels
 }
