@@ -2571,6 +2571,17 @@ test('the pick box shows the hint, one pressed button per candidate and confirms
   assert.ok(!html.includes('Selecione a mensagem'))
   assert.deepEqual(markupButtons(html).map((button) => button.disabled), [true, true, false, true])
 
+  html = render({ onAnswer: () => true })
+  buttons = markupButtons(html)
+  assert.deepEqual(buttons.map((button) => button.text), [nodeSubject(WELCOME), nodeSubject(FAREWELL), 'Cancelar seleção', panel.PICK_OTHER, 'Confirmar seleção'])
+  assert.deepEqual(buttons.map((button) => button.disabled), [false, false, false, false, true])
+  assert.ok(!html.includes('<textarea'), 'o campo do Outro abre só depois do clique')
+  assert.deepEqual(markupButtons(render({ onAnswer: () => true, disabled: true })).map((button) => button.disabled), [true, true, false, true, true])
+  assert.equal(panel.PICK_OTHER, 'Outro')
+  for (const text of [panel.PICK_OTHER_LABEL, panel.PICK_OTHER_SEND]) assert.match(`${text}.`, PT_TEXT)
+  for (const text of [panel.PICK_OTHER_PLACEHOLDER, panel.pickOtherWith(nodeSubject(FAREWELL))]) assert.match(text, PT_TEXT)
+  assert.equal(panel.pickOtherWith(nodeSubject(FAREWELL)), `A seleção vai junto: ${nodeSubject(FAREWELL)}.`)
+
   const props = { id: 'copiloto', open: true, onClose: () => undefined, getCurrentFlow: () => BASE, onLivePreview: () => undefined, onWorkflowEdited: () => true }
   const canvas = { start: () => [], select: () => undefined, confirm: () => undefined, end: () => undefined }
   const whole = renderToStaticMarkup(React.createElement(panel.default, { ...props, pick: canvas }))

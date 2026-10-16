@@ -82,6 +82,7 @@ export interface StreamWatch {
   events: boolean
   refusal: boolean
   failed: boolean
+  reached: boolean
 }
 
 export interface ModelSetup {
@@ -129,6 +130,7 @@ const DETAIL_LIMIT = 300
 const RELAX_LIMIT = 2
 const KEY_MIN = 8
 const RESERVED_LIMIT = 1000
+const STREAM_RETRIES = 1
 const READ_ERROR = "Não foi possível ler a solicitação."
 const IMAGE_ERROR = "Imagem inválida. Envie PNG ou JPG de até 5 MB."
 const EMPTY_FLOW = "O modelo não gerou nenhum componente para esta descrição."
@@ -366,6 +368,7 @@ async function withoutQuotaRetry(response: Response): Promise<Response> {
 function observe(watch: StreamWatch, base: typeof fetch, browser: boolean): typeof fetch {
   return async (input, init) => {
     const response = await base(input, browser ? browserInit(init) : init)
+    watch.reached = true
     if (response.status === 429) return withoutQuotaRetry(response)
     if (!watch.events || !response.ok || !response.body) return response
     const decoder = new TextDecoder()
@@ -386,7 +389,7 @@ function observe(watch: StreamWatch, base: typeof fetch, browser: boolean): type
 export function createSetup(input: ResolvedInput, hooks: RunHooks): ModelSetup {
   const { provider, model, apiKey } = input
   const browser = hooks.transport === "browser"
-  const watch: StreamWatch = { events: provider === "openai" || provider === "xai", refusal: false, failed: false }
+  const watch: StreamWatch = { events: provider === "openai" || provider === "xai", refusal: false, failed: false, reached: false }
   const fetch = observe(watch, baseFetch(hooks.fetch), browser)
   const effort = modelEffort(provider, model, input.effort)
   const maxOutputTokens = maxOutputFor(provider, model)
@@ -456,7 +459,34 @@ function isNetwork(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   const code = errorCode(error) ?? errorCode(error.cause)
   if (code && NETWORK_CODES.has(code)) return true
-  return error instanceof TypeError && /fetch failed|failed to fetch|network|load failed|terminated/i.test(error.message)
+  return error instanceof TypeError && /fetch failed|failed to fetch|network|load failed|terminated|body stream/i.test(error.message)
+}
+
+export function isTransient(error: unknown): boolean {
+  if (NoObjectGeneratedError.isInstance(error) && error.cause !== undefined) return isTransient(error.cause)
+  const cause = unwrap(error)
+  if (APICallError.isInstance(cause)) return (cause.statusCode === undefined || cause.statusCode < 400) && !isTimeout(cause.cause)
+  return isNetwork(cause)
+}
+
+export const RETRY_DELAYS_MS: readonly number[] = [600, 1800]
+
+export function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason)
+      return
+    }
+    const stop = () => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", stop)
+      resolve()
+    }, ms)
+    signal.addEventListener("abort", stop, { once: true })
+  })
 }
 
 function classify(status: number | undefined, text: string): FailureCode {
@@ -496,7 +526,7 @@ function failure(code: FailureCode, provider: ProviderId, detail?: string, wait?
     rate_limit: ["Limite de uso atingido no provedor.", rateLimitDetails(of, wait)],
     provider_error: ["O provedor recusou a solicitação.", detail ? `Detalhe do provedor: ${detail}` : "Tente novamente em alguns instantes."],
     provider_unavailable: ["O provedor está indisponível no momento.", "Tente novamente em alguns instantes."],
-    network: ["Não foi possível conectar ao provedor.", "Verifique a conexão com a internet e tente novamente."],
+    network: ["Não foi possível conectar ao provedor.", detail ? `Verifique a conexão com a internet e tente novamente. Detalhe técnico: ${detail}` : "Verifique a conexão com a internet e tente novamente."],
     timeout: ["O provedor demorou demais para responder.", "Tente um modelo mais rápido ou um fluxo menor."],
     invalid_output: ["A resposta do modelo não seguiu o formato esperado.", "Gere novamente ou escolha outro modelo."],
     output_too_long: ["A resposta do modelo foi interrompida por excesso de tamanho.", "Reduza o tamanho do fluxo ou escolha um modelo com mais capacidade."],
@@ -525,10 +555,11 @@ export function describeFailure(error: unknown, provider: ProviderId, apiKey: st
     const status = cause.statusCode !== undefined && cause.statusCode >= 400 ? cause.statusCode : undefined
     const code = status === undefined && isTimeout(cause.cause) ? "timeout" : classify(status, text)
     const wait = code === "rate_limit" ? rateLimitWait(text, cause.responseHeaders?.["retry-after"]) : undefined
-    return failure(code, provider, redact(cause.message, apiKey), wait)
+    const detail = code === "network" && cause.cause instanceof Error && cause.cause.message ? cause.cause.message : cause.message
+    return failure(code, provider, redact(detail, apiKey), wait)
   }
   if (isTimeout(cause)) return failure("timeout", provider)
-  if (isNetwork(cause)) return failure("network", provider)
+  if (isNetwork(cause)) return failure("network", provider, cause instanceof Error ? redact(cause.message, apiKey) : undefined)
   if (isRecord(cause) && !(cause instanceof Error)) {
     const { code, text } = streamFailure(cause)
     return failure(code, provider, redact(text, apiKey), code === "rate_limit" ? rateLimitWait(JSON.stringify(cause)) : undefined)
@@ -682,6 +713,7 @@ function withNotice(issues: GenerationIssue[]): GenerationIssue[] {
 async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: AbortSignal, onUpdate: (partial: unknown) => void, format: RiFormat): Promise<Attempt> {
   setup.watch.refusal = false
   setup.watch.failed = false
+  setup.watch.reached = false
   let partial: unknown
   try {
     const result = streamObject({
@@ -779,6 +811,7 @@ async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hoo
   let best: EditRound | null = null
   let rounds = 0
   let relaxed = 0
+  let dropped = 0
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     rounds = round
     progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, nodes: 0, edges: 0 })
@@ -838,6 +871,12 @@ async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hoo
       messages.push({ role: "assistant", content: JSON.stringify(piece) }, { role: "user", content: resume })
       transcript.push(section(`Retomada ${round}`, resume))
       progress({ stage: "corrigindo", round: round + 1, maxRounds: MAX_ROUNDS, resumed: true })
+      continue
+    }
+    if (dropped < STREAM_RETRIES && (setup.watch.reached || hooks.transport === "server") && isTransient(error) && timeLeft()) {
+      dropped++
+      await pause(RETRY_DELAYS_MS[0], signal)
+      round--
       continue
     }
     if (isFormatFailure(error) && round < MAX_ROUNDS && timeLeft()) {
@@ -901,6 +940,7 @@ async function generate(input: ResolvedInput, hooks: RunHooks, abort: Abort): Pr
   let base: RiFlow | null = null
   let rounds = 0
   let relaxed = 0
+  let dropped = 0
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     rounds = round
     progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, nodes: 0, edges: 0 })
@@ -956,6 +996,12 @@ async function generate(input: ResolvedInput, hooks: RunHooks, abort: Abort): Pr
       transcript.push(section(`Retomada ${round}`, resume))
       base = piece
       progress({ stage: "corrigindo", round: round + 1, maxRounds: MAX_ROUNDS, resumed: true })
+      continue
+    }
+    if (dropped < STREAM_RETRIES && (setup.watch.reached || hooks.transport === "server") && isTransient(error) && timeLeft()) {
+      dropped++
+      await pause(RETRY_DELAYS_MS[0], signal)
+      round--
       continue
     }
     if (isFormatFailure(error) && round < MAX_ROUNDS && timeLeft()) {

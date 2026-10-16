@@ -324,10 +324,32 @@ test('stream que cai na última rodada devolve sucesso parcial com aviso', async
   }
 })
 
-test('queda sem nenhum componente completo continua como falha de rede, sem rodadas extras', async () => {
+test('queda sem nenhum componente completo tenta de novo uma vez e continua como falha de rede, sem rodadas de correção', async () => {
   const result = await runGeneration(input('openai'), hooks(() => dropped('openai', JSON.stringify(RI).slice(0, 120), 0.6)))
-  assert.deepEqual(result, { success: false, code: 'network', error: 'Não foi possível conectar ao provedor.', details: 'Verifique a conexão com a internet e tente novamente.' })
-  assert.equal(calls.length, 1)
+  assert.deepEqual(result, { success: false, code: 'network', error: 'Não foi possível conectar ao provedor.', details: 'Verifique a conexão com a internet e tente novamente. Detalhe técnico: terminated' })
+  assert.equal(calls.length, 2)
+  assert.equal(JSON.stringify(calls[1].body), JSON.stringify(calls[0].body))
+})
+
+test('queda sem nenhum componente completo que volta na nova tentativa termina a geração e a edição normalmente', async () => {
+  let result = await runGeneration(input('openai'), hooks((call, index) => (index === 0 ? dropped('openai', JSON.stringify(RI).slice(0, 120), 0.6) : reply.openai(JSON.stringify(RI)))))
+  assert.equal(result.success, true)
+  assert.equal(result.partial, undefined)
+  assert.equal(result.rounds, 1)
+  assert.equal(calls.length, 2)
+  calls.length = 0
+  result = await runGeneration(editInput('openai'), hooks((call, index) => (index === 0 ? dropped('openai', JSON.stringify(FINANCE_EDIT).slice(0, 60), 0.6) : reply.openai(JSON.stringify(FINANCE_EDIT)))))
+  assert.equal(result.success, true)
+  assert.equal(result.mode, 'edit')
+  assert.deepEqual(result.changes, { added: 2, changed: 2, removed: 0 })
+  assert.equal(calls.length, 2)
+  calls.length = 0
+  result = await runGeneration(input('openai'), hooks(() => {
+    throw new TypeError('Failed to fetch')
+  }))
+  assert.equal(result.code, 'network')
+  assert.equal(result.details, 'Verifique a conexão com a internet e tente novamente. Detalhe técnico: Failed to fetch')
+  assert.equal(calls.length, 1, 'no navegador, a falha antes da resposta fica com a rota de reserva')
 })
 
 test('prazo do servidor com componentes completos vira sucesso parcial, nunca timeout', async () => {

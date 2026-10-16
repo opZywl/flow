@@ -418,7 +418,7 @@ for (const provider of ['openai', 'anthropic', 'google', 'xai']) {
     responder = () => dropped(provider)
     const { response, data, text } = await run(payload(provider))
     assert.equal(response.status, 502)
-    assert.deepEqual(data, { success: false, code: 'network', error: 'Não foi possível conectar ao provedor.', details: 'Verifique a conexão com a internet e tente novamente.' })
+    assert.deepEqual(data, { success: false, code: 'network', error: 'Não foi possível conectar ao provedor.', details: 'Verifique a conexão com a internet e tente novamente. Detalhe técnico: terminated' })
     assert.equal(text.includes('Failed to process'), false)
     assertNoKey(text, KEYS[provider])
   })
@@ -663,7 +663,7 @@ test('falha de rede vira network', async () => {
   }
   const { response, data } = await run(payload('openai'))
   assert.equal(response.status, 502)
-  assert.deepEqual(data, { success: false, code: 'network', error: 'Não foi possível conectar ao provedor.', details: 'Verifique a conexão com a internet e tente novamente.' })
+  assert.deepEqual(data, { success: false, code: 'network', error: 'Não foi possível conectar ao provedor.', details: 'Verifique a conexão com a internet e tente novamente. Detalhe técnico: fetch failed' })
 })
 
 test('falha do provedor na correção devolve a melhor rodada anterior', async () => {

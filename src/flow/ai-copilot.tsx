@@ -21,6 +21,7 @@ import {
   Info,
   Loader2,
   MousePointerClick,
+  PenLine,
   RefreshCw,
   RotateCcw,
   SendHorizontal,
@@ -127,6 +128,11 @@ const EDIT_NOW_LABEL = "Editar agora com o que já foi decidido"
 const FOLLOW_GAP = 160
 
 export const PICK_REGION = "Seleção do componente"
+export const PICK_OTHER = "Outro"
+export const PICK_OTHER_LABEL = "Escreva outra resposta"
+export const PICK_OTHER_PLACEHOLDER = "Explique melhor ou peça outra coisa, como: crie as duas opções no menu principal."
+export const PICK_OTHER_SEND = "Enviar resposta"
+export const pickOtherWith = (subject: string) => `A seleção vai junto: ${subject}.`
 export const ANY_PICK_NOTE = `Você pode escolher qualquer componente do fluxo, inclusive o ${getComponentLabel(START_TYPE)}.`
 
 const iconButton =
@@ -278,10 +284,32 @@ interface PickBoxProps {
   onSelect: (id: string) => void
   onCancel: () => void
   onConfirm: () => void
+  onAnswer?: (text: string) => boolean
 }
 
-export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelect, onCancel, onConfirm }: PickBoxProps) {
+export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelect, onCancel, onConfirm, onAnswer }: PickBoxProps) {
   const hintId = `${id}-hint`
+  const otherId = `${id}-other`
+  const [writing, setWriting] = useState(false)
+  const [text, setText] = useState("")
+  const selected = pick.candidates.find((candidate) => candidate.id === pick.selected)
+  const send = () => {
+    const value = text.trim()
+    if (!value || disabled || !onAnswer) return
+    if (!onAnswer(value)) return
+    setText("")
+    setWriting(false)
+  }
+  const onOtherKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      setWriting(false)
+      return
+    }
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    send()
+  }
   return (
     <div role="region" aria-label={PICK_REGION} className="rounded-xl border border-flow-accent/40 bg-flow-accent/10 px-3 py-2.5">
       <p id={hintId} className="flex items-start gap-2 text-xs font-medium leading-5 text-flow-fg">
@@ -313,11 +341,54 @@ export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelec
           )
         })}
       </ul>
+      {onAnswer && writing ? (
+        <div className="mt-2.5 space-y-1.5">
+          <label htmlFor={otherId} className="block text-[11px] font-semibold leading-4 text-flow-fg">
+            {PICK_OTHER_LABEL}
+          </label>
+          <div className="flex items-end gap-2">
+            <textarea
+              id={otherId}
+              autoFocus
+              rows={2}
+              value={text}
+              maxLength={LIMITS.prompt}
+              disabled={disabled}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={onOtherKeyDown}
+              placeholder={PICK_OTHER_PLACEHOLDER}
+              aria-describedby={selected ? `${otherId}-with` : undefined}
+              className={cn(ui.textarea, "max-h-32 min-h-[2.5rem] flex-1 resize-none py-1.5 text-xs leading-5")}
+            />
+            <button
+              type="button"
+              onClick={send}
+              disabled={disabled || !text.trim()}
+              aria-label={PICK_OTHER_SEND}
+              title={PICK_OTHER_SEND}
+              className={cn(ui.primaryButton, "h-8 w-8 justify-center px-0")}
+            >
+              <SendHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+          {selected ? (
+            <p id={`${otherId}-with`} className="text-[11px] leading-4 text-flow-muted">
+              {pickOtherWith(selected.text)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mt-2.5 flex flex-wrap items-center justify-end gap-2">
         <button type="button" onClick={onCancel} className={cn(ui.button, "h-7")}>
           <X className="h-3.5 w-3.5" aria-hidden="true" />
           Cancelar seleção
         </button>
+        {onAnswer && !writing ? (
+          <button type="button" onClick={() => setWriting(true)} disabled={disabled} className={cn(ui.button, "h-7")}>
+            <PenLine className="h-3.5 w-3.5" aria-hidden="true" />
+            {PICK_OTHER}
+          </button>
+        ) : null}
         <button type="button" onClick={onConfirm} disabled={disabled || !pick.selected} className={cn(ui.primaryButton, "h-7")}>
           <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
           Confirmar seleção
@@ -1201,6 +1272,7 @@ export default function AICopilot({
 
           {asked ? (
             <PickBox
+              key={pickKey(asked)}
               id={idFor("pick")}
               pick={asked}
               onCanvas={onCanvas}
@@ -1209,6 +1281,7 @@ export default function AICopilot({
               onSelect={(candidate) => store.selectPick(candidate)}
               onCancel={cancelSelection}
               onConfirm={confirmSelection}
+              onAnswer={request}
             />
           ) : null}
 

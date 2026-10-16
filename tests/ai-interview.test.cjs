@@ -1280,3 +1280,49 @@ test('no Copiloto, o plano de remoção cita cada componente pelo texto e pelo I
     assert.ok(body.includes('Pode limpar, mantendo só o Início e as notas'), provider)
   }
 })
+
+test('a conversa tenta de novo sozinha quando a conexão cai, antes ou no meio da resposta, e só mostra a falha de rede depois das novas tentativas', async () => {
+  calls.length = 0
+  let result = await interviewTurn(input('openai'), hooks((call, index) => {
+    if (index === 0) throw new TypeError('Failed to fetch')
+    return reply.openai(JSON.stringify(ASK))
+  }))
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 2)
+  assert.equal(JSON.stringify(calls[1].body), JSON.stringify(calls[0].body))
+  calls.length = 0
+  result = await interviewTurn(input('openai'), hooks(async (call, index) => {
+    if (index > 0) return reply.openai(JSON.stringify(ASK))
+    const full = await reply.openai(JSON.stringify(ASK)).text()
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(full.slice(0, Math.floor(full.length / 3))))
+        setTimeout(() => controller.error(new TypeError('network error')), 5)
+      },
+    })
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }))
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.turn, ASK)
+  assert.equal(calls.length, 2)
+  calls.length = 0
+  result = await interviewTurn(input('openai'), hooks(() => {
+    throw new TypeError('Failed to fetch')
+  }))
+  assert.equal(result.failure.code, 'network')
+  assert.equal(result.failure.details, 'Verifique a conexão com a internet e tente novamente. Detalhe técnico: Failed to fetch')
+  assert.equal(calls.length, 3)
+  calls.length = 0
+  const controller = new AbortController()
+  const pending = interviewTurn(input('openai'), hooks(() => {
+    setTimeout(() => controller.abort(), 20)
+    throw new TypeError('Failed to fetch')
+  }, { signal: controller.signal }))
+  result = await pending
+  assert.deepEqual(result, { ok: false, failure: { success: false, code: 'aborted', error: 'A resposta foi cancelada.' } })
+  assert.equal(calls.length, 1)
+  calls.length = 0
+  result = await interviewTurn(input('openai'), hooks(() => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401, headers: { 'content-type': 'application/json' } })))
+  assert.equal(result.failure.code, 'invalid_key')
+  assert.equal(calls.length, 1, 'recusa do provedor não repete')
+})

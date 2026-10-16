@@ -10,7 +10,7 @@ import { flowToRi } from "./edit"
 import { guideOf } from "./guide"
 import type { ProviderId } from "./providers"
 import type { RiFlow, RiNode } from "./ri"
-import { createSetup, describeFailure, isFormatFailure, notify, parseGenerationRequest, relax, stopped, unfinished } from "./runner"
+import { RETRY_DELAYS_MS, createSetup, describeFailure, isFormatFailure, isTransient, notify, parseGenerationRequest, pause, relax, stopped, unfinished } from "./runner"
 import type { ModelSetup, StreamWatch, Transport } from "./runner"
 import { foldText, parseJsonText, quote, shorten, sliceObject } from "./text"
 
@@ -818,6 +818,7 @@ async function settleObject(object: PromiseLike<InterviewTurn>, watch: StreamWat
 async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: AbortSignal, onPartial: InterviewHooks["onPartial"], format: TurnFormat): Promise<TurnAttempt> {
   setup.watch.refusal = false
   setup.watch.failed = false
+  setup.watch.reached = false
   try {
     const result = streamObject({
       model: setup.model,
@@ -853,6 +854,7 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
 async function converse(setup: ModelSetup, messages: ModelMessage[], hooks: InterviewHooks, format: TurnFormat): Promise<InterviewTurn> {
   let relaxed = 0
   let corrected = false
+  let dropped = 0
   for (;;) {
     const attempt = await callTurn(setup, messages, hooks.signal, hooks.onPartial, format)
     if (attempt.turn) return attempt.turn
@@ -860,6 +862,11 @@ async function converse(setup: ModelSetup, messages: ModelMessage[], hooks: Inte
     if (hooks.signal.aborted) throw error
     if (relaxed < RELAX_LIMIT && relax(setup, error)) {
       relaxed++
+      continue
+    }
+    if (dropped < RETRY_DELAYS_MS.length && isTransient(error)) {
+      await pause(RETRY_DELAYS_MS[dropped], hooks.signal)
+      dropped++
       continue
     }
     if (!corrected && isFormatFailure(error)) {
