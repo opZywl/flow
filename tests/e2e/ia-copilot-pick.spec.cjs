@@ -111,7 +111,15 @@ const ASK_MENU = {
   suggestions: [],
   action: 'ask',
   plan: OPTION_DRAFT,
-  pick: { label: MENU_LABEL, candidates: MENUS },
+  pick: { label: MENU_LABEL, candidates: MENUS, ready: false },
+}
+const READY_PLAN = 'Acrescente a opção Segunda via, que envia o link https://boletos.exemplo.com.br e encerra o atendimento, no menu de opções que o usuário selecionar.'
+const ASK_READY = {
+  message: 'O fluxo tem dois menus de opções. Pensei na opção Segunda via com o link do boleto, seguindo para o encerramento. Em qual menu ela entra?',
+  suggestions: [],
+  action: 'ask',
+  plan: READY_PLAN,
+  pick: { label: MENU_LABEL, candidates: MENUS, ready: true },
 }
 const EDIT_OPTION = { message: 'Vou acrescentar a opção Segunda via no menu Financeiro.', suggestions: [], action: 'edit', plan: OPTION_PLAN, pick: null }
 const MENU_ANSWER = 'No menu Financeiro'
@@ -131,7 +139,7 @@ const ASK_MESSAGE = {
   suggestions: [],
   action: 'ask',
   plan: NOTICE_DRAFT,
-  pick: { label: MESSAGE_LABEL, candidates: MESSAGES },
+  pick: { label: MESSAGE_LABEL, candidates: MESSAGES, ready: false },
 }
 const EDIT_NOTICE = { message: 'Vou colocar o aviso logo depois da mensagem dos pagamentos.', suggestions: [], action: 'edit', plan: NOTICE_PLAN, pick: null }
 
@@ -154,7 +162,7 @@ const refineAsk = (boleto) => ({
   suggestions: [],
   action: 'ask',
   plan: `Na proposta, acrescente a mensagem ${NOTICE_TEXT} logo depois da mensagem que o usuário escolher.`,
-  pick: { label: MESSAGE_LABEL, candidates: [...MESSAGES, boleto] },
+  pick: { label: MESSAGE_LABEL, candidates: [...MESSAGES, boleto], ready: false },
 })
 
 function optionDelta(flow, menuId) {
@@ -656,6 +664,60 @@ test('crie a opção Segunda via with two menus: the canvas outlines both menus,
   await expect(marked(page)).toHaveCount(0)
   await expect(focusMarks(page)).toHaveCount(0)
   expect(ai.turnCalls()).toHaveLength(2)
+})
+
+test('a pick marked ready edits as soon as Confirmar is clicked, without another turn, and the request carries the plan and the chosen component', async ({ page, ai }) => {
+  const result = await expectedOption()
+  const final = result.workflow
+  const boleto = idOf(final, BOLETO_TEXT)
+  const chosen = youPicked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU)
+  const panel = await start(page)
+  ai.say(ASK_READY)
+  await ask(panel, OPTION_REQUEST)
+
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_READY)])
+  await expect(banner(page)).toContainText(`Selecione ${MENU_LABEL} no canvas.`)
+  await expectMarks(page, NODE_IDS, marks(MENUS, 'candidate'))
+  await expect(selection(panel)).toBeVisible()
+  await expect(bannerButton(page, 'Confirmar')).toBeDisabled()
+  await expect(editNowOffered(panel)).toHaveCount(0)
+  await settle(page)
+  await nodeAt(page, FINANCE_MENU).click()
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+
+  ai.builds.push({ steps: [OPTION_TEXT] })
+  await bannerButton(page, 'Confirmar').click()
+  await expectPickOver(page, panel)
+  await expect(messages(panel).nth(2)).toHaveText(chosen)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel), 'nenhuma resposta nova do Copiloto entre a seleção e a edição').toHaveText([you(OPTION_REQUEST), says(ASK_READY), chosen])
+  await expect(page.getByText(EDIT_DONE)).toBeVisible()
+  await expect(canvas(page)).toContainText(BOLETO_TEXT)
+  await expect(nodes(page)).toHaveCount(final.nodes.length)
+  await expect(focusMarks(page)).toHaveCount(1)
+  await expect(nodeAt(page, FINANCE_MENU).locator('[data-pick-focus]'), 'o menu escolhido fica marcado na prévia').toHaveCount(1)
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
+
+  expect(ai.turnCalls(), 'Confirmar vai direto para a edição').toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
+  const request = lastUser(ai.buildCalls()[0])
+  expect(request, 'o pedido de edição leva o plano, uma linha em branco e o componente escolhido').toMatch(new RegExp(`# Pedido de edição\\n${escape(READY_PLAN)}\\n\\n${pickedText(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU)}\\n\\n# Entrega`))
+  expect(ai.fallbacks).toEqual([])
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect(messages(panel)).toHaveText([you(OPTION_REQUEST), says(ASK_READY), chosen, APPLIED, says(FOLLOW_UP)])
+  await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: idsOf(final) })
+  const after = await stored(page)
+  expect(after.edges.some((edge) => edge.source === FINANCE_MENU && edge.target === boleto), 'a opção nova sai do menu selecionado').toBe(true)
+  expect(after.edges.some((edge) => edge.source === MAIN_MENU && edge.target === boleto)).toBe(false)
+  await page.waitForTimeout(300)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
 })
 
 test('Seleção do componente lists the candidates, stays in sync with the canvas both ways and Confirmar seleção sends the chosen message', async ({ page, ai }) => {

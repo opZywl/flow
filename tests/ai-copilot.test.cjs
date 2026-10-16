@@ -22,11 +22,12 @@ Module._load = function loadStub(request, ...rest) {
 }
 
 const copilot = require('../src/flow/ai/copilot-store.ts')
-const { importFlow, newFlow } = require('../lib/atendimento/format.ts')
+const { importFlow, newFlow, newNode } = require('../lib/atendimento/format.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
 const { applyEdit, diffFlows, flowToRi } = require('../lib/atendimento/ai/edit.ts')
 const { previewEdit } = require('../lib/atendimento/ai/preview.ts')
-const { documentKey, nodeSubject, nodeText } = require('../src/flow/ai/generation-client.ts')
+const { documentKey, keyWarning, nodeSubject, nodeText } = require('../src/flow/ai/generation-client.ts')
+const { PROVIDERS } = require('../lib/atendimento/ai/providers.ts')
 
 function loadPanel() {
   const file = path.join(ROOT, 'src/flow/ai-copilot.tsx')
@@ -115,6 +116,7 @@ const PICK_DRAFT = 'Depois da mensagem escolhida, acrescente uma pergunta pedind
 const PICK_PLAN = `Depois da mensagem Obrigado pelo contato. Até logo., ID ${FAREWELL.id}, acrescente uma pergunta pedindo o CPF do cliente.`
 const PICK_EDIT = 'Vou acrescentar a pergunta de CPF depois da despedida.'
 const PICK_CHIPS = ['Na boas-vindas', 'Na despedida']
+const PICK_READY = 'Acrescente uma pergunta pedindo o CPF do cliente logo depois do componente que o usuário selecionar.'
 const AGENDA = BASE.nodes.find((node) => node.data.type === 'departamentos')
 const FAREWELL_RI = textNode(BASE_RI, 'Obrigado pelo contato. Até logo.').id
 const FAREWELL_DELTA = { name: '', description: '', nodes: [{ id: FAREWELL_RI, type: 'envio_pergunta', config: [{ key: 'template', value: 'Até a próxima.' }] }], edges: [] }
@@ -125,6 +127,27 @@ const NOTICE_BEFORE = applyEdit(BASE, {
   edges: [{ from: MENU.id, output: 'Encerrar', to: 'aviso' }, { from: 'aviso', output: '', to: FAREWELL_RI }],
 }, { now: NOW }).flow
 const BOTH = { ...CHANGED, nodes: CHANGED.nodes.map((node) => (node.id === WELCOME.id ? { ...node, data: { ...node.data, data: { ...node.data.data, template: 'Oi, #NAME.' } } } : node)) }
+const NOTE = newNode('note', { x: 480, y: 120 }, 'nota')
+const BLANK = newFlow(NOW)
+const NOTES_ONLY = importFlow({ ...BLANK, nodes: [...BLANK.nodes, { ...NOTE, data: { ...NOTE.data, data: { ...NOTE.data.data, text: 'Revisar o menu com o time de cobrança.' } } }] })
+const NOTED = importFlow({ ...BASE, nodes: [...BASE.nodes, NOTE] })
+const START_REQUEST = 'Comece com uma mensagem de boas-vindas'
+const START_QUESTION = 'Pensei em uma boas-vindas com o nome do cliente, seguida do encerramento. Fica assim?'
+const START_DRAFT = 'A partir do Início, acrescente uma mensagem de boas-vindas.'
+const START_PLAN = 'A partir do Início, acrescente a mensagem Olá, #NAME. Você está no atendimento da Clínica Exemplo. e depois encerre a conversa.'
+const START_EDIT = 'Vou montar a boas-vindas a partir do Início.'
+const START_DELTA = {
+  name: '',
+  description: '',
+  nodes: [
+    { id: 'boas_vindas', type: 'envio_pergunta', config: [{ key: 'template', value: 'Olá, #NAME. Você está no atendimento da Clínica Exemplo.' }] },
+    { id: 'fim', type: 'finalizar', config: [] },
+  ],
+  edges: [{ from: 'inicio', output: '', to: 'boas_vindas' }, { from: 'boas_vindas', output: '', to: 'fim' }],
+}
+const STARTED = applyEdit(BLANK, START_DELTA, { now: NOW }).flow
+const NOTES_STARTED = applyEdit(NOTES_ONLY, START_DELTA, { now: NOW }).flow
+const BLANK_MOVED = { ...BLANK, nodes: BLANK.nodes.map((node) => ({ ...node, position: { x: node.position.x + 40, y: node.position.y + 24 } })) }
 
 function received(flow, extra = {}) {
   return {
@@ -144,6 +167,7 @@ function turn(action, message, plan = '', suggestions = []) {
 const asked = (message, suggestions, plan = '') => turn('ask', message, plan, suggestions)
 const edited = (plan = '', message = EDIT_MESSAGE) => turn('edit', message, plan)
 const picked = (candidates, label = 'A mensagem.', plan = PICK_DRAFT) => ({ ok: true, turn: { action: 'ask', message: PICK_QUESTION, suggestions: PICK_CHIPS, plan, pick: { label, candidates } } })
+const readied = (candidates, plan = PICK_READY) => ({ ok: true, turn: { action: 'ask', message: PICK_QUESTION, suggestions: PICK_CHIPS, plan, pick: { label: 'A mensagem.', candidates, ready: true } } })
 const choice = (node) => `${copilot.PICK_PREFIX} ${nodeSubject(node)}`
 const delayed = (answer) => {
   const release = gate()
@@ -864,22 +888,98 @@ test('invalid credentials send nothing, mark the field and keep the conversation
   assert.deepEqual(store.getState().fieldErrors, {})
 })
 
-test('an open flow with only Início blocks the request, and so does a busy Gerar com IA', () => {
-  const empty = harness({ flow: newFlow(NOW) })
-  assert.equal(empty.store.send('Acrescente uma pesquisa de satisfação no fim'), false)
-  assert.equal(empty.env.turns.length, 0)
-  assert.equal(empty.env.requests.length, 0)
-  assert.deepEqual(empty.store.getState().entries, [])
-  assert.equal(empty.env.previews.length, 0)
-  assert.equal(empty.store.send('   '), false)
+test('an open flow with only Início goes to the AI like any other flow and the edit builds on it from Início, without Gerar com IA', async () => {
+  const { store, env } = harness({ flow: BLANK, turns: [asked(START_QUESTION, ['Pode ser assim'], START_DRAFT), edited(START_PLAN, START_EDIT)], outcomes: [received(STARTED)] })
+  assert.equal(store.send(START_REQUEST), true)
+  assert.equal(store.getState().thinking, true)
+  assert.equal(env.turns[0].flow, BLANK)
+  assert.equal(env.turns[0].proposal, false)
+  assert.deepEqual(env.turns[0].history, [{ role: 'user', text: START_REQUEST }])
+  let state = await settled(store)
+  assert.deepEqual(texts(state), [`user:${START_REQUEST}`, `assistant:${START_QUESTION}`])
+  assert.equal(state.plan, START_DRAFT)
+  assert.deepEqual(state.suggestions, ['Pode ser assim'])
+  assert.equal(env.requests.length, 0)
 
-  const busy = harness()
+  assert.equal(store.send('Pode ser assim'), true)
+  assert.equal(env.turns[1].flow, BLANK)
+  state = await settled(store)
+  assert.equal(env.turns.length, 2)
+  assert.equal(env.requests.length, 1)
+  const { request } = env.requests[0]
+  assert.equal(request.mode, 'edit')
+  assert.equal(request.provider, 'openai')
+  assert.equal(request.base, BLANK)
+  assert.equal(request.prompt, START_PLAN)
+  assert.deepEqual(env.previews[0], { flow: BLANK, done: false })
+  assert.deepEqual(texts(state), [`user:${START_REQUEST}`, `assistant:${START_QUESTION}`, 'user:Pode ser assim', `assistant:${START_EDIT}`, 'proposal:pending'])
+  const proposal = proposals(state)[0].proposal
+  assert.equal(proposal.original, BLANK)
+  assert.equal(proposal.base, BLANK)
+  assert.deepEqual(proposal.changes, { added: 2, changed: 0, removed: 0 })
+  assert.deepEqual(proposal.removed, [])
+  assert.deepEqual(lastPreview(env), { flow: STARTED, done: true })
+  assert.equal(store.apply(), true)
+  assert.equal(env.applied.length, 1)
+  assert.equal(documentKey(env.applied[0]), documentKey(importFlow(STARTED)))
+  assert.deepEqual(kinds(store.getState()).slice(-2), [`note:${copilot.COPILOT_TEXT.applied}`, 'assistant'])
+})
+
+test('a turn answered after the Início was moved still edits the open flow, and only a busy Gerar com IA, an empty or long request or a missing flow block a request', async () => {
+  const answer = delayed(edited(START_PLAN, START_EDIT))
+  const moved = harness({ flow: BLANK, turns: [answer.turn], outcomes: [received(STARTED)] })
+  assert.equal(moved.store.send(START_REQUEST), true)
+  moved.env.flow = BLANK_MOVED
+  answer.release.open()
+  const state = await settled(moved.store)
+  assert.equal(moved.env.requests.length, 1)
+  assert.equal(moved.env.requests[0].request.base, BLANK_MOVED)
+  assert.equal(moved.env.requests[0].request.prompt, START_PLAN)
+  assert.equal(proposals(state)[0].proposal.original, BLANK_MOVED)
+
+  const busy = harness({ flow: BLANK })
   busy.store.setBlocked(true)
-  assert.equal(busy.store.send('Acrescente uma pesquisa de satisfação no fim'), false)
+  assert.equal(busy.store.send(START_REQUEST), false)
   assert.equal(busy.env.turns.length, 0)
   busy.store.setBlocked(false)
+  assert.equal(busy.store.send('   '), false)
   assert.equal(busy.store.send(`${'a'.repeat(8001)}`), false)
   assert.equal(busy.env.turns.length, 0)
+  assert.deepEqual(busy.store.getState().entries, [])
+
+  const missing = harness({ flow: null })
+  assert.equal(missing.store.send(START_REQUEST), false)
+  assert.equal(missing.env.turns.length, 0)
+  assert.equal(missing.env.requests.length, 0)
+  assert.deepEqual(missing.store.getState().entries, [])
+  assert.deepEqual(missing.env.previews, [])
+})
+
+test('notes stay annotations: a flow with only Início and notes is edited with the notes kept, and a note never becomes a candidate to select', async () => {
+  const { store, env } = harness({ flow: NOTES_ONLY, turns: [edited(START_PLAN, START_EDIT)], outcomes: [received(NOTES_STARTED)] })
+  assert.equal(store.send(START_REQUEST), true)
+  assert.equal(env.turns[0].flow, NOTES_ONLY)
+  let state = await settled(store)
+  assert.equal(env.requests[0].request.base, NOTES_ONLY)
+  const proposal = proposals(state)[0].proposal
+  assert.deepEqual(proposal.changes, { added: 2, changed: 0, removed: 0 })
+  assert.deepEqual(proposal.removed, [])
+  assert.deepEqual(proposal.issues, [])
+  const note = (flow) => flow.nodes.find((node) => node.id === NOTE.id)
+  assert.equal(note(proposal.flow).data.data.text, note(NOTES_ONLY).data.data.text)
+  assert.equal(store.apply(), true)
+  assert.equal(note(env.applied[0]).data.type, 'note')
+
+  const noted = harness({ flow: NOTED, turns: [picked([NOTE.id, WELCOME.id, FAREWELL.id])] })
+  noted.store.send(PICK_REQUEST)
+  state = await settled(noted.store)
+  assert.equal(noted.env.turns[0].flow, NOTED)
+  assert.deepEqual(state.pick.candidates, [
+    { id: WELCOME.id, text: nodeSubject(WELCOME) },
+    { id: FAREWELL.id, text: nodeSubject(FAREWELL) },
+  ])
+  assert.equal(copilot.readPick({ label: 'a mensagem', candidates: [NOTE.id, WELCOME.id] }, NOTED), null)
+  assert.equal(copilot.readPick({ label: 'a mensagem', candidates: [NOTE.id, WELCOME.id, FAREWELL.id] }, NOTED).candidates.length, 2)
 })
 
 test('a question that arrives with the panel closed asks for attention, and a goodbye does not', async () => {
@@ -1103,6 +1203,63 @@ test('texts are in PT-BR without exclamation marks or dashes', () => {
   assert.deepEqual(copilot.credentialErrors({ provider: 'anthropic', model: 'claude-opus-5-5', apiKey: '', effort: 'medium', fill: true }), { apiKey: 'Informe a chave da API da Anthropic.' })
 })
 
+test('the Copiloto keeps ChatGPT, Claude, Gemini and Grok: the picker lists all four, the chosen provider goes in the turn, the edit and the proposal, and the key warning checks every provider', async () => {
+  assert.deepEqual(PROVIDERS.map((entry) => [entry.id, entry.name]), [['openai', 'ChatGPT'], ['anthropic', 'Claude'], ['google', 'Gemini'], ['xai', 'Grok']])
+  assert.deepEqual(copilot.SETTINGS_FIELDS, ['provider', 'apiKey', 'model', 'effort'])
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const panel = loadPanel()
+  const selects = []
+  const stub = STUBS['./flow-select']
+  const plain = stub.FlowSelect
+  stub.FlowSelect = (props) => {
+    selects.push(props)
+    return null
+  }
+  let html = ''
+  try {
+    html = renderToStaticMarkup(React.createElement(panel.default, { id: 'copiloto', open: true, onClose: () => undefined, getCurrentFlow: () => BLANK, onLivePreview: () => undefined, onWorkflowEdited: () => true }))
+  } finally {
+    stub.FlowSelect = plain
+  }
+  const picker = selects.find((props) => props.id.endsWith('-provider'))
+  assert.deepEqual(picker.options, [
+    { value: 'openai', label: 'ChatGPT' },
+    { value: 'anthropic', label: 'Claude' },
+    { value: 'google', label: 'Gemini' },
+    { value: 'xai', label: 'Grok' },
+  ])
+  assert.equal(picker.value, 'openai')
+  assert.match(html, /<label[^>]*>Provedor de IA<\/label>/)
+  assert.match(html, />OpenAI · GPT-6\.1 Sol · Esforço equilibrado</)
+
+  const { store, env } = harness({ outcomes: [received(FIRST, { model: 'claude-opus-5-5' })] })
+  env.settings = { ...env.settings, provider: 'anthropic', model: 'claude-opus-5-5', apiKey: 'sk-ant-api03-0123456789abcdef' }
+  store.send(OPTION_REQUEST)
+  const state = await settled(store)
+  assert.equal(env.turns[0].settings.provider, 'anthropic')
+  assert.equal(env.requests[0].request.provider, 'anthropic')
+  assert.equal(env.requests[0].request.model, 'claude-opus-5-5')
+  assert.equal(proposals(state)[0].proposal.provider, 'anthropic')
+  assert.equal(proposals(state)[0].proposal.model, 'claude-opus-5-5')
+
+  const wrong = harness({ turns: [refused('invalid_request', 'Escolha um provedor de IA válido.', undefined, 'provider')] })
+  wrong.store.send(OPTION_REQUEST)
+  const failed = await settled(wrong.store)
+  assert.equal(failed.fieldErrors.provider, 'Escolha um provedor de IA válido.')
+  assert.equal(failed.focus.field, 'provider')
+
+  const missing = [['openai', 'da OpenAI'], ['anthropic', 'da Anthropic'], ['google', 'do Google'], ['xai', 'da xAI']]
+  for (const [provider, of] of missing) assert.deepEqual(copilot.credentialErrors({ provider, model: 'modelo-1', apiKey: '', effort: 'medium', fill: true }), { apiKey: `Informe a chave da API ${of}.` })
+  const [openai, anthropic, google, xai] = PROVIDERS
+  assert.equal(keyWarning(openai, `  ${KEY}  `), '')
+  assert.equal(keyWarning(openai, 'sk-ant-api03-exemplo'), 'Esta chave parece ser da Anthropic. Confira o provedor escolhido.')
+  assert.equal(keyWarning(anthropic, KEY), 'Esta chave parece ser da OpenAI. Confira o provedor escolhido.')
+  assert.equal(keyWarning(xai, 'AIzaSyExemplo0123456789'), 'Esta chave parece ser do Google. Confira o provedor escolhido.')
+  assert.equal(keyWarning(google, 'xai-exemplo0123456789'), 'Esta chave parece ser da xAI. Confira o provedor escolhido.')
+  assert.equal(keyWarning(google, 'chave0123456789'), 'Chaves do Google costumam começar com AIza.')
+})
+
 test('the panel renders the empty conversation, the examples, the composer and the notices', () => {
   const React = require('react')
   const { renderToStaticMarkup } = require('react-dom/server')
@@ -1114,7 +1271,6 @@ test('the panel renders the empty conversation, the examples, the composer and t
     getCurrentFlow: () => BASE,
     onLivePreview: () => undefined,
     onWorkflowEdited: () => true,
-    onOpenGenerate: () => undefined,
   }
   const html = renderToStaticMarkup(React.createElement(panel.default, props))
   assert.match(html, /<section id="copiloto" aria-label="Copiloto"/)
@@ -1140,7 +1296,8 @@ test('the panel renders the empty conversation, the examples, the composer and t
   assert.match(html, /OpenAI · GPT-6\.1 Sol · Esforço equilibrado/)
   assert.match(html, /Chave da API da OpenAI/)
   assert.match(html, /É a mesma usada no Gerar com IA\./)
-  assert.doesNotMatch(html, /O fluxo aberto só tem o Início/)
+  assert.doesNotMatch(html, /O fluxo aberto só tem o Início|Abrir Gerar com IA/)
+  assert.doesNotMatch(html, /role="status" class="rounded-lg/)
   assert.doesNotMatch(html, /Sugestões de resposta/)
   assert.doesNotMatch(html, /Editar agora/)
   assert.doesNotMatch(html, /[!—–]/)
@@ -1150,11 +1307,16 @@ test('the panel renders the empty conversation, the examples, the composer and t
   assert.equal(panel.ATTENTION_TOASTS.failed.variant, 'destructive')
   for (const notice of Object.values(panel.ATTENTION_TOASTS)) assert.doesNotMatch(`${notice.title} ${notice.description}`, /[!—–]/)
 
-  const empty = renderToStaticMarkup(React.createElement(panel.default, { ...props, getCurrentFlow: () => newFlow(NOW) }))
-  assert.match(empty, /O fluxo aberto só tem o Início\. Para criar um fluxo do zero, use Gerar com IA\./)
-  assert.match(empty, /Abrir Gerar com IA/)
+  for (const flow of [BLANK, NOTES_ONLY, null]) {
+    const markup = renderToStaticMarkup(React.createElement(panel.default, { ...props, getCurrentFlow: () => flow }))
+    assert.equal(markup, html)
+  }
   const busy = renderToStaticMarkup(React.createElement(panel.default, { ...props, dialogBusy: true }))
-  assert.match(busy, /Aguarde a geração do Gerar com IA terminar\./)
+  assert.match(busy, /<p id="[^"]*-notice" role="status" class="[^"]*">Aguarde a geração do Gerar com IA terminar\.<\/p>/)
+  assert.match(busy, /aria-describedby="[^"]*-keys [^"]*-notice"/)
+  assert.doesNotMatch(busy, /Abrir Gerar com IA|O fluxo aberto só tem o Início/)
+  const busyBlank = renderToStaticMarkup(React.createElement(panel.default, { ...props, dialogBusy: true, getCurrentFlow: () => BLANK }))
+  assert.equal(busyBlank, busy)
   const classes = (markup) => /<section id="copiloto" aria-label="Copiloto" class="([^"]*)"/.exec(markup)[1].split(/\s+/)
   assert.ok(classes(html).includes('flex'))
   assert.ok(!classes(html).includes('hidden'))
@@ -1194,6 +1356,7 @@ test('an ask with pick keeps the question, the suggestions and the plan and list
       { id: FAREWELL.id, text: nodeSubject(FAREWELL) },
     ],
     selected: null,
+    ready: false,
   })
   assert.deepEqual(state.suggestions, PICK_CHIPS)
   assert.equal(state.plan, PICK_DRAFT)
@@ -1316,6 +1479,186 @@ test('when the edit after a selection comes without a plan, the prompt is the pl
   assert.equal(env.requests[0].request.prompt, prompt)
   assert.ok(env.requests[0].request.prompt.includes(`ID ${FAREWELL.id}`))
   assert.equal(proposals(state)[0].proposal.prompt, prompt)
+})
+
+test('a pick marked ready edits right after Confirmar seleção, without another turn, with the plan and the selection as the prompt and the focus on the chosen component', async () => {
+  const { store, env } = harness({ turns: [readied([WELCOME.id, FAREWELL.id]), turn('finish', 'Combinado.')], outcomes: [received(CHANGED)] })
+  store.send(PICK_REQUEST)
+  let state = await settled(store)
+  assert.equal(state.pick.ready, true)
+  assert.equal(state.plan, PICK_READY)
+  assert.deepEqual(state.suggestions, PICK_CHIPS)
+  store.selectPick(FAREWELL.id)
+  assert.equal(store.confirmPick(), true)
+  const prompt = `${PICK_READY}\n\n${choice(FAREWELL)}`
+  state = store.getState()
+  assert.equal(state.thinking, false)
+  assert.equal(state.running, true)
+  assert.equal(state.pick, null)
+  assert.deepEqual(state.suggestions, [])
+  assert.equal(state.plan, prompt)
+  assert.deepEqual(texts(state), [`user:${PICK_REQUEST}`, `assistant:${PICK_QUESTION}`, `user:${choice(FAREWELL)}`])
+  assert.deepEqual(env.previews, [{ flow: BASE, done: false }])
+  assert.deepEqual(env.focus, [FAREWELL.id])
+  assert.equal(store.confirmPick(), false)
+  assert.equal(store.send('outro pedido'), false)
+
+  state = await settled(store)
+  assert.equal(env.turns.length, 1)
+  assert.equal(env.requests.length, 1)
+  assert.equal(env.requests[0].request.prompt, prompt)
+  assert.ok(prompt.includes(`ID ${FAREWELL.id}`))
+  assert.equal(env.requests[0].request.base, BASE)
+  assert.equal(env.requests[0].request.provider, 'openai')
+  assert.deepEqual(texts(state), [`user:${PICK_REQUEST}`, `assistant:${PICK_QUESTION}`, `user:${choice(FAREWELL)}`, 'proposal:pending'])
+  const proposal = proposals(state)[0].proposal
+  assert.equal(proposal.prompt, prompt)
+  assert.equal(proposal.focus, FAREWELL.id)
+  assert.equal(proposal.missed, false)
+  assert.deepEqual(env.focus, [FAREWELL.id, FAREWELL.id])
+  assert.deepEqual(lastPreview(env), { flow: CHANGED, done: true })
+  assert.equal(state.plan, '')
+
+  store.send('Era só isso')
+  await settled(store)
+  assert.equal(env.turns[1].proposal, true)
+  assert.deepEqual(env.turns[1].history, [
+    { role: 'user', text: PICK_REQUEST },
+    { role: 'assistant', text: PICK_QUESTION },
+    { role: 'user', text: choice(FAREWELL) },
+    { role: 'assistant', text: copilot.proposalSummary(proposal) },
+    { role: 'user', text: 'Era só isso' },
+  ])
+})
+
+test('a ready pick without a plan still asks the AI after Confirmar seleção, and a typed answer or a chip still goes to the AI while a ready pick is open', async () => {
+  assert.equal(copilot.readPick({ label: 'a mensagem', candidates: [WELCOME.id, FAREWELL.id], ready: true }, BASE).ready, true)
+  assert.equal(copilot.readPick({ label: 'a mensagem', candidates: [WELCOME.id, FAREWELL.id], ready: 'true' }, BASE).ready, false)
+  assert.equal(copilot.readPick({ label: 'a mensagem', candidates: [WELCOME.id, FAREWELL.id] }, BASE).ready, false)
+
+  const blank = harness({ turns: [readied([WELCOME.id, FAREWELL.id], ''), edited(PICK_PLAN, PICK_EDIT)], outcomes: [received(CHANGED)] })
+  blank.store.send(PICK_REQUEST)
+  let state = await settled(blank.store)
+  assert.equal(state.pick.ready, true)
+  assert.equal(state.plan, '')
+  blank.store.selectPick(FAREWELL.id)
+  assert.equal(blank.store.confirmPick(), true)
+  state = blank.store.getState()
+  assert.equal(state.thinking, true)
+  assert.equal(state.running, false)
+  assert.equal(blank.env.turns.length, 2)
+  assert.deepEqual(blank.env.turns[1].history.at(-1), { role: 'user', text: choice(FAREWELL) })
+  state = await settled(blank.store)
+  assert.equal(blank.env.requests[0].request.prompt, PICK_PLAN)
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+
+  const typed = harness({ turns: [readied([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', [], PICK_PLAN)] })
+  typed.store.send(PICK_REQUEST)
+  await settled(typed.store)
+  typed.store.selectPick(FAREWELL.id)
+  assert.equal(typed.store.send('Pode ser assim'), true)
+  state = typed.store.getState()
+  assert.equal(state.thinking, true)
+  assert.equal(state.running, false)
+  assert.deepEqual(texts(state).slice(-2), [`user:${choice(FAREWELL)}`, 'user:Pode ser assim'])
+  assert.deepEqual(typed.env.turns[1].history.at(-1), { role: 'user', text: `${choice(FAREWELL)}\n\nPode ser assim` })
+  await settled(typed.store)
+  assert.equal(typed.env.requests.length, 0)
+
+  const chip = harness({ turns: [readied([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', [], PICK_PLAN)] })
+  chip.store.send(PICK_REQUEST)
+  await settled(chip.store)
+  chip.store.selectPick(FAREWELL.id)
+  assert.equal(chip.store.send(PICK_CHIPS[1], false), true)
+  assert.equal(chip.store.getState().thinking, true)
+  assert.deepEqual(chip.env.turns[1].history.at(-1), { role: 'user', text: PICK_CHIPS[1] })
+  await settled(chip.store)
+  assert.equal(chip.env.requests.length, 0)
+})
+
+test('a ready pick keeps the selection when the key is refused or Gerar com IA is busy, ends with the outdated note when the flow changed and still edits after a move', async () => {
+  const key = harness({ turns: [readied([WELCOME.id, FAREWELL.id])], outcomes: [received(CHANGED)] })
+  key.store.send(PICK_REQUEST)
+  await settled(key.store)
+  key.store.selectPick(FAREWELL.id)
+  key.env.settings = { ...key.env.settings, apiKey: '' }
+  assert.equal(key.store.confirmPick(), false)
+  let state = key.store.getState()
+  assert.equal(state.pick.selected, FAREWELL.id)
+  assert.equal(state.fieldErrors.apiKey, 'Informe a chave da API da OpenAI.')
+  assert.equal(state.entries.length, 2)
+  assert.equal(key.env.requests.length, 0)
+  key.store.setBlocked(true)
+  key.env.settings = { ...key.env.settings, apiKey: KEY }
+  assert.equal(key.store.confirmPick(), false)
+  assert.equal(key.store.getState().pick.selected, FAREWELL.id)
+  key.store.setBlocked(false)
+  assert.equal(key.store.confirmPick(), true)
+  await settled(key.store)
+  assert.equal(key.env.turns.length, 1)
+  assert.equal(key.env.requests[0].request.prompt, `${PICK_READY}\n\n${choice(FAREWELL)}`)
+
+  const changed = harness({ turns: [readied([WELCOME.id, FAREWELL.id])] })
+  changed.store.send(PICK_REQUEST)
+  await settled(changed.store)
+  changed.store.selectPick(FAREWELL.id)
+  changed.env.flow = CHANGED
+  assert.equal(changed.store.confirmPick(), false)
+  state = changed.store.getState()
+  assert.equal(state.pick, null)
+  assert.equal(state.plan, '')
+  assert.deepEqual(kinds(state), ['user', 'assistant', `note:${copilot.COPILOT_TEXT.outdated}`])
+  assert.equal(changed.env.requests.length, 0)
+
+  const moved = harness({ turns: [readied([WELCOME.id, FAREWELL.id])], outcomes: [received(CHANGED)] })
+  moved.store.send(PICK_REQUEST)
+  await settled(moved.store)
+  moved.store.selectPick(FAREWELL.id)
+  moved.env.flow = MOVED
+  assert.equal(moved.store.confirmPick(), true)
+  state = await settled(moved.store)
+  assert.equal(moved.env.turns.length, 1)
+  assert.equal(moved.env.requests[0].request.base, MOVED)
+  assert.equal(proposals(state)[0].proposal.original, MOVED)
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+})
+
+test('after a ready edit fails or is stopped, Tentar de novo and Editar agora send the same prompt with the focus on the chosen component', async () => {
+  const prompt = `${PICK_READY}\n\n${choice(FAREWELL)}`
+  const failed = harness({
+    turns: [readied([WELCOME.id, FAREWELL.id])],
+    outcomes: [rejected('rate_limit', 'O limite de uso do provedor foi atingido.', 'Aguarde alguns instantes.'), received(CHANGED)],
+  })
+  failed.store.send(PICK_REQUEST)
+  await settled(failed.store)
+  failed.store.selectPick(FAREWELL.id)
+  failed.store.confirmPick()
+  let state = await settled(failed.store)
+  assert.deepEqual(kinds(state), ['user', 'assistant', 'user', 'error'])
+  assert.equal(state.entries.at(-1).prompt, prompt)
+  assert.equal(state.plan, prompt)
+  assert.equal(failed.store.retry(), true)
+  state = await settled(failed.store)
+  assert.equal(failed.env.turns.length, 1)
+  assert.equal(failed.env.requests[1].request.prompt, prompt)
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+
+  const stopped = harness({ turns: [readied([WELCOME.id, FAREWELL.id])], outcomes: [({ signal }) => waiting(signal), received(CHANGED)] })
+  stopped.store.send(PICK_REQUEST)
+  await settled(stopped.store)
+  stopped.store.selectPick(FAREWELL.id)
+  stopped.store.confirmPick()
+  await waitFor(() => stopped.env.requests.length === 1)
+  stopped.store.cancel()
+  state = stopped.store.getState()
+  assert.equal(stopped.env.requests[0].signal.aborted, true)
+  assert.deepEqual(kinds(state), ['user', 'assistant', 'user', `note:${copilot.COPILOT_TEXT.cancelled}`])
+  assert.equal(stopped.store.editNow(), true)
+  state = await settled(stopped.store)
+  assert.equal(stopped.env.turns.length, 1)
+  assert.equal(stopped.env.requests[1].request.prompt, prompt)
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+  assert.equal(stopped.env.focus.at(-1), FAREWELL.id)
 })
 
 test('Cancelar seleção leaves the pick with a muted note, hides Editar agora until the next answer and the answer can come by text', async () => {
@@ -2155,6 +2498,31 @@ test('linkPick starts the canvas pick again when the confirm on the canvas is re
   unlink()
 })
 
+test('linkPick confirms a ready pick on the canvas straight into the edit, without another turn', async () => {
+  const { store, env } = harness({ turns: [readied([WELCOME.id, FAREWELL.id])], outcomes: [received(CHANGED)] })
+  const canvas = fakeCanvas()
+  const unlink = copilot.linkPick(store, canvas)
+  store.send(PICK_REQUEST)
+  await settled(store)
+  await tick()
+  assert.deepEqual(canvas.calls, [['start', 'a mensagem', [WELCOME.id, FAREWELL.id], null]])
+  leave(canvas).onConfirm(FAREWELL.id)
+  let state = store.getState()
+  assert.equal(state.thinking, false)
+  assert.equal(state.running, true)
+  assert.equal(state.pick, null)
+  assert.equal(state.entries.at(-1).text, choice(FAREWELL))
+  assert.deepEqual(env.focus, [FAREWELL.id])
+  state = await settled(store)
+  assert.equal(env.turns.length, 1)
+  assert.equal(env.requests[0].request.prompt, `${PICK_READY}\n\n${choice(FAREWELL)}`)
+  assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
+  await tick()
+  assert.equal(canvas.calls.length, 1)
+  unlink()
+  assert.equal(canvas.calls.length, 1)
+})
+
 test('the pick box shows the hint, one pressed button per candidate and confirms only after a selection', () => {
   const React = require('react')
   const { renderToStaticMarkup } = require('react-dom/server')
@@ -2192,7 +2560,7 @@ test('the pick box shows the hint, one pressed button per candidate and confirms
   assert.ok(!html.includes('Selecione a mensagem'))
   assert.deepEqual(markupButtons(html).map((button) => button.disabled), [true, true, false, true])
 
-  const props = { id: 'copiloto', open: true, onClose: () => undefined, getCurrentFlow: () => BASE, onLivePreview: () => undefined, onWorkflowEdited: () => true, onOpenGenerate: () => undefined }
+  const props = { id: 'copiloto', open: true, onClose: () => undefined, getCurrentFlow: () => BASE, onLivePreview: () => undefined, onWorkflowEdited: () => true }
   const canvas = { start: () => [], select: () => undefined, confirm: () => undefined, end: () => undefined }
   const whole = renderToStaticMarkup(React.createElement(panel.default, { ...props, pick: canvas }))
   assert.match(whole, /<section id="copiloto" aria-label="Copiloto"/)
@@ -2268,14 +2636,13 @@ test('the reply bar shows the full text of each suggestion in a tooltip and lock
   assert.match(html, /Editar agora/)
 })
 
-test('chips and Editar agora lock when the flow has only Início without a proposal, and after a question focus never lands on an older Aplicar', async () => {
+test('chips and Editar agora lock only while the Copiloto or Gerar com IA is busy, and after a question focus never lands on an older Aplicar', async () => {
   const panel = loadPanel()
-  const reply = (extra = {}) => panel.canReply({ busy: false, dialogBusy: false, hasFlow: true, hasPending: false, ...extra })
+  const reply = (extra = {}) => panel.canReply({ busy: false, dialogBusy: false, ...extra })
   assert.equal(reply(), true)
-  assert.equal(reply({ hasFlow: false }), false)
-  assert.equal(reply({ hasFlow: false, hasPending: true }), true)
   assert.equal(reply({ busy: true }), false)
   assert.equal(reply({ dialogBusy: true }), false)
+  assert.equal(reply({ busy: true, dialogBusy: true }), false)
 
   const { store } = harness({
     turns: [edited(), asked('Qual texto você quer no boleto?', ['Quero outro texto'], 'Troque o texto do boleto.'), asked('Qual texto?', [], 'Troque o texto do boleto.')],

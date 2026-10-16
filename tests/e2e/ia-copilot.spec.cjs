@@ -2,7 +2,7 @@ require('../../scripts/register-typescript.cjs')
 const { test: base, expect } = require('@playwright/test')
 const crypto = require('node:crypto')
 const https = require('node:https')
-const { importFlow } = require('../../lib/atendimento/format.ts')
+const { importFlow, newFlow, newNode } = require('../../lib/atendimento/format.ts')
 const { START_TYPE } = require('../../lib/atendimento/catalog.ts')
 const { assembleFlow, finalizeFlow } = require('../../lib/atendimento/ai/assemble.ts')
 const { flowToRi } = require('../../lib/atendimento/ai/edit.ts')
@@ -26,7 +26,7 @@ const EXAMPLES = [
 const APPLIED = 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.'
 const DISCARDED = 'Proposta descartada. O fluxo aberto não mudou.'
 const CANCELLED = 'Pedido cancelado. O fluxo aberto não mudou.'
-const EMPTY_NOTICE = 'O fluxo aberto só tem o Início. Para criar um fluxo do zero, use Gerar com IA.'
+const OLD_NOTICE = /só tem o Início|use Gerar com IA/
 const REFINE_HINT = 'O próximo pedido ajusta a proposta mostrada no canvas.'
 const FALLBACK_ERROR = 'A rota de reserva não fazia parte deste teste.'
 const SUMMARY = 'OpenAI · GPT-6.1 Sol · Esforço equilibrado'
@@ -65,6 +65,34 @@ const ASK_OPTION = {
 }
 const EDIT_OPTION = { message: 'Vou acrescentar a opção 8 Segunda via de boleto no fim do menu.', suggestions: [], action: 'edit', plan: OPTION_PLAN }
 const OPTIONS = ['Agendar consulta', 'Remarcar consulta', 'Cancelar consulta', 'Resultado de exames', 'Convênios aceitos', 'Endereço e horários', 'Falar com a recepção']
+
+const PET_WELCOME = 'Olá, #NAME. Você está no atendimento do Pet Shop Exemplo.'
+const PET_HOURS = 'Atendemos de segunda a sábado, das 8h às 18h.'
+const NOTE_TEXT = 'Lembrar de revisar os horários do feriado.'
+const START_REQUEST = 'Monte o atendimento do Pet Shop Exemplo com boas-vindas, um menu com Horários e Encerrar e uma despedida.'
+const START_PLAN = `A partir do Início, envie a mensagem ${PET_WELCOME} Depois mostre o menu Como podemos ajudar? com as opções Horários e Encerrar. Horários envia ${PET_HOURS} e encerra o atendimento. Encerrar envia ${FAREWELL} e encerra o atendimento.`
+const START_TURN = { message: 'Vou montar o atendimento a partir do Início, com as boas-vindas, o menu Como podemos ajudar? e a despedida.', suggestions: [], action: 'edit', plan: START_PLAN }
+const START_TEXT = JSON.stringify({
+  name: '',
+  description: '',
+  nodes: [
+    { id: 'boas_vindas', type: 'envio_pergunta', config: [{ key: 'template', value: PET_WELCOME }] },
+    { id: 'menu', type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify([{ text: 'Horários' }, { text: 'Encerrar' }]) }] },
+    { id: 'horarios', type: 'envio_pergunta', config: [{ key: 'template', value: PET_HOURS }] },
+    { id: 'fim_horarios', type: 'finalizar', config: [] },
+    { id: 'despedida', type: 'envio_pergunta', config: [{ key: 'template', value: FAREWELL }] },
+    { id: 'fim', type: 'finalizar', config: [] },
+  ],
+  edges: [
+    { from: 'inicio', output: '', to: 'boas_vindas' },
+    { from: 'boas_vindas', output: '', to: 'menu' },
+    { from: 'menu', output: 'Horários', to: 'horarios' },
+    { from: 'menu', output: 'Encerrar', to: 'despedida' },
+    { from: 'horarios', output: '', to: 'fim_horarios' },
+    { from: 'despedida', output: '', to: 'fim' },
+  ],
+})
+const START_CHANGES = ['6 componentes novos', '0 alterados', '0 removidos']
 
 const SOURCE = {
   name: 'Atendimento Clínica Exemplo',
@@ -152,6 +180,15 @@ const AFTER_NODES = TEXT.indexOf('"edges"')
 const BASE_STATE = { name: BASE_FLOW.name, nodes: BASE_FLOW.nodes.map((node) => node.id) }
 const MENU_FLOW = assembled(MENU_SOURCE)
 const OPTION_TEXT = JSON.stringify(optionDelta(MENU_FLOW).delta)
+const NOTE_FLOW = (() => {
+  const flow = newFlow(new Date('2026-01-15T12:00:00.000Z'))
+  flow.name = 'Atendimento Pet Shop Exemplo'
+  const note = newNode('note', { x: 120, y: 320 }, '2')
+  note.data.data.text = NOTE_TEXT
+  flow.nodes.push(note)
+  return importFlow(JSON.parse(JSON.stringify(flow)))
+})()
+const NOTE_NODE = NOTE_FLOW.nodes.find((node) => node.data.type === 'note')
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const event = (payload) => `data: ${JSON.stringify(payload)}\n\n`
@@ -430,6 +467,8 @@ test('the Copiloto button opens a side panel next to the canvas, keeps it mounte
   await expect(panel.getByRole('button', { name: 'Configurar IA', exact: true })).toHaveAttribute('aria-expanded', 'true')
   await expect(panel.getByLabel('Chave da API da OpenAI')).toBeFocused()
   await expect(panel.getByText('A chave fica só nesta página, não é salva e serve apenas para chamar a API da OpenAI. É a mesma usada no Gerar com IA.')).toBeVisible()
+  await expect(panel.getByRole('combobox', { name: 'Modelo' })).toHaveText(/^GPT-6\.1 Sol/)
+  await expect(panel.getByRole('combobox', { name: 'Esforço' })).toHaveText('Equilibrado')
   const log = conversation(panel)
   await expect(log).toHaveAttribute('aria-live', 'polite')
   await expect(log.getByText(INTRO)).toBeVisible()
@@ -968,32 +1007,104 @@ test('a question that arrives with the panel closed shows a toast and a badge th
   expect(ai.buildCalls()).toHaveLength(0)
 })
 
-test('with only Início the Copiloto points to Gerar com IA', async ({ page, ai }) => {
+test('a new flow with only Início: the Copiloto builds the request starting from Início, shows the proposal and Aplicar is one undoable step', async ({ page, ai }) => {
   await page.goto('/flow')
-  await expect(page.locator('.react-flow__node')).toHaveCount(1)
+  await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
+  const nodes = page.locator('.react-flow__node')
+  const canvas = page.locator('.react-flow')
+  const undo = page.getByRole('button', { name: 'Desfazer', exact: true })
+  await expect(nodes).toHaveCount(1)
+  await expect(undo).toBeDisabled()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('workflow') !== null)).toBe(true)
+  const opened = importFlow(await stored(page))
+  expect(components(opened)).toBe(0)
+  const result = await engineEdit(opened, START_TEXT, START_PLAN)
+  const final = result.workflow
+  expect(result.changes).toEqual({ added: 6, changed: 0, removed: 0 })
+  const welcome = final.nodes.find((node) => node.data.data.template === PET_WELCOME).id
+  ai.say(START_TURN)
+  ai.builds.push({ steps: [START_TEXT] })
+
   const panel = await openCopilot(page)
-  await expect(panel.getByText(EMPTY_NOTICE, { exact: true })).toBeVisible()
+  await expect(panel.getByText(OLD_NOTICE)).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'Abrir Gerar com IA', exact: true })).toHaveCount(0)
   await typeKey(panel)
-  await composer(panel).fill(EXAMPLES[3])
-  await expect(sendButton(panel)).toBeDisabled()
-  await composer(panel).press('Enter')
-  await expect(composer(panel)).toHaveValue(EXAMPLES[3])
-  await expect(conversation(panel).getByText(EXAMPLES[3], { exact: true })).toHaveCount(1)
-  expect(ai.calls).toEqual([])
-
-  await panel.getByRole('button', { name: 'Abrir Gerar com IA', exact: true }).click()
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Gerar fluxo com IA' })).toBeVisible()
-  await expect(panel).toBeHidden()
-  await expect(trigger(page)).toHaveAttribute('aria-expanded', 'false')
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancelar', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-
-  await page.getByLabel('Importar arquivo JSON').setInputFiles({ name: 'base.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(BASE_FLOW)) })
-  await expect(page.locator('.react-flow__node')).toHaveCount(BASE_FLOW.nodes.length)
-  await trigger(page).click()
-  await expect(panel).toBeVisible()
-  await expect(panel.getByText(EMPTY_NOTICE, { exact: true })).toHaveCount(0)
+  await composer(panel).fill(START_REQUEST)
   await expect(sendButton(panel)).toBeEnabled()
+  await composer(panel).press('Enter')
+  await expect(composer(panel)).toHaveValue('')
+  const changes = await proposal(panel)
+  await expect(changes).toHaveText(START_CHANGES)
+  await expect(messages(panel)).toHaveText([you(START_REQUEST), says(START_TURN)])
+  await expect(page.getByText(EDIT_DONE)).toBeVisible()
+  await expect(nodes).toHaveCount(final.nodes.length)
+  await expect(canvas).toContainText(PET_WELCOME)
+  await expect(canvas).toContainText(PET_HOURS)
+  expect(await saved(page)).toEqual({ name: opened.name, nodes: ['inicio'] })
+
+  expect(ai.turnCalls()).toHaveLength(1)
+  const turn = ai.turnCalls()[0]
+  expect(turn.headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(historyOf(turn)).toContain(START_REQUEST)
+  expect(systemOf(turn), 'o turno do Copiloto recebe o fluxo só com o Início').toEqual([copilotSystemPrompt(), copilotState(opened)])
+  expect(ai.buildCalls()).toHaveLength(1)
+  const build = JSON.stringify(ai.buildCalls()[0].body)
+  expect(build).toContain('# Modo de edição')
+  expect(build).toContain('# Fluxo atual')
+  expect(build).toContain(START_PLAN)
+  expect(build).not.toContain(START_REQUEST)
+  expect(ai.fallbacks).toEqual([])
+
+  await panel.getByRole('button', { name: 'Aplicar', exact: true }).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect(messages(panel)).toHaveText([you(START_REQUEST), says(START_TURN), APPLIED, says(FOLLOW_UP)])
+  await expect(nodes).toHaveCount(final.nodes.length)
+  await expect(page.locator('.react-flow__edge')).toHaveCount(final.edges.length)
+  await expect.poll(() => saved(page)).toEqual({ name: opened.name, nodes: final.nodes.map((node) => node.id) })
+  const after = await stored(page)
+  expect(after.edges.filter((edge) => edge.source === 'inicio').map((edge) => edge.target), 'o atendimento começa no Início').toEqual([welcome])
+
+  await undo.click()
+  await expect(nodes).toHaveCount(1)
+  await expect(canvas).not.toContainText(PET_WELCOME)
+  await expect.poll(() => saved(page)).toEqual({ name: opened.name, nodes: ['inicio'] })
+  await expect(undo, 'Aplicar entra como um só passo no histórico').toBeDisabled()
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
+})
+
+test('a flow with only Início and a note goes through the Copiloto too, and the note stays as it was', async ({ page, ai }) => {
+  const result = await engineEdit(NOTE_FLOW, START_TEXT, START_PLAN)
+  const final = result.workflow
+  expect(result.changes).toEqual({ added: 6, changed: 0, removed: 0 })
+  ai.say(START_TURN)
+  ai.builds.push({ steps: [START_TEXT] })
+
+  await openEditor(page, NOTE_FLOW)
+  const memo = page.locator(`.react-flow__node[data-id="${NOTE_NODE.id}"]`)
+  await expect(memo).toContainText(NOTE_TEXT)
+  const panel = await openCopilot(page)
+  await expect(panel.getByText(OLD_NOTICE)).toHaveCount(0)
+  await typeKey(panel)
+  await ask(panel, START_REQUEST)
+  const changes = await proposal(panel)
+  await expect(changes, 'a nota não conta como componente').toHaveText(START_CHANGES)
+  await expect(page.locator('.react-flow__node')).toHaveCount(final.nodes.length)
+  await expect(memo).toContainText(NOTE_TEXT)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(systemOf(ai.turnCalls()[0])).toEqual([copilotSystemPrompt(), copilotState(NOTE_FLOW)])
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(JSON.stringify(ai.buildCalls()[0].body)).toContain(START_PLAN)
+
+  await panel.getByRole('button', { name: 'Aplicar', exact: true }).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect.poll(() => saved(page)).toEqual({ name: NOTE_FLOW.name, nodes: final.nodes.map((node) => node.id) })
+  const after = await stored(page)
+  const kept = after.nodes.find((node) => node.id === NOTE_NODE.id)
+  expect(kept.data, 'a nota continua com o mesmo texto').toEqual(NOTE_NODE.data)
+  expect(kept.position).toEqual(NOTE_NODE.position)
+  expect(after.edges.some((edge) => edge.source === NOTE_NODE.id || edge.target === NOTE_NODE.id), 'a nota segue fora das conexões').toBe(false)
+  await expect(memo).toContainText(NOTE_TEXT)
 })
 
 test('Preencher todos os campos sends fill true by default and fill false when unchecked', async ({ page, ai }) => {

@@ -420,7 +420,8 @@ test('o resumo do fluxo traz componentes, textos e conexões e fica compacto com
 })
 
 const COPILOT_REQUEST = [{ role: 'user', text: 'crie uma opcao 8' }]
-const COPILOT_FLOW_MISSING = 'Abra um fluxo com componentes para o Copiloto editar.'
+const COPILOT_FLOW_MISSING = 'Abra um fluxo para o Copiloto editar.'
+const NOTES_HEAD = 'Notas no canvas, anotações do usuário fora do caminho do atendimento:'
 const COPILOT_OPENED = 'O fluxo resumido abaixo está aberto no editor, e cada pedido do usuário é uma mudança nesse fluxo.'
 const PROPOSAL_NOTICE = 'Há uma proposta em revisão no canvas, ainda não aplicada. O resumo abaixo já inclui essa proposta, e o pedido seguinte ajusta a proposta.'
 const BUILDER_FILL = 'Preenchimento ligado: na montagem, nomes cadastrados, IDs e URLs que o usuário não informar recebem valores provisórios, e o editor avisa cada um para ele trocar. Pergunte por esses valores só quando o usuário quiser informar e siga sem eles quando ele preferir.'
@@ -498,13 +499,14 @@ test('o Copiloto sem fluxo é recusado no campo base, sem chamar o provedor, e o
   const silent = await interviewTurn(copilotInput('openai', { history: [] }), hooks(() => reply.openai(JSON.stringify(ASK))))
   assert.deepEqual([silent.failure.field, silent.failure.error], ['prompt', 'Escreva o que você precisa no atendimento.'])
   assert.equal(calls.length, 0)
-  for (const [flow, count] of [[empty, 0], [noted, 1]]) {
+  for (const [flow, notes] of [[empty, false], [noted, true]]) {
     calls.length = 0
     const result = await interviewTurn(copilotInput('openai', { flow }), hooks(() => reply.openai(JSON.stringify(ASK))))
-    assert.deepEqual([result.ok, calls.length], [true, 1], String(count))
+    assert.deepEqual([result.ok, calls.length], [true, 1], String(notes))
     const state = interviewMessages({ history: COPILOT_REQUEST, flow, scope: 'copilot' })[1].content
-    assert.ok(state.startsWith(`# Situação atual\n${COPILOT_OPENED}\n\n# Resumo do fluxo aberto\n`), String(count))
-    assert.ok(state.includes(`Componentes: ${count}`), String(count))
+    assert.ok(state.startsWith(`# Situação atual\n${COPILOT_OPENED}\n\n# Resumo do fluxo aberto\n`), String(notes))
+    assert.ok(state.includes('Componentes: 0\n'), String(notes))
+    assert.equal(state.includes(`${NOTES_HEAD}\n- “Lembrete.”`), notes)
   }
   calls.length = 0
   const unknown = await interviewTurn(input('openai', { flow: noted, scope: 'outro' }), hooks(() => reply.openai(JSON.stringify(ASK))))
@@ -593,7 +595,8 @@ const MENUS = importFlow(JSON.parse(JSON.stringify(finalizeFlow(assembleFlow(MEN
 const MENUS_IDS = MENUS.nodes.map((node) => node.id)
 const MENU_IDS = MENUS.nodes.filter((node) => node.data.type === 'envio_mensagem').map((node) => node.id)
 const MESSAGE_IDS = MENUS.nodes.filter((node) => node.data.type === 'envio_pergunta').map((node) => node.id)
-const MENU_PICK = { label: 'o menu de opções', candidates: MENU_IDS }
+const MENU_PICK = { label: 'o menu de opções', candidates: MENU_IDS, ready: false }
+const READY_PICK = { ...MENU_PICK, ready: true }
 const PICK_ASK = {
   message: 'O fluxo tem dois menus de opções. Selecione no canvas o menu da opção nova e clique em Confirmar.',
   suggestions: ['No menu Como podemos ajudar', 'No menu Qual boleto você quer'],
@@ -632,10 +635,12 @@ test('o esquema do Copiloto acrescenta pick, objeto estrito ou null com descriç
   assert.deepEqual(Object.keys(jsonSchema.properties).sort(), ['action', 'message', 'pick', 'plan', 'suggestions'])
   const { pick } = jsonSchema.properties
   assert.deepEqual(pick.anyOf[1], { type: 'null' })
-  assert.deepEqual(Object.keys(pick.anyOf[0].properties), ['label', 'candidates'])
+  assert.deepEqual(Object.keys(pick.anyOf[0].properties), ['label', 'candidates', 'ready'])
   assert.equal(pick.anyOf[0].properties.label.type, 'string')
   assert.equal(pick.anyOf[0].properties.candidates.items.type, 'string')
-  for (const schema of [pick, pick.anyOf[0].properties.label, pick.anyOf[0].properties.candidates]) assert.ok(schema.description.length > 30, JSON.stringify(schema))
+  assert.equal(pick.anyOf[0].properties.ready.type, 'boolean')
+  assert.match(pick.anyOf[0].properties.ready.description, /^true quando plan já descreve a mudança inteira e só falta saber qual componente/)
+  for (const schema of [pick, pick.anyOf[0].properties.label, pick.anyOf[0].properties.candidates, pick.anyOf[0].properties.ready]) assert.ok(schema.description.length > 30, JSON.stringify(schema))
   const builder = zodSchema(interviewSchema).jsonSchema
   for (const key of ['message', 'suggestions', 'action', 'plan']) assert.deepEqual(jsonSchema.properties[key], builder.properties[key], key)
   assert.deepEqual(Object.keys(builder.properties).sort(), ['action', 'message', 'plan', 'suggestions'])
@@ -659,6 +664,8 @@ test('cada provedor recebe pick no esquema do turno do Copiloto, com o mesmo nom
     assert.ok(turn.schema.required.includes('pick'), provider)
     if (provider === 'google') assert.deepEqual([turn.schema.properties.pick.nullable, turn.schema.properties.pick.type], [true, 'object'], provider)
     else assert.deepEqual(turn.schema.properties.pick.anyOf[1], { type: 'null' }, provider)
+    const selection = provider === 'google' ? turn.schema.properties.pick : turn.schema.properties.pick.anyOf[0]
+    assert.deepEqual([selection.properties.ready.type, selection.required.includes('ready')], ['boolean', true], provider)
     assert.equal(build.schema.properties.pick, undefined, provider)
     assert.ok(!build.schema.required.includes('pick'), provider)
   }
@@ -684,7 +691,7 @@ test('settleTurn guarda pick só no ask do Copiloto, com 2 ou mais IDs do fluxo,
   const ask = (pick, extra = {}, context = PICK_CONTEXT) => settleTurn({ ...PICK_ASK, ...extra, pick }, context)
   assert.deepEqual(ask(MENU_PICK), { ...PICK_ASK, pick: MENU_PICK })
   assert.deepEqual(ask({ label: 'o menu', candidates: [second, first, second, 'x', first] }).pick.candidates, [second, first])
-  assert.deepEqual(ask({ label: 'a mensagem', candidates: MESSAGE_IDS }).pick, { label: 'a mensagem', candidates: MESSAGE_IDS })
+  assert.deepEqual(ask({ label: 'a mensagem', candidates: MESSAGE_IDS }).pick, { label: 'a mensagem', candidates: MESSAGE_IDS, ready: false })
   for (const candidates of [[], [first], [first, first, ` ${first}`], [first, 'x'], ['x', 'y'], 'abc']) assert.equal('pick' in ask({ label: 'o menu', candidates }), false, JSON.stringify(candidates))
   for (const pick of [null, undefined, 'o menu', [first, second], { label: 'o menu' }, { label: 'o menu', candidates: [] }]) assert.deepEqual(ask(pick), { ...PICK_ASK, message: PICK_LOST }, JSON.stringify(pick))
   const typed = 'Em qual menu entra a opção nova, Como podemos ajudar ou Qual boleto você quer?'
@@ -745,12 +752,17 @@ test('o parcial do Copiloto mostra pick enquanto a resposta chega e o parcial da
   let result = await interviewTurn(menusInput('xai'), hooks(() => reply.xai(answer), { onPartial: (turn) => copilot.push(turn) }))
   assert.deepEqual(result.turn, { ...PICK_ASK, pick: MENU_PICK })
   assert.ok(copilot.some((turn) => turn.pick && turn.pick.label === 'o menu de opções' && turn.pick.candidates.length === 2), JSON.stringify(copilot.at(-1)))
-  assert.ok(copilot.every((turn) => turn.pick === undefined || (typeof turn.pick.label === 'string' && turn.pick.candidates.every((id) => typeof id === 'string'))))
+  assert.ok(copilot.every((turn) => turn.pick === undefined || (typeof turn.pick.label === 'string' && turn.pick.candidates.every((id) => typeof id === 'string') && turn.pick.ready === false)))
+  const ready = []
+  result = await interviewTurn(menusInput('google'), hooks(() => reply.google(JSON.stringify({ ...PICK_ASK, pick: READY_PICK })), { onPartial: (turn) => ready.push(turn) }))
+  assert.deepEqual(result.turn, { ...PICK_ASK, pick: READY_PICK })
+  assert.deepEqual(ready.at(-1).pick, READY_PICK)
+  assert.ok(ready.every((turn) => turn.pick === undefined || typeof turn.pick.ready === 'boolean'), JSON.stringify(ready.map((turn) => turn.pick)))
   const empty = []
   await interviewTurn(menusInput('openai'), hooks(() => reply.openai(JSON.stringify({ ...ASK, pick: null })), { onPartial: (turn) => empty.push(turn) }))
   assert.equal(empty.at(-1).pick, null)
   const builder = []
-  result = await interviewTurn(input('xai', { flow: MENUS }), hooks(() => reply.xai(answer), { onPartial: (turn) => builder.push(turn) }))
+  result = await interviewTurn(input('xai', { flow: MENUS }), hooks(() => reply.xai(JSON.stringify({ ...PICK_ASK, pick: READY_PICK })), { onPartial: (turn) => builder.push(turn) }))
   assert.equal(result.ok, true)
   assert.equal('pick' in result.turn, false)
   assert.ok(builder.length > 1)
@@ -786,7 +798,7 @@ test('os candidatos valem pelos IDs do fluxo enviado com o turno, inclusive os c
   const proposal = { ...MENUS, nodes: [...MENUS.nodes, added] }
   const answer = JSON.stringify({ ...PICK_ASK, pick: { label: 'o menu de opções', candidates: [first, '900'] } })
   let result = await interviewTurn(menusInput('openai', { flow: proposal, proposal: true }), hooks(() => reply.openai(answer)))
-  assert.deepEqual(result.turn.pick, { label: 'o menu de opções', candidates: [first, '900'] })
+  assert.deepEqual(result.turn.pick, { label: 'o menu de opções', candidates: [first, '900'], ready: false })
   assert.ok(bodyText(calls[0]).includes('- 900 (Menu de Opções)'))
   calls.length = 0
   result = await interviewTurn(menusInput('openai'), hooks(() => reply.openai(answer)))
@@ -986,4 +998,142 @@ test('o resumo do Copiloto marca com reticências o texto cortado, e a conversa 
   assert.ok(state('copilot').includes(`# Resumo do fluxo aberto\n${copilot}\n`))
   assert.ok(state(undefined).includes(`# Resumo do fluxo aberto\n${builder}\n`))
   assert.ok(!state(undefined).includes('…'))
+})
+
+test('settleTurn mantém ready true só no ask do Copiloto com a seleção válida e o plano preenchido, sem o ID de um candidato no plano', () => {
+  const [first, second] = MENU_IDS
+  const farewell = MESSAGE_IDS.find((id) => PICK_CONTEXT.texts.get(id) === '“Obrigado pelo contato. Até logo.”')
+  const settle = (extra = {}, context = PICK_CONTEXT) => settleTurn({ ...PICK_ASK, pick: READY_PICK, ...extra }, context)
+  assert.deepEqual(settle(), { ...PICK_ASK, pick: READY_PICK })
+  assert.deepEqual(settle({ pick: { ...READY_PICK, candidates: [` ${second} `, `ID ${first}`, '999'] } }).pick, { ...READY_PICK, candidates: [second, first] })
+  for (const plan of ['', '   ']) assert.deepEqual(settle({ plan }), { ...PICK_ASK, plan: '', pick: MENU_PICK }, JSON.stringify(plan))
+  for (const ready of [false, 'true', 1, null, undefined]) assert.deepEqual(settle({ pick: { ...MENU_PICK, ready } }).pick, MENU_PICK, String(ready))
+  assert.deepEqual(settle({ pick: { label: MENU_PICK.label, candidates: MENU_IDS } }).pick, MENU_PICK)
+  const chosen = [
+    `No menu de opções ID ${second}, acrescente a opção Falar com atendente.`,
+    `Acrescente a opção Falar com atendente no menu de opções que o usuário selecionar, IDs ${first} ou ${second}.`,
+  ]
+  for (const plan of chosen) assert.deepEqual(settle({ plan }).pick, MENU_PICK, plan)
+  assert.deepEqual(settle({ plan: `${PICK_ASK.plan} Depois da opção, o caminho segue para a despedida ID ${farewell}.` }).pick, READY_PICK)
+  assert.deepEqual(settle({ action: 'edit' }), { ...PICK_ASK, pick: READY_PICK })
+  const edit = { action: 'edit', message: 'Vou colocar a opção Falar com atendente no menu Qual boleto você quer.', suggestions: [], plan: chosen[0] }
+  assert.deepEqual(settle(edit), edit)
+  assert.deepEqual(settle({ action: 'finish' }), { message: PICK_ASK.message, suggestions: [], action: 'finish', plan: PICK_ASK.plan })
+  for (const candidates of [[first], [first, '999'], ['998', '999']]) assert.equal('pick' in settle({ pick: { ...READY_PICK, candidates } }), false, JSON.stringify(candidates))
+  for (const scope of [undefined, 'builder']) assert.equal('pick' in settle({}, { ...PICK_CONTEXT, scope }), false, String(scope))
+})
+
+test('no Copiloto, o ask com a seleção pronta chega com ready true, e a resposta reparada lê ready, pronto ou pronta', async () => {
+  for (const provider of PROVIDERS) {
+    calls.length = 0
+    const result = await interviewTurn(menusInput(provider), hooks(() => reply[provider](JSON.stringify({ ...PICK_ASK, pick: READY_PICK }))))
+    assert.deepEqual([result.turn, calls.length], [{ ...PICK_ASK, pick: READY_PICK }, 1], provider)
+  }
+  const [first, second] = MENU_IDS
+  const repaired = async (selection) => {
+    calls.length = 0
+    const text = JSON.stringify({ mensagem: PICK_ASK.message, sugestoes: PICK_ASK.suggestions, acao: 'ask', plano: PICK_ASK.plan, selecao: { rotulo: 'O menu de opções', candidatos: [first, second], ...selection } })
+    const result = await interviewTurn(menusInput('anthropic'), hooks(() => reply.anthropic(`\`\`\`json\n${text}\n\`\`\``)))
+    assert.equal(calls.length, 1, JSON.stringify(selection))
+    assert.deepEqual(result.turn.pick.candidates, MENU_IDS, JSON.stringify(selection))
+    return result.turn.pick.ready
+  }
+  for (const selection of [{ ready: true }, { pronta: true }, { pronto: 'true' }, { pronta: ' Sim ' }]) assert.equal(await repaired(selection), true, JSON.stringify(selection))
+  for (const selection of [{}, { ready: false }, { pronta: 'talvez' }, { ready: 1 }]) assert.equal(await repaired(selection), false, JSON.stringify(selection))
+  calls.length = 0
+  const loose = await interviewTurn(menusInput('google'), hooks(() => reply.google(JSON.stringify({ ...PICK_ASK, pick: { ...MENU_PICK, ready: 'true' } }))))
+  assert.deepEqual([loose.turn, calls.length], [{ ...PICK_ASK, pick: READY_PICK }, 1])
+  calls.length = 0
+  const blank = await interviewTurn(menusInput('openai'), hooks(() => reply.openai(JSON.stringify({ ...PICK_ASK, plan: ' ', pick: READY_PICK }))))
+  assert.deepEqual(blank.turn, { ...PICK_ASK, plan: '', pick: MENU_PICK })
+})
+
+test('o prompt do Copiloto pede ready true quando só falta o componente, com o plano escrito para o componente que o usuário selecionar', () => {
+  const prompt = copilotSystemPrompt()
+  const section = prompt.slice(prompt.indexOf('# Seleção no canvas'), prompt.indexOf('# Proposta em revisão'))
+  const rule = section.split('\n').find((line) => line.includes('ready fica true'))
+  assert.ok(rule, 'regra de ready')
+  for (const text of ['Em pick, ready fica true quando plan já descreve a mudança inteira, com as suas propostas, e só falta saber qual componente', 'escreva plan para o componente que o usuário selecionar', 'deixe os IDs dos candidatos só em candidates', 'no menu de opções que o usuário selecionar', 'a interface edita logo que o usuário confirma a seleção', 'Quando ainda falta outra decisão além do componente, ready fica false']) assert.ok(rule.includes(text), text)
+  assert.ok(section.indexOf(rule) > section.indexOf('candidates traz o ID') && section.indexOf(rule) < section.indexOf('A interface destaca os candidatos'), 'ordem das regras')
+  assert.deepEqual(section.split('\n').filter((line) => /^\d+\. /.test(line)).map((line) => Number(line.split('.')[0])), [1, 2, 3, 4, 5, 6, 7, 8])
+  assert.ok(!/\bready\b/.test(interviewSystemPrompt()))
+})
+
+const noteNode = (id, text, y = 0) => {
+  const node = newNode('note', { x: 0, y }, id)
+  if (text !== undefined) node.data.data.text = text
+  return node
+}
+
+test('o resumo do Copiloto conta só os componentes e traz as notas no fim, como anotações sem ID, e o resumo da montagem segue com as notas como antes', () => {
+  const short = 'Lembrete: revisar o horário de atendimento.'
+  const long = `Aqui entra a segunda via com o link https://lucas-lima.xyz/boleto. ${'O time de cobrança revisa cada texto antes de publicar o fluxo. '.repeat(4)}`
+  const flow = { ...FLOW, nodes: [...FLOW.nodes, noteNode('999', short), noteNode('998', long, 200), noteNode('997', undefined, 400)] }
+  const copilot = interviewFlowSummary(flow, true)
+  const lines = copilot.split('\n')
+  assert.equal(lines[1], 'Componentes: 5')
+  assert.equal(copilot.slice(0, copilot.indexOf(`\n${NOTES_HEAD}\n`)), interviewFlowSummary(FLOW, true))
+  const notes = lines.slice(lines.indexOf(NOTES_HEAD))
+  assert.equal(notes.length, 3)
+  assert.equal(notes[1], `- “${short}”`)
+  assert.match(notes[2], /^- “Aqui entra a segunda via com o link https:\/\/lucas-lima\.xyz\/boleto\. O time de cobrança [^”]*…”$/)
+  assert.ok(notes[2].length <= 205, String(notes[2].length))
+  assert.ok(!/\(Nota\)|\b99[789]\b/.test(copilot))
+  const builder = interviewFlowSummary(flow)
+  assert.equal(builder.split('\n')[1], 'Componentes: 8')
+  for (const id of ['999', '998', '997']) assert.ok(builder.includes(`- ${id} (Nota)`), id)
+  assert.ok(!builder.includes(NOTES_HEAD))
+  assert.equal(interviewFlowSummary({ ...FLOW, nodes: [...FLOW.nodes, noteNode('997')] }, true), interviewFlowSummary(FLOW, true))
+})
+
+test('no fluxo só com o Início, com ou sem notas, o Copiloto pergunta e edita a partir do Início, e os IDs das notas ficam fora da seleção', async () => {
+  const start = { ...FLOW, nodes: FLOW.nodes.filter((node) => node.data.type === START_TYPE), edges: [] }
+  const noted = { ...start, nodes: [...start.nodes, noteNode('999', 'Aqui entra o menu de boletos.'), noteNode('998', 'Revisar com o financeiro.', 200)] }
+  const history = [{ role: 'user', text: 'crie um menu com Boletos e Suporte' }]
+  const question = {
+    message: 'Vou começar o fluxo com esse menu, logo depois do Início. Pensei em enviar o link do boleto na opção Boletos e transferir a opção Suporte para o departamento Suporte. Fica assim ou quer outro destino?',
+    suggestions: ['Pode ser assim', 'Suporte vai para o Atendimento', 'Pode editar agora'],
+    action: 'ask',
+    plan: 'Logo depois do Início, envie o menu Como podemos ajudar? com as opções Boletos, que envia o link https://lucas-lima.xyz/boleto, e Suporte, que transfere para o departamento Suporte.',
+  }
+  const edit = { message: 'Vou montar o menu logo depois do Início.', suggestions: [], action: 'edit', plan: question.plan }
+  const answered = [...history, { role: 'assistant', text: question.message }, { role: 'user', text: 'Pode ser assim' }]
+  for (const provider of PROVIDERS) {
+    for (const [flow, notes] of [[start, false], [noted, true]]) {
+      const label = `${provider} ${notes}`
+      calls.length = 0
+      let result = await interviewTurn(copilotInput(provider, { history, flow }), hooks(() => reply[provider](JSON.stringify({ ...question, pick: null }))))
+      assert.deepEqual([result.ok, result.turn, calls.length], [true, question, 1], label)
+      const body = bodyText(calls[0])
+      assert.ok(body.includes('Componentes: 0'), label)
+      assert.ok(body.includes('o pedido monta o atendimento a partir do Início'), label)
+      assert.equal(body.includes(NOTES_HEAD), notes, label)
+      calls.length = 0
+      result = await interviewTurn(copilotInput(provider, { history: answered, flow }), hooks(() => reply[provider](JSON.stringify({ ...edit, action: 'generate', pick: null }))))
+      assert.deepEqual([result.ok, result.turn, calls.length], [true, edit, 1], label)
+    }
+  }
+  const state = interviewMessages({ history, flow: noted, scope: 'copilot' })[1].content
+  assert.ok(state.includes(`Componentes: 0\nCada linha: id (componente) textos principais | saídas e destinos.\n- inicio (Iniciar Fluxo)\n${NOTES_HEAD}\n- “Aqui entra o menu de boletos.”\n- “Revisar com o financeiro.”\n\n`), state)
+  for (const candidates of [['999', '998'], ['inicio', '999']]) {
+    const result = await interviewTurn(copilotInput('openai', { history, flow: noted }), hooks(() => reply.openai(JSON.stringify({ ...question, pick: { label: 'a nota', candidates, ready: false } }))))
+    assert.deepEqual(result.turn, question, JSON.stringify(candidates))
+  }
+  const [first, second] = MENU_IDS
+  const menusNoted = { ...MENUS, nodes: [...MENUS.nodes, noteNode('999', 'Menu principal revisado.')] }
+  let result = await interviewTurn(menusInput('openai', { flow: menusNoted }), hooks(() => reply.openai(JSON.stringify({ ...PICK_ASK, pick: { ...MENU_PICK, candidates: [first, '999', second] } }))))
+  assert.deepEqual(result.turn, { ...PICK_ASK, pick: MENU_PICK })
+  result = await interviewTurn(menusInput('openai', { flow: menusNoted }), hooks(() => reply.openai(JSON.stringify({ ...PICK_ASK, pick: { ...MENU_PICK, candidates: [first, '999'] } }))))
+  assert.deepEqual(result.turn, { ...PICK_ASK, message: PICK_LOST })
+})
+
+test('o prompt do Copiloto monta a partir do Início no fluxo só com o Início, pergunta o que faltar e mantém as notas como anotações', () => {
+  const prompt = copilotSystemPrompt()
+  const decide = prompt.slice(prompt.indexOf('# Como decidir'), prompt.indexOf('# Como perguntar'))
+  const rules = decide.split('\n').filter((line) => /^\d+\. /.test(line))
+  assert.deepEqual(rules.map((line) => Number(line.split('.')[0])), [1, 2, 3, 4, 5, 6, 7])
+  const [start, notes] = rules.slice(5)
+  for (const text of ['Quando o resumo tem só o Início, com Componentes: 0, o pedido monta o atendimento a partir do Início', 'o primeiro componente entra na saída do Início, e os outros seguem dele', 'Pergunte o que faltar como em qualquer pedido, propondo a resposta mais provável, e devolva edit com o pedido completo', 'Exemplo para o pedido crie um menu com Boletos e Suporte, num fluxo só com o Início: Vou começar o fluxo com esse menu, logo depois do Início.', 'Fica assim ou quer outro destino?']) assert.ok(start.includes(text), text)
+  for (const text of ['As notas no fim do resumo são anotações do usuário no canvas, fora do caminho do atendimento, e ficam no fluxo como estão', 'Use o texto delas como contexto quando o pedido citar uma nota', 'trate em plan e em candidates só dos componentes']) assert.ok(notes.includes(text), text)
+  for (const text of ['Componentes: 0', 'a partir do Início', 'anotações do usuário']) assert.ok(!interviewSystemPrompt().includes(text), text)
 })

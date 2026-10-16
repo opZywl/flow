@@ -48,7 +48,6 @@ import {
   effortChoices,
   formatNumber,
   generateFlow,
-  hasComponents,
   issueSubject,
   keyWarning,
   loadEngine,
@@ -94,7 +93,6 @@ export interface AICopilotProps {
   getCurrentFlow: () => AtendimentoFlow | null
   onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean, focus?: string | null) => void
   onWorkflowEdited: (workflow: AtendimentoFlow) => boolean
-  onOpenGenerate: () => void
   dialogBusy?: boolean
   onAttentionChange?: (attention: CopilotAttention | null) => void
   pick?: CanvasPick
@@ -122,7 +120,6 @@ const PROVIDER_OPTIONS = PROVIDERS.map((entry) => ({ value: entry.id, label: ent
 const PLACEHOLDER = "O que você quer mudar no fluxo?"
 const REFINE_PLACEHOLDER = "Peça um ajuste nesta proposta"
 const REFINE_HINT = "O próximo pedido ajusta a proposta mostrada no canvas."
-const EMPTY_NOTICE = "O fluxo aberto só tem o Início. Para criar um fluxo do zero, use Gerar com IA."
 const BUSY_NOTICE = "Aguarde a geração do Gerar com IA terminar."
 const EDIT_NOW_LABEL = "Editar agora com o que já foi decidido"
 const FOLLOW_GAP = 160
@@ -202,8 +199,8 @@ export function pickHint(label: string, onCanvas: boolean, blocked = false): str
   return onCanvas ? `Selecione ${label} no canvas ou na lista e confirme.` : `Selecione ${label} na lista e confirme.`
 }
 
-export function canReply({ busy, dialogBusy, hasFlow, hasPending }: { busy: boolean; dialogBusy: boolean; hasFlow: boolean; hasPending: boolean }): boolean {
-  return !busy && !dialogBusy && (hasFlow || hasPending)
+export function canReply({ busy, dialogBusy }: { busy: boolean; dialogBusy: boolean }): boolean {
+  return !busy && !dialogBusy
 }
 
 export function landing(entries: readonly CopilotEntry[], pending: string | null): "apply" | "prompt" {
@@ -502,7 +499,6 @@ export default function AICopilot({
   getCurrentFlow,
   onLivePreview,
   onWorkflowEdited,
-  onOpenGenerate,
   dialogBusy = false,
   onAttentionChange,
   pick,
@@ -522,7 +518,6 @@ export default function AICopilot({
   const [draft, setDraft] = useState("")
   const [clockNow, setClockNow] = useState(() => Date.now())
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
-  const [hasFlow, setHasFlow] = useState(() => hasComponents(safeFlow(getCurrentFlow)))
   const [listKey, setListKey] = useState("")
   const pickActions = useRef<{ confirm: () => void; cancel: () => void }>({ confirm: () => undefined, cancel: () => undefined })
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -601,14 +596,6 @@ export default function AICopilot({
   )
 
   useEffect(() => {
-    if (!open) return
-    const check = () => setHasFlow(hasComponents(safeFlow(propsRef.current.getCurrentFlow)))
-    check()
-    window.addEventListener("storage", check)
-    return () => window.removeEventListener("storage", check)
-  }, [open, entries.length, running])
-
-  useEffect(() => {
     if (open && !apiKey.trim()) setSettingsOpen(true)
   }, [open, provider, apiKey])
 
@@ -672,8 +659,6 @@ export default function AICopilot({
     document.getElementById(focusTarget)?.focus()
     setFocusTarget(null)
   }, [focusTarget])
-
-  const readFlow = () => safeFlow(propsRef.current.getCurrentFlow)
 
   const handleFocusRequest = (before: number | undefined) => {
     const after = store.getState().focus
@@ -776,10 +761,7 @@ export default function AICopilot({
 
   const follow = (started: boolean, before: number | undefined) => {
     if (started) setSettingsOpen(false)
-    else {
-      handleFocusRequest(before)
-      setHasFlow(hasComponents(readFlow()))
-    }
+    else handleFocusRequest(before)
     if (store.getState().focus?.seq === before) setFocusTarget(idFor("prompt"))
     return started
   }
@@ -854,8 +836,8 @@ export default function AICopilot({
         : ""
   const listingBusy = providerListing?.state === "loading"
   const hasPending = Boolean(pending)
-  const notice = dialogBusy ? BUSY_NOTICE : !hasFlow && !hasPending && !busy ? EMPTY_NOTICE : ""
-  const canAnswer = canReply({ busy, dialogBusy, hasFlow, hasPending })
+  const notice = dialogBusy ? BUSY_NOTICE : ""
+  const canAnswer = canReply({ busy, dialogBusy })
   const canSend = canAnswer && draft.trim().length > 0
   const canEditNow = !busy && !asked && Boolean(plan)
   const onCanvas = Boolean(pick) && !dialogBusy && listKey !== pickKey(asked)
@@ -1225,16 +1207,13 @@ export default function AICopilot({
         </label>
 
         {notice ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-flow-warning/40 bg-flow-warning/10 px-2.5 py-2">
-            <p id={idFor("notice")} role="status" className="min-w-0 flex-1 text-[11px] font-medium leading-4 text-flow-fg">
-              {notice}
-            </p>
-            {notice === EMPTY_NOTICE ? (
-              <button type="button" onClick={onOpenGenerate} className={cn(ui.accentButton, "h-7 px-2.5")}>
-                Abrir Gerar com IA
-              </button>
-            ) : null}
-          </div>
+          <p
+            id={idFor("notice")}
+            role="status"
+            className="rounded-lg border border-flow-warning/40 bg-flow-warning/10 px-2.5 py-2 text-[11px] font-medium leading-4 text-flow-fg"
+          >
+            {notice}
+          </p>
         ) : hasPending ? (
           <p id={idFor("prompt-hint")} className={cn(ui.hint, "mt-0")}>
             {REFINE_HINT}
@@ -1253,7 +1232,6 @@ export default function AICopilot({
             maxLength={LIMITS.prompt}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onPromptKeyDown}
-            onFocus={() => setHasFlow(hasComponents(readFlow()))}
             placeholder={hasPending ? REFINE_PLACEHOLDER : PLACEHOLDER}
             aria-describedby={describedBy(idFor("keys"), notice ? idFor("notice") : hasPending && idFor("prompt-hint"))}
             className={cn(ui.textarea, "max-h-40 min-h-[2.75rem] flex-1 resize-none py-2 leading-5")}

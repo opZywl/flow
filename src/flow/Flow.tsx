@@ -3,7 +3,8 @@
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
-import { ArrowRightLeft, Bot, Camera, ImageIcon, Link2, Loader2, Maximize2, Minus, Moon, Palette, Play, RotateCcw, Search, SendHorizontal, Sparkles, Sun, WandSparkles, Workflow, X, type LucideIcon } from "lucide-react"
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
+import { ArrowRightLeft, Bot, Camera, EllipsisVertical, ImageIcon, Link2, Loader2, Maximize2, Minus, Moon, Palette, Play, RotateCcw, Search, SendHorizontal, Sparkles, Sun, WandSparkles, Workflow, X, type LucideIcon } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -46,6 +47,7 @@ const HEADER_HEIGHT = 56
 const BOT_GAP = 16
 const COPILOT_WIDTH = 384
 const WIDE_QUERY = "(min-width: 1024px)"
+const TOOLS_QUERY = "(min-width: 640px)"
 const CANVAS_PICK_QUERY = `(min-width: ${COPILOT_WIDTH + PICK_MIN_WIDTH}px)`
 const SEARCH_LIMIT = 50
 const IMAGE_TIMEOUT = 15000
@@ -63,6 +65,12 @@ const COPILOT_ATTENTION: Readonly<Record<CopilotAttention, string>> = {
 
 const ghostButton =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
+
+const moreContent =
+  "z-50 max-h-[var(--radix-dropdown-menu-content-available-height)] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-xl border border-flow-border bg-flow-surface py-1 text-flow-fg shadow-lg outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-1 motion-reduce:animate-none"
+
+const moreItem =
+  "flex w-full cursor-pointer select-none items-start gap-2.5 px-3 py-2 text-left outline-none transition-colors data-[highlighted]:bg-flow-strong data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
 
 interface StoredWorkflow {
   raw: string | null
@@ -502,6 +510,109 @@ function BackgroundMenu({ hasImage, capturing, onChange, onSave, onReset }: { ha
   )
 }
 
+function MoreAction({ icon: Icon, label, description, disabled, onSelect }: { icon: LucideIcon; label: string; description?: string; disabled?: boolean; onSelect: () => void }) {
+  const descriptionId = useId()
+  return (
+    <DropdownMenuPrimitive.Item
+      disabled={disabled}
+      textValue={label}
+      onSelect={onSelect}
+      aria-label={label}
+      aria-describedby={description ? descriptionId : undefined}
+      className={moreItem}
+    >
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-flow-muted" aria-hidden />
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-flow-fg">{label}</span>
+        {description ? (
+          <span id={descriptionId} className="block text-[11px] leading-4 text-flow-muted">
+            {description}
+          </span>
+        ) : null}
+      </span>
+    </DropdownMenuPrimitive.Item>
+  )
+}
+
+interface MoreMenuProps {
+  theme: string
+  hasImage: boolean
+  capturing: boolean
+  onOpenEra: () => void
+  onChangeBackground: () => void
+  onSaveImage: () => void
+  onResetBackground: () => void
+  onOpenColors: () => void
+  onToggleTheme: () => void
+}
+
+function MoreMenu({ theme, hasImage, capturing, onOpenEra, onChangeBackground, onSaveImage, onResetBackground, onOpenColors, onToggleTheme }: MoreMenuProps) {
+  const [open, setOpen] = useState(false)
+  const pending = useRef<(() => void) | null>(null)
+  const groupId = useId()
+  const roomy = useMediaQuery(TOOLS_QUERY)
+  const shown = open && !roomy
+
+  useEffect(() => {
+    if (roomy) setOpen(false)
+  }, [roomy])
+
+  const later = (action: () => void) => () => {
+    pending.current = action
+  }
+
+  const changeOpen = (next: boolean) => {
+    if (next) {
+      pending.current = null
+      warmColors()
+    }
+    setOpen(next)
+  }
+
+  return (
+    <DropdownMenuPrimitive.Root open={shown} onOpenChange={changeOpen}>
+      <DropdownMenuPrimitive.Trigger asChild>
+        <button type="button" aria-label="Mais opções" title="Mais opções" aria-busy={capturing || undefined} className={cn(ui.toolButton, "sm:hidden", shown && ui.toolButtonActive)}>
+          {capturing ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <EllipsisVertical className="h-4 w-4" aria-hidden />}
+        </button>
+      </DropdownMenuPrimitive.Trigger>
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          align="end"
+          sideOffset={8}
+          collisionPadding={12}
+          onCloseAutoFocus={() => {
+            const action = pending.current
+            pending.current = null
+            action?.()
+          }}
+          className={moreContent}
+        >
+          <MoreAction icon={ArrowRightLeft} label="Converter para o padrão ERA" onSelect={later(onOpenEra)} />
+          <DropdownMenuPrimitive.Separator className="my-1 border-t border-flow-border" />
+          <DropdownMenuPrimitive.Group aria-labelledby={groupId}>
+            <DropdownMenuPrimitive.Label id={groupId} className={cn(ui.sectionTitle, "px-3 pb-1 pt-1.5")}>
+              Imagem de fundo
+            </DropdownMenuPrimitive.Label>
+            <MoreAction icon={Link2} label="Trocar imagem" description="Aplicar uma imagem a partir de um link" onSelect={later(onChangeBackground)} />
+            <MoreAction icon={Camera} label="Salvar imagem do canvas" description="Baixar o fluxo inteiro em PNG" disabled={capturing} onSelect={later(onSaveImage)} />
+            <MoreAction
+              icon={RotateCcw}
+              label="Restaurar padrão"
+              description={hasImage ? "Remover a imagem de fundo aplicada" : "Nenhuma imagem de fundo aplicada"}
+              disabled={!hasImage}
+              onSelect={later(onResetBackground)}
+            />
+          </DropdownMenuPrimitive.Group>
+          <DropdownMenuPrimitive.Separator className="my-1 border-t border-flow-border" />
+          <MoreAction icon={Palette} label="Cores" onSelect={later(onOpenColors)} />
+          <MoreAction icon={theme === "dark" ? Sun : Moon} label="Alternar tema" onSelect={later(onToggleTheme)} />
+        </DropdownMenuPrimitive.Content>
+      </DropdownMenuPrimitive.Portal>
+    </DropdownMenuPrimitive.Root>
+  )
+}
+
 interface FlowHeaderProps {
   botOpen: boolean
   capturing: boolean
@@ -581,33 +692,46 @@ function FlowHeader({ botOpen, capturing, hasBackground, copilotId, copilotOpen,
         <button type="button" onClick={onOpenBot} aria-label="Abrir prévia" title="Abrir prévia" className={cn(ui.toolButton, botOpen && ui.toolButtonActive)}>
           <Bot className="h-4 w-4" aria-hidden />
         </button>
-        <button
-          type="button"
-          onClick={onOpenEra}
-          aria-haspopup="dialog"
-          aria-label="Converter para o padrão ERA"
-          title="Converter para o padrão ERA"
-          className={ui.toolButton}
-        >
-          <ArrowRightLeft className="h-4 w-4" aria-hidden />
-        </button>
-        <BackgroundMenu hasImage={hasBackground} capturing={capturing} onChange={onChangeBackground} onSave={onSaveImage} onReset={onResetBackground} />
-        <button
-          type="button"
-          onClick={() => setShowColorPanel(!showColorPanel)}
-          onPointerEnter={warmColors}
-          onFocus={warmColors}
-          data-color-panel-trigger=""
-          aria-expanded={showColorPanel}
-          aria-label="Cores"
-          title="Cores"
-          className={cn(ui.toolButton, showColorPanel && ui.toolButtonActive)}
-        >
-          <Palette className="h-4 w-4" aria-hidden />
-        </button>
-        <button type="button" onClick={toggleTheme} aria-label="Alternar tema" title="Alternar tema" className={ui.toolButton}>
-          {theme === "dark" ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />}
-        </button>
+        <div className="hidden items-center gap-2 sm:flex">
+          <button
+            type="button"
+            onClick={onOpenEra}
+            aria-haspopup="dialog"
+            aria-label="Converter para o padrão ERA"
+            title="Converter para o padrão ERA"
+            className={ui.toolButton}
+          >
+            <ArrowRightLeft className="h-4 w-4" aria-hidden />
+          </button>
+          <BackgroundMenu hasImage={hasBackground} capturing={capturing} onChange={onChangeBackground} onSave={onSaveImage} onReset={onResetBackground} />
+          <button
+            type="button"
+            onClick={() => setShowColorPanel(!showColorPanel)}
+            onPointerEnter={warmColors}
+            onFocus={warmColors}
+            data-color-panel-trigger=""
+            aria-expanded={showColorPanel}
+            aria-label="Cores"
+            title="Cores"
+            className={cn(ui.toolButton, showColorPanel && ui.toolButtonActive)}
+          >
+            <Palette className="h-4 w-4" aria-hidden />
+          </button>
+          <button type="button" onClick={toggleTheme} aria-label="Alternar tema" title="Alternar tema" className={ui.toolButton}>
+            {theme === "dark" ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />}
+          </button>
+        </div>
+        <MoreMenu
+          theme={theme}
+          hasImage={hasBackground}
+          capturing={capturing}
+          onOpenEra={onOpenEra}
+          onChangeBackground={onChangeBackground}
+          onSaveImage={onSaveImage}
+          onResetBackground={onResetBackground}
+          onOpenColors={() => setShowColorPanel(true)}
+          onToggleTheme={toggleTheme}
+        />
       </div>
     </header>
   )
@@ -1126,7 +1250,6 @@ function FlowLayout() {
             getCurrentFlow={getCurrentFlow}
             onLivePreview={handleLivePreview}
             onWorkflowEdited={handleEdited}
-            onOpenGenerate={openAI}
             dialogBusy={dialogBusy}
             onAttentionChange={setCopilotAttention}
             pick={canvasRoom ? canvasPick : undefined}

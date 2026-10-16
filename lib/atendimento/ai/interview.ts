@@ -26,6 +26,7 @@ export type InterviewScope = "builder" | "copilot"
 export interface InterviewPick {
   label: string
   candidates: string[]
+  ready: boolean
 }
 
 export interface InterviewTurn {
@@ -91,6 +92,7 @@ export const copilotSchema: z.ZodType<InterviewTurn> = z.object({
     .object({
       label: z.string().describe("O que o usuário seleciona no canvas, com o artigo, como o menu de opções ou a mensagem"),
       candidates: z.array(z.string()).describe("IDs do resumo do fluxo de todos os componentes que servem para o pedido"),
+      ready: z.boolean().describe("true quando plan já descreve a mudança inteira e só falta saber qual componente, com plan escrito para o componente que o usuário selecionar; false quando ainda falta outra decisão"),
     })
     .nullable()
     .describe("Seleção no canvas, com ask, quando mais de um componente do resumo serve para o pedido; null nas outras respostas"),
@@ -100,12 +102,14 @@ const HISTORY_MESSAGES = 80
 const HISTORY_CHARS = 60_000
 const RELAX_LIMIT = 2
 const PART_LIMIT = 70
+const NOTE_LIMIT = 200
 const SUMMARY_LIMIT = 32_000
+const NOTES_HEAD = "Notas no canvas, anotações do usuário fora do caminho do atendimento:"
 const VALIDATION_PROMPT = "Conversa para montar um fluxo de atendimento."
 const HISTORY_EMPTY = "Escreva o que você precisa no atendimento."
 const HISTORY_INVALID = "Não foi possível ler a conversa."
 const FLOW_INVALID = "Não foi possível ler o fluxo aberto. Confira o fluxo e tente de novo."
-const COPILOT_FLOW_MISSING = "Abra um fluxo com componentes para o Copiloto editar."
+const COPILOT_FLOW_MISSING = "Abra um fluxo para o Copiloto editar."
 const CONTINUE = "Continue a conversa a partir do último registro."
 const FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action e plan."
 const COPILOT_FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action, plan e pick."
@@ -115,6 +119,8 @@ const PICK_MESSAGE = "Mais de um componente serve para esse pedido. Em qual dele
 const PICK_KEYS = ["pick", "selecao", "seleção", "selection"]
 const PICK_LABEL_KEYS = ["label", "rotulo", "rótulo"]
 const PICK_CANDIDATE_KEYS = ["candidates", "candidatos", "ids"]
+const PICK_READY_KEYS = ["ready", "pronto", "pronta"]
+const READY_WORDS = new Set(["true", "sim"])
 const ARTICLES = new Set(["o", "a", "os", "as", "um", "uma"])
 const OMITTED = "Mensagens anteriores da conversa foram resumidas no plano."
 const ABORTED = "A resposta foi cancelada."
@@ -280,6 +286,8 @@ const COPILOT_LINES = [
   "- o pedido que o fluxo já atende: conte o que o fluxo faz hoje, com os textos do resumo, proponha manter como está e pergunte se ele quer mudar algum ponto, como o departamento da transferência.",
   "4. No pedido com atrás de ou depois de um componente, o componente novo entra logo depois dele, na saída dele, e o caminho segue como antes. No pedido com antes de um componente, o componente novo entra logo antes dele, na entrada dele.",
   "5. Componentes do mesmo tipo e com os mesmos textos no resumo são cópias de um mesmo passo, uma em cada caminho. Conte as cópias como um só componente: o pedido sobre esse passo muda todas as cópias, com o ID de cada uma em plan, e muda só uma quando o pedido aponta o caminho dela, como a despedida da opção Planos.",
+  "6. Quando o resumo tem só o Início, com Componentes: 0, o pedido monta o atendimento a partir do Início: o primeiro componente entra na saída do Início, e os outros seguem dele, na ordem da conversa. Pergunte o que faltar como em qualquer pedido, propondo a resposta mais provável, e devolva edit com o pedido completo. Exemplo para o pedido crie um menu com Boletos e Suporte, num fluxo só com o Início: Vou começar o fluxo com esse menu, logo depois do Início. Pensei em enviar o link do boleto na opção Boletos e transferir a opção Suporte para o departamento Suporte. Fica assim ou quer outro destino?",
+  "7. As notas no fim do resumo são anotações do usuário no canvas, fora do caminho do atendimento, e ficam no fluxo como estão. Use o texto delas como contexto quando o pedido citar uma nota, e trate em plan e em candidates só dos componentes.",
   "",
   "# Como perguntar",
   "1. Pergunte propondo: use o resumo do fluxo para sugerir a resposta mais provável e peça confirmação. Exemplo para o pedido crie uma opção 8, num fluxo com um só menu, de 7 opções: Vou colocar a opção 8 no menu Como podemos ajudar. Pensei em Falar com atendente, que transfere para o departamento Atendimento. Fica assim ou quer outro texto e outro destino?",
@@ -292,11 +300,12 @@ const COPILOT_LINES = [
   "# Seleção no canvas",
   "1. Quando o pedido cita um componente sem dizer qual e o resumo mostra mais de um que serve, como dois menus de opções ou várias mensagens, peça para o usuário selecionar o componente no canvas, mesmo quando um deles parece o mais provável pelo assunto: devolva ask com pick. Peça a seleção na primeira pergunta do pedido.",
   "2. Em pick, label diz o que selecionar, com o artigo, como o menu de opções ou a mensagem, e candidates traz o ID, como aparece no resumo, de cada componente que serve para o pedido.",
-  "3. A interface destaca os candidatos para o usuário selecionar um e confirmar. message conta que mais de um componente serve, traz a sua proposta para o resto do pedido e termina perguntando qual deles, como: O fluxo tem dois menus de opções. Pensei na opção Segunda via com o link do boleto, seguindo para a despedida. Em qual menu ela entra?",
-  "4. Nessa pergunta, suggestions traz atalhos em texto, um para cada candidato, com o texto dele, como No menu Como podemos ajudar, e só esses atalhos. Com mais de 5 candidatos, suggestions fica vazio.",
-  "5. Quando só um componente do resumo serve, use esse componente direto. Nas outras respostas, pick fica null.",
-  "6. A mensagem do usuário que começa com Selecionei no canvas, ou o atalho que aponta um candidato, traz o componente escolhido e aceita a proposta da pergunta. Siga o pedido com esse componente: cite em plan o ID e o texto dele e devolva edit quando o pedido fica completo com essa escolha; pergunte só o que ainda faltar.",
-  "7. Depois de Seleção cancelada, o usuário responde por texto: use o componente que o texto indica, com o ID dele em plan, ou peça a seleção de novo quando o texto ainda serve para mais de um.",
+  "3. Em pick, ready fica true quando plan já descreve a mudança inteira, com as suas propostas, e só falta saber qual componente. Nesse caso, escreva plan para o componente que o usuário selecionar e deixe os IDs dos candidatos só em candidates, como em: Acrescente a opção Falar com atendente, que transfere para o departamento Atendimento, no menu de opções que o usuário selecionar. Com ready true, a interface edita logo que o usuário confirma a seleção. Quando ainda falta outra decisão além do componente, ready fica false.",
+  "4. A interface destaca os candidatos para o usuário selecionar um e confirmar. message conta que mais de um componente serve, traz a sua proposta para o resto do pedido e termina perguntando qual deles, como: O fluxo tem dois menus de opções. Pensei na opção Segunda via com o link do boleto, seguindo para a despedida. Em qual menu ela entra?",
+  "5. Nessa pergunta, suggestions traz atalhos em texto, um para cada candidato, com o texto dele, como No menu Como podemos ajudar, e só esses atalhos. Com mais de 5 candidatos, suggestions fica vazio.",
+  "6. Quando só um componente do resumo serve, use esse componente direto. Nas outras respostas, pick fica null.",
+  "7. A mensagem do usuário que começa com Selecionei no canvas, ou o atalho que aponta um candidato, traz o componente escolhido e aceita a proposta da pergunta. Siga o pedido com esse componente: cite em plan o ID e o texto dele e devolva edit quando o pedido fica completo com essa escolha; pergunte só o que ainda faltar.",
+  "8. Depois de Seleção cancelada, o usuário responde por texto: use o componente que o texto indica, com o ID dele em plan, ou peça a seleção de novo quando o texto ainda serve para mais de um.",
   "",
   "# Proposta em revisão",
   "1. Quando a situação atual indica uma proposta em revisão, o resumo já inclui a proposta, e o pedido seguinte ajusta essa proposta: plan traz só o ajuste.",
@@ -360,9 +369,9 @@ function readable(value: string): string {
   return list.map(itemText).filter((text) => text.trim()).join(", ")
 }
 
-function marked(text: string): string {
+function marked(text: string, limit: number = PART_LIMIT): string {
   const full = text.replace(/\s+/g, " ").trim()
-  const cut = shorten(full, PART_LIMIT)
+  const cut = shorten(full, limit)
   return cut.length < full.length ? `${cut.replace(/[\s,;:.]+$/, "")}…` : cut
 }
 
@@ -383,6 +392,16 @@ function brief(node: RiNode, mark = false): string {
 
 function componentTexts(flow: AtendimentoFlow): Map<string, string> {
   return new Map(flowToRi(flow).nodes.map((node) => [node.id, brief(node, true)]))
+}
+
+const isNote = (node: RiNode) => node.type === NOTE_TYPE
+
+function noteLines(notes: readonly RiNode[]): string[] {
+  const lines = notes.flatMap((node) => {
+    const text = marked(node.config.find((entry) => entry.key === "text")?.value ?? "", NOTE_LIMIT)
+    return text ? [`- ${quote(text)}`] : []
+  })
+  return lines.length ? [NOTES_HEAD, ...lines] : []
 }
 
 function summaryLines(ri: RiFlow, detailed: boolean, mark: boolean): string[] {
@@ -407,12 +426,14 @@ function hasComponents(flow: AtendimentoFlow): boolean {
   return flow.nodes.some((node) => node.data.type !== START_TYPE && node.data.type !== NOTE_TYPE)
 }
 
-export function interviewFlowSummary(flow: AtendimentoFlow, mark = false): string {
+export function interviewFlowSummary(flow: AtendimentoFlow, copilot = false): string {
   const ri = flowToRi(flow)
-  const head = [`Nome: ${flow.name || "sem nome"}`, `Componentes: ${ri.nodes.length}`, "Cada linha: id (componente) textos principais | saídas e destinos."]
-  const detailed = [...head, ...summaryLines(ri, true, mark)].join("\n")
+  const shown = copilot ? { ...ri, nodes: ri.nodes.filter((node) => !isNote(node)) } : ri
+  const head = [`Nome: ${flow.name || "sem nome"}`, `Componentes: ${shown.nodes.length}`, "Cada linha: id (componente) textos principais | saídas e destinos."]
+  const notes = copilot ? noteLines(ri.nodes.filter(isNote)) : []
+  const detailed = [...head, ...summaryLines(shown, true, copilot), ...notes].join("\n")
   if (detailed.length <= SUMMARY_LIMIT) return detailed
-  return [...head, ...summaryLines(ri, false, mark)].join("\n")
+  return [...head, ...summaryLines(shown, false, copilot)].join("\n")
 }
 
 function fillLine(fill: boolean): string {
@@ -519,7 +540,11 @@ function candidateTexts(value: unknown): string[] {
 
 function coercePick(value: unknown): InterviewPick | null {
   if (!isRecord(value)) return null
-  return { label: asText(pick(value, PICK_LABEL_KEYS)), candidates: candidateTexts(pick(value, PICK_CANDIDATE_KEYS)) }
+  return {
+    label: asText(pick(value, PICK_LABEL_KEYS)),
+    candidates: candidateTexts(pick(value, PICK_CANDIDATE_KEYS)),
+    ready: READY_WORDS.has(asText(pick(value, PICK_READY_KEYS)).trim().toLowerCase()),
+  }
 }
 
 function coerceTurn(value: unknown, copilot = false): InterviewTurn | null {
@@ -547,7 +572,7 @@ function partialPick(value: unknown): InterviewPick | null | undefined {
   if (value === null) return null
   if (!isRecord(value)) return undefined
   const candidates = Array.isArray(value.candidates) ? value.candidates.filter((entry): entry is string => typeof entry === "string") : []
-  return { label: typeof value.label === "string" ? tidy(value.label) : "", candidates: candidates.map((entry) => entry.trim()).filter(Boolean) }
+  return { label: typeof value.label === "string" ? tidy(value.label) : "", candidates: candidates.map((entry) => entry.trim()).filter(Boolean), ready: value.ready === true }
 }
 
 function partialTurn(value: unknown, copilot = false): Partial<InterviewTurn> | null {
@@ -604,7 +629,7 @@ function pickLabel(value: unknown): string {
   return ARTICLES.has(first.toLowerCase()) ? `${first.toLowerCase()}${label.slice(first.length)}` : label
 }
 
-function settlePick(value: unknown, ids: Iterable<string> | undefined): InterviewPick | null {
+function settlePick(value: unknown, ids: Iterable<string> | undefined, plan: string): InterviewPick | null {
   if (!isRecord(value) || !Array.isArray(value.candidates)) return null
   const resolve = idResolver(ids)
   const candidates: string[] = []
@@ -612,7 +637,9 @@ function settlePick(value: unknown, ids: Iterable<string> | undefined): Intervie
     const id = resolve(asText(entry))
     if (id !== undefined && !candidates.includes(id)) candidates.push(id)
   }
-  return candidates.length >= PICK_LIMITS.min ? { label: pickLabel(value.label), candidates } : null
+  if (candidates.length < PICK_LIMITS.min) return null
+  const ready = value.ready === true && plan !== "" && !candidates.some((id) => citesId(plan, id))
+  return { label: pickLabel(value.label), candidates, ready }
 }
 
 function wantedPick(value: unknown): boolean {
@@ -663,7 +690,7 @@ export function settleTurn(raw: InterviewTurn, context: SettleContext): Intervie
   let plan = clipPlan(raw.plan)
   if ((action === "generate" || action === "edit") && !plan && !copilot) plan = clipPlan(userText(context.history, action === "edit"))
   let said = tidy(raw.message)
-  const offered = copilot && action !== "finish" ? settlePick(raw.pick, context.ids) : null
+  const offered = copilot && action !== "finish" ? settlePick(raw.pick, context.ids, plan) : null
   if (offered && action === "edit" && !offered.candidates.some((id) => citesId(plan, id))) {
     action = "ask"
     if (!asksSelection(said) && !said.endsWith("?")) said = ""
@@ -835,7 +862,7 @@ export async function interviewTurn(input: InterviewInput, hooks: InterviewHooks
     const messages = contextMessages(context, setup.systemOptions)
     try {
       const raw = await converse(setup, messages, hooks, context.scope === "copilot" ? COPILOT_FORMAT : BUILDER_FORMAT)
-      const ids = context.flow ? context.flow.nodes.map((node) => node.id) : []
+      const ids = context.flow ? context.flow.nodes.filter((node) => node.data.type !== NOTE_TYPE).map((node) => node.id) : []
       const texts = context.scope === "copilot" && context.flow ? componentTexts(context.flow) : undefined
       return { ok: true, turn: settleTurn(raw, { hasFlow: context.flow !== null, history: context.history, scope: context.scope, ids, texts }) }
     } catch (error) {

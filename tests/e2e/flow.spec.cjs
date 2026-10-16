@@ -15,6 +15,10 @@ const FILLED = {
   envio_pergunta: { template: 'Mensagem criada no editor' },
   envio_mensagem: { title: 'Escolha uma opção', 'text-1': 'Primeira opção' },
 }
+const PHONE = { width: 390, height: 844 }
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+const HEADER_TOOLS = ['Converter para o padrão ERA', 'Imagem de fundo', 'Cores', 'Alternar tema']
+const MORE_ACTIONS = ['Converter para o padrão ERA', 'Trocar imagem', 'Salvar imagem do canvas', 'Restaurar padrão', 'Cores', 'Alternar tema']
 
 function sample() {
   const flow = newFlow(new Date('2026-01-15T12:00:00.000Z'))
@@ -67,6 +71,26 @@ async function exportedText(page) {
 async function exported(page) {
   return JSON.parse(await exportedText(page))
 }
+
+async function closeToast(page, title) {
+  await expect(page.getByText(title, { exact: true }).first()).toBeVisible()
+  const close = page.getByRole('button', { name: 'Fechar notificação', exact: true })
+  await close.click()
+  await expect(close).toHaveCount(0)
+}
+
+const headerFit = (header) => header.evaluate((element) => {
+  const width = document.documentElement.clientWidth
+  const shown = [...element.querySelectorAll('a, button, input')].filter((control) => control.getClientRects().length > 0)
+  return {
+    header: element.scrollWidth - element.clientWidth,
+    page: document.documentElement.scrollWidth - width,
+    outside: shown.filter((control) => {
+      const box = control.getBoundingClientRect()
+      return box.left < 0 || box.right > width
+    }).map((control) => control.getAttribute('aria-label') || control.textContent.trim()),
+  }
+})
 
 async function edgesFrom(page, source) {
   return page.evaluate(id => JSON.parse(localStorage.getItem('workflow')).edges.filter(edge => edge.source === id).map(edge => [edge.sourceHandle, edge.target, edge.id]).sort(), source)
@@ -465,6 +489,95 @@ test('header search focuses the component in the visible canvas beside the confi
     const node = await page.locator('.react-flow__node[data-id="3"]').boundingBox()
     return Math.round(Math.abs(node.x + node.width / 2 - (canvas.x + canvas.width / 2)))
   }).toBeLessThan(8)
+})
+
+test('on a 390 px phone the header fits, keeps the search usable and every secondary tool works from Mais opções', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.setViewportSize(PHONE)
+  await open(page)
+  const header = page.locator('header').first()
+  const fit = await headerFit(header)
+  expect(fit.header, 'o cabeçalho não rola na horizontal').toBeLessThanOrEqual(0)
+  expect(fit.page, 'a página não rola na horizontal').toBeLessThanOrEqual(0)
+  expect(fit.outside, 'controles fora da tela').toEqual([])
+  const search = header.getByLabel('Buscar componente no fluxo')
+  await expect(search).toBeVisible()
+  expect((await search.boundingBox()).width, 'largura da busca').toBeGreaterThanOrEqual(140)
+  for (const name of ['Gerar com IA', 'Copiloto', 'Abrir prévia', 'Mais opções']) await expect(header.getByRole('button', { name, exact: true }), name).toBeInViewport({ ratio: 1 })
+  for (const name of HEADER_TOOLS) await expect(header.getByRole('button', { name, exact: true }), `${name} fica no menu`).toHaveCount(0)
+
+  const more = header.locator('button[aria-label="Mais opções"]')
+  const menu = page.getByRole('menu', { name: 'Mais opções' })
+  await expect(more).toHaveAttribute('aria-haspopup', 'menu')
+  await expect(more).toHaveAttribute('aria-expanded', 'false')
+  await more.click()
+  await expect(menu).toBeVisible()
+  await expect(more).toHaveAttribute('aria-expanded', 'true')
+  await expect(menu).toBeInViewport({ ratio: 1 })
+  const items = menu.getByRole('menuitem')
+  await expect(items).toHaveCount(MORE_ACTIONS.length)
+  for (const [index, name] of MORE_ACTIONS.entries()) await expect(items.nth(index)).toHaveAccessibleName(name)
+  await expect(menu.getByRole('group', { name: 'Imagem de fundo', exact: true }).getByRole('menuitem')).toHaveCount(3)
+  await expect(menu.getByRole('menuitem', { name: 'Restaurar padrão', exact: true })).toHaveAttribute('aria-disabled', 'true')
+
+  await menu.getByRole('menuitem', { name: 'Converter para o padrão ERA', exact: true }).click()
+  await expect(menu).toHaveCount(0)
+  const era = page.getByRole('dialog', { name: 'Converter seu fluxo no padrão ERA' })
+  await expect(era).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(era).toHaveCount(0)
+
+  const fromMenu = async (name) => {
+    await more.click()
+    await expect(menu).toBeVisible()
+    await menu.getByRole('menuitem', { name, exact: true }).click()
+    await expect(menu).toHaveCount(0)
+  }
+
+  await fromMenu('Cores')
+  const colors = page.getByRole('dialog', { name: 'Cores' })
+  await expect(colors).toBeVisible()
+  await expect(colors).toBeInViewport({ ratio: 1 })
+  await colors.getByRole('button', { name: 'Fechar cores', exact: true }).click()
+  await expect(colors).toHaveCount(0)
+
+  const dark = () => page.evaluate(() => document.documentElement.classList.contains('dark'))
+  const before = await dark()
+  await fromMenu('Alternar tema')
+  await expect.poll(dark).toBe(!before)
+
+  const background = () => page.evaluate(() => document.documentElement.style.getPropertyValue('--flow-background-image'))
+  await fromMenu('Trocar imagem')
+  const form = page.getByRole('dialog', { name: 'Trocar imagem de fundo' })
+  await expect(form).toBeVisible()
+  await form.getByLabel('Endereço da imagem').fill(PIXEL)
+  await form.getByRole('button', { name: 'Aplicar', exact: true }).click()
+  await expect(form).toHaveCount(0)
+  await expect.poll(background).toContain('data:image/png')
+  await closeToast(page, 'Imagem de fundo aplicada')
+
+  await fromMenu('Restaurar padrão')
+  await expect.poll(background).toBe('')
+  await closeToast(page, 'Fundo padrão restaurado')
+
+  await more.click()
+  await expect(menu.getByRole('menuitem', { name: 'Restaurar padrão', exact: true })).toHaveAttribute('aria-disabled', 'true')
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    menu.getByRole('menuitem', { name: 'Salvar imagem do canvas', exact: true }).click(),
+  ])
+  expect(download.suggestedFilename()).toMatch(/\.png$/)
+  await closeToast(page, 'Imagem do canvas salva')
+  expect((await headerFit(header)).outside).toEqual([])
+
+  await more.click()
+  await expect(menu).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await expect(menu).toHaveCount(0)
+  await expect(more).toBeHidden()
+  for (const name of HEADER_TOOLS) await expect(header.getByRole('button', { name, exact: true })).toBeVisible()
+  expect(errors).toEqual([])
 })
 
 test('keyboard shortcuts keep working and Delete still removes components after Ctrl+K focuses the search', async ({ page }) => {

@@ -11,6 +11,7 @@ import {
 import type { InterviewMessage, InterviewTurn } from "@/lib/atendimento/ai/interview"
 import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
 import { clip, shorten } from "@/lib/atendimento/ai/text"
+import { NOTE_TYPE } from "@/lib/atendimento/catalog"
 import { behaviorSignature, importFlow, isObject, validateFlow } from "@/lib/atendimento/format"
 import type { AtendimentoFlow, AtendimentoNode } from "@/lib/atendimento/types"
 import type { InterviewTurnResult } from "../ai-interview"
@@ -23,7 +24,6 @@ import {
   changeLabels,
   documentKey,
   failureField,
-  hasComponents,
   isModelId,
   mergeIssues,
   messageLines,
@@ -131,6 +131,7 @@ export interface CopilotPick {
   label: string
   candidates: CopilotPickCandidate[]
   selected: string | null
+  ready: boolean
 }
 
 export interface CopilotState {
@@ -318,10 +319,10 @@ export function readPick(value: unknown, flow: AtendimentoFlow): CopilotPick | n
   for (const item of value.candidates) {
     const id = typeof item === "string" ? item.trim() : typeof item === "number" && Number.isFinite(item) ? String(item) : ""
     const node = nodes.get(id)
-    if (!node || candidates.some((candidate) => candidate.id === id)) continue
+    if (!node || node.data.type === NOTE_TYPE || candidates.some((candidate) => candidate.id === id)) continue
     candidates.push({ id, text: nodeSubject(node) })
   }
-  return candidates.length < 2 ? null : { label: pickLabel(value.label), candidates, selected: null }
+  return candidates.length < 2 ? null : { label: pickLabel(value.label), candidates, selected: null, ready: value.ready === true }
 }
 
 export function pickKey(pick: CopilotPick | null | undefined): string {
@@ -457,7 +458,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     const opened = currentFlow()
     if (!opened) return null
     if (documentKey(opened) === documentKey(found.original)) return found
-    if (found.refines !== null || !hasComponents(opened)) return null
+    if (found.refines !== null) return null
     return behaviorSignature(opened) === behaviorSignature(found.original) ? { base: opened, original: opened, refines: null } : null
   }
 
@@ -550,7 +551,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       return { base: proposal.flow, original: proposal.original, refines: state.pending }
     }
     const opened = currentFlow()
-    if (!hasComponents(opened)) return null
+    if (!opened) return null
     return { base: opened, original: opened, refines: null }
   }
 
@@ -580,7 +581,9 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     return ""
   }
 
-  const choiceEntry = (candidate: CopilotPickCandidate): CopilotEntry => ({ id: nextId(), kind: "user", text: `${PICK_PREFIX} ${candidate.text}` })
+  const choiceText = (candidate: CopilotPickCandidate) => `${PICK_PREFIX} ${candidate.text}`
+
+  const choiceEntry = (candidate: CopilotPickCandidate): CopilotEntry => ({ id: nextId(), kind: "user", text: choiceText(candidate) })
 
   const choiceOf = (pick: CopilotPick): Choice | null => {
     const candidate = pick.candidates.find((item) => item.id === pick.selected)
@@ -917,7 +920,14 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
         return false
       }
       chosen = choice
-      think(settings, base, [...state.entries, choiceEntry(choice)])
+      const entries = [...state.entries, choiceEntry(choice)]
+      if (pick.ready && state.plan) {
+        planned = base
+        const prompt = join(state.plan, choiceText(choice))
+        start(jobFor(base, prompt, settings), entries, { plan: prompt })
+        return true
+      }
+      think(settings, base, entries)
       return true
     },
     cancelPick() {
