@@ -16,6 +16,7 @@ import type { CopilotAttention } from "./ai/copilot-store"
 import EraDialog from "./era-dialog"
 import WorkflowBuilder, { type PreviewKind, type WorkflowActions } from "./workflow-builder"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
+import type { CanvasPick } from "./pick"
 import { ui } from "./ui"
 
 const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
@@ -44,6 +45,7 @@ const HEADER_HEIGHT = 56
 const BOT_GAP = 16
 const COPILOT_WIDTH = 384
 const WIDE_QUERY = "(min-width: 1024px)"
+const SIDE_BY_SIDE_QUERY = "(min-width: 640px)"
 const SEARCH_LIMIT = 50
 const IMAGE_TIMEOUT = 15000
 
@@ -953,6 +955,7 @@ function FlowLayout() {
   const capturingRef = useRef(false)
   const copilotId = useId()
   const wide = useMediaQuery(WIDE_QUERY)
+  const sideBySide = useMediaQuery(SIDE_BY_SIDE_QUERY)
 
   useEffect(() => {
     try {
@@ -1028,6 +1031,16 @@ function FlowLayout() {
   const livePreview = useMemo<LivePreviewProps>(
     () => ({ onLivePreview: handleLivePreview, getCurrentFlow, onWorkflowEdited: handleEdited }),
     [getCurrentFlow, handleEdited, handleLivePreview],
+  )
+
+  const canvasPick = useMemo<CanvasPick>(
+    () => ({
+      start: (request) => actionsRef.current?.startPick(request) ?? [],
+      select: (id) => actionsRef.current?.selectPick(id),
+      confirm: () => actionsRef.current?.confirmPick(),
+      end: () => actionsRef.current?.endPick(),
+    }),
+    [],
   )
 
   const openBackgroundDialog = useCallback(() => setBackgroundDialog(true), [])
@@ -1114,6 +1127,7 @@ function FlowLayout() {
             onOpenGenerate={openAI}
             dialogBusy={dialogBusy}
             onAttentionChange={setCopilotAttention}
+            pick={sideBySide ? canvasPick : undefined}
           />
         )}
       </div>

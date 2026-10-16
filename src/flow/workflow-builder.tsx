@@ -1,9 +1,9 @@
 "use client"
 
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
 import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, getNodesBounds, getViewportForBounds, useReactFlow, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type Viewport, type XYPosition } from "reactflow"
 import "reactflow/dist/style.css"
-import { Check, Download, Eraser, FilePlus2, Info, Loader2, MapIcon, Maximize, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
+import { Check, Download, Eraser, FilePlus2, Info, Loader2, MapIcon, Maximize, MousePointerClick, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -17,7 +17,8 @@ import NodeLibrary from "./node-library"
 import NodeConfigPanel from "./node-config-panel"
 import SavedFlows from "./saved-flows"
 import CustomEdge, { EdgeActionsContext } from "./custom-edge"
-import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, nodeSummary, noteColor } from "./nodes/atendimento-node"
+import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, NodePickContext, nodeSummary, noteColor, type NodePick } from "./nodes/atendimento-node"
+import type { PickHandlers, PickRequest } from "./pick"
 import { ui } from "./ui"
 
 export interface WorkflowActions {
@@ -36,6 +37,10 @@ export interface WorkflowActions {
   captureImage: () => Promise<Blob | null>
   getFlow: () => AtendimentoFlow
   applyWorkflowEdit: (flow: AtendimentoFlow) => boolean
+  startPick: (request: PickRequest) => string[]
+  selectPick: (id: string | null) => void
+  confirmPick: () => void
+  endPick: () => void
 }
 
 export type PreviewKind = "create" | "edit"
@@ -43,6 +48,14 @@ export type PreviewKind = "create" | "edit"
 interface WorkflowBuilderProps {
   onActionsReady: (actions: WorkflowActions) => void
   onOpenBot?: () => void
+}
+
+interface PickSession extends PickHandlers {
+  key: number
+  label: string
+  order: string[]
+  candidates: ReadonlySet<string>
+  selected: string | null
 }
 
 type Handlers = WorkflowActions & { undo: () => void; redo: () => void }
@@ -97,6 +110,13 @@ const FIT_MARGIN = 16
 const FIT_TOP_MARGIN = 64
 const PREVIEW_COOLDOWN = 1000
 const ID_SEPARATOR = "\u0000"
+const LOCKED_NODE = { selected: false, draggable: false, selectable: false, connectable: false, deletable: false, focusable: false }
+const PICK_CANDIDATE_NODE = { ...LOCKED_NODE, className: "nopan", zIndex: 1 }
+const PICK_DIMMED_NODE = { ...LOCKED_NODE, style: { pointerEvents: "none" } as CSSProperties }
+const LOCKED_EDGE = { selectable: false, deletable: false, focusable: false, updatable: false }
+const PICK_EDGE = { ...LOCKED_EDGE, className: "opacity-30 transition-opacity" }
+const PICK_FALLBACK_LABEL = "o componente"
+const LAYER_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]'
 const CANVAS_HINTS: ReadonlyArray<readonly [string, string]> = [
   ['[id^="react-flow__node-desc-"]', "Pressione Enter ou Espaço para selecionar o componente. Depois, use as setas para movê-lo, Delete para removê-lo e Esc para cancelar."],
   ['[id^="react-flow__edge-desc-"]', "Pressione Enter ou Espaço para selecionar a conexão. Depois, use Delete para removê-la ou Esc para cancelar."],
@@ -115,6 +135,16 @@ const overlaps = (first: Box, second: Box, gap: number) =>
   first.x < second.x + second.width + gap && second.x < first.x + first.width + gap && first.y < second.y + second.height + gap && second.y < first.y + first.height + gap
 const sameJson = (first: unknown, second: unknown) => first === second || JSON.stringify(first) === JSON.stringify(second)
 const isPreviewFlow = (value: AtendimentoFlow | null): value is AtendimentoFlow => Boolean(value && Array.isArray(value.nodes) && Array.isArray(value.edges) && value.nodes.length)
+const pickLabel = (value: unknown) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().replace(/[\s.,;:!?]+$/, "") : "") || PICK_FALLBACK_LABEL
+const pickMinimapClass = (candidates: ReadonlySet<string>) => (node: Node<AtendimentoData>) => (candidates.has(node.id) ? "fill-flow-accent" : "fill-flow-muted/30")
+
+function safely(run: () => void) {
+  try {
+    run()
+  } catch {
+    return
+  }
+}
 
 function stabilizePreview(next: AtendimentoFlow, previous: AtendimentoFlow | null): AtendimentoFlow {
   if (!previous) return next
@@ -216,6 +246,32 @@ function PreviewBanner({ nodes, edges, done, kind }: { nodes: number; edges: num
         <span><span className="text-flow-muted-strong">{edges}</span> {edges === 1 ? "conexão" : "conexões"}</span>
       </span>
     </div>
+  )
+}
+
+function PickBanner({ label, selection, onCancel, onConfirm }: { label: string; selection: string; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <section aria-label="Seleção no canvas" data-canvas-overlay="" className={cn(ui.overlay, "nokey absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 flex-wrap items-center gap-x-2.5 gap-y-2 border-flow-accent/40 px-3 py-2")}>
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-flow-accent/15 text-flow-accent">
+        <MousePointerClick className="h-3.5 w-3.5" aria-hidden />
+      </span>
+      <div className="min-w-0 max-w-[26rem] flex-1">
+        <p className="break-words text-xs font-semibold leading-5 text-flow-fg">Selecione {label} no canvas.</p>
+        <p role="status" className="truncate text-[11px] leading-4 text-flow-muted">
+          {selection ? <>Selecionado: <span className="font-semibold text-flow-muted-strong">{selection}</span></> : "Clique em um dos componentes destacados."}
+        </p>
+      </div>
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <button type="button" onClick={onCancel} className={cn(ui.button, "h-7")}>
+          <X className="h-3.5 w-3.5" aria-hidden />
+          Cancelar
+        </button>
+        <button type="button" onClick={onConfirm} disabled={!selection} className={cn(ui.primaryButton, "h-7")}>
+          <Check className="h-3.5 w-3.5" aria-hidden />
+          Confirmar
+        </button>
+      </div>
+    </section>
   )
 }
 
@@ -352,6 +408,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const [previewDone, setPreviewDone] = useState(false)
   const [previewKind, setPreviewKind] = useState<PreviewKind>("create")
   const [previewSizes, setPreviewSizes] = useState<Record<string, Size>>({})
+  const [pick, setPick] = useState<PickSession | null>(null)
   const [, setHistoryVersion] = useState(0)
   const flowRef = useRef(flow)
   const past = useRef<AtendimentoFlow[]>([])
@@ -381,11 +438,15 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const fitFrame = useRef(0)
   const fitPending = useRef(false)
   const moveOrigin = useRef<Viewport | null>(null)
+  const pickRef = useRef<PickSession | null>(null)
+  const pickSequence = useRef(0)
   const issuesId = useId()
-  const { setViewport, getViewport, getNodes, screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
+  const { setViewport, getViewport, getNode, getNodes, screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
   const store = useStoreApi()
   const dirty = Object.values(drafts).some(Boolean)
   const previewing = preview !== null
+  const picking = pick !== null
+  const locked = previewing || picking
   const display = preview ?? flow
   const issues = useMemo(() => validateFlow(flow), [flow])
   const errorCount = useMemo(() => issues.filter((issue) => issue.severity === "error").length, [issues])
@@ -441,15 +502,35 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [pushHistory])
 
   const commit = useCallback((change: (current: AtendimentoFlow) => AtendimentoFlow, coalesce?: string) => {
-    if (previewRef.current) return
+    if (previewRef.current || pickRef.current) return
     setDocument(change(flowRef.current), "history", { coalesce })
   }, [setDocument])
 
-  const previewBusy = useCallback(() => {
+  const canvasBusy = useCallback(() => {
+    if (pickRef.current) {
+      toast({ title: "Seleção no canvas em andamento", description: "Confirme ou cancele a seleção para editar, salvar ou exportar." })
+      return true
+    }
     if (!previewRef.current) return false
     toast({ title: "Geração com IA em andamento", description: "Aguarde o fluxo ficar pronto para editar, salvar ou exportar." })
     return true
   }, [])
+
+  const writePick = useCallback((next: PickSession | null) => {
+    pickRef.current = next
+    setPick(next)
+  }, [])
+
+  const leavePick = useCallback(() => {
+    const session = pickRef.current
+    if (session) writePick(null)
+    return session
+  }, [writePick])
+
+  const cancelPick = useCallback(() => {
+    const session = leavePick()
+    if (session) safely(() => session.onCancel())
+  }, [leavePick])
 
   const removal = useCallback(() => {
     const mode = removalBatch.current ? "silent" as const : "history" as const
@@ -534,6 +615,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const current = previewRef.current
     if (!current) {
       if (!fresh && performance.now() < previewCooldown.current) return
+      if (kind === "create") cancelPick()
       previewView.current = settledView()
       previewFollow.current = true
       previewFitted.current = false
@@ -546,7 +628,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     if (stable === current) return
     previewRef.current = stable
     setPreview(stable)
-  }, [endPreview, settledView])
+  }, [cancelPick, endPreview, settledView])
 
   const fitPreview = useCallback((force: boolean) => {
     if (!previewRef.current) return
@@ -571,7 +653,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [getNodes, holdView, setViewport, settledView, store])
 
   const scheduleFit = useCallback(function schedule() {
-    if (!previewRef.current || !previewFollow.current) return
+    if (!previewRef.current || !previewFollow.current || pickRef.current) return
     if (fitFrame.current) {
       fitPending.current = true
       return
@@ -584,7 +666,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       fitFrame.current = requestAnimationFrame(() => {
         fitFrame.current = requestAnimationFrame(() => {
           fitFrame.current = 0
-          if (previewFollow.current) fitPreview(false)
+          if (previewFollow.current && !pickRef.current) fitPreview(false)
           if (fitPending.current) schedule()
         })
       })
@@ -714,6 +796,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       backupStored()
       selectSaved(null)
       setDocument(imported, "silent", { resetIds: true })
+      cancelPick()
       resetHistory()
       setRecovery("")
       setSizes({})
@@ -726,7 +809,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       setImportError(cause instanceof SyntaxError ? "O arquivo não é um JSON válido." : (cause as Error).message)
       return false
     }
-  }, [backupStored, clearSelection, endPreview, ensureApplied, getViewport, persist, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
+  }, [backupStored, cancelPick, clearSelection, endPreview, ensureApplied, getViewport, persist, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
 
   const getFlow = useCallback((): AtendimentoFlow => ({ ...flowRef.current, viewport: previewView.current ?? settledView() }), [settledView])
 
@@ -759,7 +842,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [errorCount])
 
   const save = useCallback(() => {
-    if (previewBusy()) return false
+    if (canvasBusy()) return false
     if (recovery) {
       toast({ title: "Salvamento pausado", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
       return false
@@ -774,10 +857,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       toast({ title: "Fluxo salvo", description: `${plural(document.nodes.length, "componente", "componentes")} e ${plural(document.edges.length, "conexão", "conexões")} guardados neste navegador.${pending}` })
     }
     return saved
-  }, [ensureApplied, errorCount, getViewport, persist, previewBusy, recovery, setDocument, storeCurrent])
+  }, [ensureApplied, errorCount, getViewport, persist, canvasBusy, recovery, setDocument, storeCurrent])
 
   const download = useCallback(() => {
-    if (previewBusy() || !ensureApplied()) return false
+    if (canvasBusy() || !ensureApplied()) return false
     if (errorCount) {
       reportIssues("Corrija as pendências antes de exportar")
       return false
@@ -792,10 +875,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       toast({ title: "Exportação bloqueada", description: (cause as Error).message, variant: "destructive" })
       return false
     }
-  }, [ensureApplied, errorCount, getViewport, previewBusy, reportIssues])
+  }, [ensureApplied, errorCount, getViewport, canvasBusy, reportIssues])
 
   const execute = useCallback(() => {
-    if (previewBusy() || recovery || !ensureApplied()) return false
+    if (canvasBusy() || recovery || !ensureApplied()) return false
     if (errorCount) {
       reportIssues("Corrija as pendências antes de abrir a prévia")
       return false
@@ -805,7 +888,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     window.dispatchEvent(new CustomEvent("workflow:executed", { detail: document }))
     onOpenBot?.()
     return true
-  }, [ensureApplied, errorCount, onOpenBot, persist, previewBusy, recovery, reportIssues])
+  }, [ensureApplied, errorCount, onOpenBot, persist, canvasBusy, recovery, reportIssues])
 
   const removeNodes = useCallback((ids: string[]) => {
     const current = flowRef.current
@@ -825,11 +908,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [findNode, removal, setDocument])
 
   const removeNode = useCallback((id: string) => {
-    if (!previewBusy() && ensureApplied()) removeNodes([id])
-  }, [ensureApplied, previewBusy, removeNodes])
+    if (!canvasBusy() && ensureApplied()) removeNodes([id])
+  }, [ensureApplied, canvasBusy, removeNodes])
 
   const removeEdges = useCallback((ids: string[]) => {
-    if (previewRef.current) return
+    if (previewRef.current || pickRef.current) return
     const remove = new Set(ids)
     const current = flowRef.current
     if (!current.edges.some((edge) => remove.has(edge.id))) return
@@ -838,7 +921,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [removal, setDocument])
 
   const reset = useCallback(() => {
-    if (previewBusy() || !ensureApplied()) return
+    if (canvasBusy() || !ensureApplied()) return
     backupStored()
     selectSaved(null)
     const empty = newFlow()
@@ -849,7 +932,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     clearSelection()
     void setViewport(empty.viewport)
     persist(empty)
-  }, [backupStored, clearSelection, ensureApplied, persist, previewBusy, resetHistory, selectSaved, setDocument, setViewport])
+  }, [backupStored, clearSelection, ensureApplied, persist, canvasBusy, resetHistory, selectSaved, setDocument, setViewport])
 
   const focusNode = useCallback((node: AtendimentoNode) => {
     setPanelId(node.id)
@@ -865,7 +948,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [ensureApplied, focusNode])
 
   const search = useCallback((query: string) => {
-    if (previewBusy() || !ensureApplied()) return false
+    if (canvasBusy() || !ensureApplied()) return false
     const text = query.trim()
     const term = normalize(text)
     if (!term) return false
@@ -878,10 +961,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     }
     focusNode(node)
     return true
-  }, [ensureApplied, focusNode, previewBusy])
+  }, [ensureApplied, focusNode, canvasBusy])
 
   const undo = useCallback(() => {
-    if (previewBusy() || !ensureApplied()) return
+    if (canvasBusy() || !ensureApplied()) return
     const previous = past.current.pop()
     if (!previous) return
     future.current = [flowRef.current, ...future.current].slice(0, HISTORY_LIMIT)
@@ -889,10 +972,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setDocument(previous, "silent")
     setHistoryVersion((version) => version + 1)
     clearSelection()
-  }, [clearSelection, ensureApplied, previewBusy, setDocument])
+  }, [clearSelection, ensureApplied, canvasBusy, setDocument])
 
   const redo = useCallback(() => {
-    if (previewBusy() || !ensureApplied()) return
+    if (canvasBusy() || !ensureApplied()) return
     const [next, ...rest] = future.current
     if (!next) return
     past.current = [...past.current, flowRef.current].slice(-HISTORY_LIMIT)
@@ -901,7 +984,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setDocument(next, "silent")
     setHistoryVersion((version) => version + 1)
     clearSelection()
-  }, [clearSelection, ensureApplied, previewBusy, setDocument])
+  }, [clearSelection, ensureApplied, canvasBusy, setDocument])
 
   const zoomInView = useCallback(() => {
     previewFollow.current = false
@@ -930,8 +1013,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [cancelFit, fitPreview, fitView, holdView, syncViewport])
 
   const openFile = useCallback(() => {
-    if (!previewBusy()) fileInput.current?.click()
-  }, [previewBusy])
+    if (!canvasBusy()) fileInput.current?.click()
+  }, [canvasBusy])
 
   const captureImage = useCallback(async (): Promise<Blob | null> => {
     const surface = canvas.current
@@ -958,8 +1041,141 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     })
   }, [getNodes])
 
+  const minimapCorner = useCallback((): XYPosition | null => {
+    const root = store.getState().domNode
+    const map = root?.querySelector(".react-flow__minimap")
+    if (!root || !map) return null
+    const area = root.getBoundingClientRect()
+    const box = map.getBoundingClientRect()
+    return box.width && box.height ? { x: box.left - area.left, y: box.top - area.top } : null
+  }, [store])
+
+  const fitPick = useCallback((ids: readonly string[]) => {
+    const { width, height } = store.getState()
+    const wanted = new Set(ids)
+    const nodes = getNodes().filter((node) => wanted.has(node.id))
+    if (!width || !height || !nodes.length) return
+    const bounds = getNodesBounds(nodes.map((node) => (node.width && node.height ? node : { ...node, width: DEFAULT_NODE_SIZE.width, height: DEFAULT_NODE_SIZE.height })))
+    const room = height - FIT_TOP_MARGIN
+    const fit = (areaWidth: number, areaHeight: number) => getViewportForBounds(bounds, Math.max(1, areaWidth), Math.max(1, areaHeight), MIN_ZOOM, FIT_MAX_ZOOM, FIT_PADDING)
+    let fitted = fit(width, room)
+    const map = minimapCorner()
+    if (map && (bounds.x + bounds.width) * fitted.zoom + fitted.x > map.x && (bounds.y + bounds.height) * fitted.zoom + fitted.y + FIT_TOP_MARGIN > map.y) {
+      const beside = fit(map.x, room)
+      const above = fit(width, map.y - FIT_TOP_MARGIN)
+      fitted = above.zoom > beside.zoom ? above : beside
+    }
+    const viewport = { x: fitted.x, y: fitted.y + FIT_TOP_MARGIN, zoom: fitted.zoom }
+    holdView(FIT_DURATION, viewport)
+    void setViewport(viewport, { duration: FIT_DURATION })
+    syncViewport(FIT_DURATION + 50)
+  }, [getNodes, holdView, minimapCorner, setViewport, store, syncViewport])
+
+  const revealPick = useCallback((id: string) => {
+    const node = getNode(id)
+    const { width, height } = store.getState()
+    if (!node || !width || !height) return
+    const nodeWidth = node.width || DEFAULT_NODE_SIZE.width
+    const nodeHeight = node.height || DEFAULT_NODE_SIZE.height
+    const { x, y, zoom } = settledView()
+    const left = node.position.x * zoom + x
+    const top = node.position.y * zoom + y
+    const right = left + nodeWidth * zoom
+    const bottom = top + nodeHeight * zoom
+    const map = minimapCorner()
+    const covered = map !== null && right > map.x && bottom > map.y
+    if (!covered && left >= FIT_MARGIN && top >= FIT_TOP_MARGIN && right <= width - FIT_MARGIN && bottom <= height - FIT_MARGIN) return
+    const viewport = { x: width / 2 - (node.position.x + nodeWidth / 2) * zoom, y: (height + FIT_TOP_MARGIN) / 2 - (node.position.y + nodeHeight / 2) * zoom, zoom }
+    holdView(PAN_DURATION, viewport)
+    void setViewport(viewport, { duration: PAN_DURATION })
+    syncViewport(PAN_DURATION + 50)
+  }, [getNode, holdView, minimapCorner, setViewport, settledView, store, syncViewport])
+
+  const startPick = useCallback((request: PickRequest): string[] => {
+    const shown = new Set((previewRef.current ?? flowRef.current).nodes.map((node) => node.id))
+    const listed: unknown[] = Array.isArray(request.candidates) ? request.candidates : []
+    const order = [...new Set(listed)].filter((id): id is string => typeof id === "string" && shown.has(id))
+    if (!order.length) return []
+    const candidates: ReadonlySet<string> = new Set(order)
+    pickSequence.current += 1
+    const key = pickSequence.current
+    writePick({
+      key,
+      label: pickLabel(request.label),
+      order,
+      candidates,
+      selected: typeof request.selected === "string" && candidates.has(request.selected) ? request.selected : null,
+      onSelect: request.onSelect,
+      onConfirm: request.onConfirm,
+      onCancel: request.onCancel,
+    })
+    const keep = !dirty
+    requestAnimationFrame(() => {
+      if (pickRef.current?.key !== key) return
+      if (keep) clearSelection()
+      setSettingsOpen(false)
+      setLibraryOpen(false)
+      setConfirmClear(false)
+      requestAnimationFrame(() => {
+        if (pickRef.current?.key === key) fitPick(order)
+      })
+    })
+    return [...order]
+  }, [clearSelection, dirty, fitPick, writePick])
+
+  const selectPick = useCallback((id: string | null) => {
+    const session = pickRef.current
+    if (!session || session.selected === id) return
+    if (id !== null && (!session.candidates.has(id) || !(previewRef.current ?? flowRef.current).nodes.some((node) => node.id === id))) return
+    writePick({ ...session, selected: id })
+    if (id !== null) revealPick(id)
+  }, [revealPick, writePick])
+
+  const chooseCandidate = useCallback((id: string) => {
+    const session = pickRef.current
+    if (!session || !session.candidates.has(id) || session.selected === id) return
+    writePick({ ...session, selected: id })
+    safely(() => session.onSelect(id))
+  }, [writePick])
+
+  const confirmPick = useCallback(() => {
+    const session = pickRef.current
+    const id = session?.selected
+    if (!session || !id) return
+    leavePick()
+    safely(() => session.onConfirm(id))
+  }, [leavePick])
+
+  const endPick = useCallback(() => {
+    leavePick()
+  }, [leavePick])
+
+  useEffect(() => {
+    if (!picking) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return
+      if (event.target instanceof Element && event.target.closest(LAYER_SELECTOR)) return
+      cancelPick()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [cancelPick, picking])
+
+  useEffect(() => {
+    const session = pickRef.current
+    if (!session) return
+    const shown = new Set(display.nodes.map((node) => node.id))
+    if (!session.order.some((id) => shown.has(id))) {
+      cancelPick()
+      return
+    }
+    if (session.selected === null || shown.has(session.selected)) return
+    writePick({ ...session, selected: null })
+    safely(() => session.onSelect(null))
+  }, [cancelPick, display.nodes, writePick])
+
   useLayoutEffect(() => {
-    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, previewWorkflow, captureImage, getFlow, applyWorkflowEdit, undo, redo }
+    handlers.current = { zoomIn: zoomInView, zoomOut: zoomOutView, fitView: fitCanvas, save, load: openFile, loadWorkflow, execute, search, removeNode, reset, download, previewWorkflow, captureImage, getFlow, applyWorkflowEdit, startPick, selectPick, confirmPick, endPick, undo, redo }
   })
 
   const actions = useMemo<WorkflowActions>(() => ({
@@ -978,6 +1194,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     captureImage: () => handlers.current?.captureImage() ?? Promise.resolve(null),
     getFlow: () => handlers.current?.getFlow() ?? newFlow(),
     applyWorkflowEdit: (flow) => handlers.current?.applyWorkflowEdit(flow) ?? false,
+    startPick: (request) => handlers.current?.startPick(request) ?? [],
+    selectPick: (id) => handlers.current?.selectPick(id),
+    confirmPick: () => handlers.current?.confirmPick(),
+    endPick: () => handlers.current?.endPick(),
   }), [])
 
   useEffect(() => {
@@ -1096,7 +1316,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [centerOn, findNode, settledView, store])
 
   const addComponent = useCallback((type: string, position?: XYPosition) => {
-    if (previewBusy()) return
+    if (canvasBusy()) return
     if (recovery) {
       toast({ title: "Edição pausada", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
       return
@@ -1116,7 +1336,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     } catch (cause) {
       toast({ title: "Componente indisponível", description: (cause as Error).message, variant: "destructive" })
     }
-  }, [allocateId, commit, ensureApplied, placeComponent, previewBusy, recovery, revealNode])
+  }, [allocateId, commit, ensureApplied, placeComponent, canvasBusy, recovery, revealNode])
 
   const isValidConnection = useCallback((connection: Connection) => {
     const source = findNode(connection.source)
@@ -1126,7 +1346,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
 
   const connect = useCallback((connection: Connection) => {
     const { source: sourceId, sourceHandle, target } = connection
-    if (previewRef.current || !sourceId || !target || !sourceHandle || !isValidConnection(connection)) return
+    if (previewRef.current || pickRef.current || !sourceId || !target || !sourceHandle || !isValidConnection(connection)) return
     const source = findNode(sourceId)
     if (!source) return
     const current = flowRef.current
@@ -1160,9 +1380,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const dimensions: Array<{ id: string } & Size> = []
     const selections = new Map<string, boolean>()
     const positions = new Map<string, XYPosition>()
+    const editable = !pickRef.current
     for (const change of changes) {
-      if (change.type === "remove") removals.push(change.id)
-      else if (change.type === "dimensions" && change.dimensions) dimensions.push({ id: change.id, width: change.dimensions.width, height: change.dimensions.height })
+      if (change.type === "dimensions" && change.dimensions) dimensions.push({ id: change.id, width: change.dimensions.width, height: change.dimensions.height })
+      else if (!editable) continue
+      else if (change.type === "remove") removals.push(change.id)
       else if (change.type === "select") selections.set(change.id, change.selected)
       else if (change.type === "position" && change.position) positions.set(change.id, change.position)
     }
@@ -1202,7 +1424,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [ensureApplied, removeNodes, revealNode, setDocument])
 
   const handleEdgeChanges = useCallback((changes: EdgeChange[]) => {
-    if (previewRef.current) return
+    if (previewRef.current || pickRef.current) return
     const selections = new Map<string, boolean>()
     const removals: string[] = []
     for (const change of changes) {
@@ -1237,13 +1459,13 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [pushHistory])
 
   const openNode = useCallback((_: ReactMouseEvent, node: Node) => {
-    if (previewRef.current || node.id === panelId || !ensureApplied()) return
+    if (previewRef.current || pickRef.current || node.id === panelId || !ensureApplied()) return
     setPanelId(node.id)
     setDrafts({})
   }, [ensureApplied, panelId])
 
   const closeOnPane = useCallback(() => {
-    if (previewRef.current || !ensureApplied()) return
+    if (previewRef.current || pickRef.current || !ensureApplied()) return
     setPanelId(null)
     setDrafts({})
   }, [ensureApplied])
@@ -1283,7 +1505,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
 
   const drop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
-    if (previewBusy()) return
+    if (canvasBusy()) return
     const type = event.dataTransfer.getData("application/reactflow")
     if (type) {
       addComponent(type, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
@@ -1296,7 +1518,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       return
     }
     void readFile(file)
-  }, [addComponent, previewBusy, readFile, screenToFlowPosition])
+  }, [addComponent, canvasBusy, readFile, screenToFlowPosition])
 
   const importFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -1355,7 +1577,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const setServiceType = useCallback((serviceType: string) => commit((current) => ({ ...current, service_type: serviceType }), "service_type"), [commit])
 
   const startNewFlow = useCallback(() => {
-    if (previewBusy() || !ensureApplied()) return
+    if (canvasBusy() || !ensureApplied()) return
     setSettingsOpen(false)
     if (recovery) {
       reset()
@@ -1367,10 +1589,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     toast(stored
       ? { title: "Novo fluxo criado", description: `“${stored.flow.name.trim() || "Sem nome"}” ficou guardado em Meus fluxos.` }
       : { title: "Novo fluxo criado", description: "O fluxo anterior estava vazio e não foi guardado." })
-  }, [ensureApplied, getViewport, previewBusy, recovery, reset, storeCurrent])
+  }, [ensureApplied, getViewport, canvasBusy, recovery, reset, storeCurrent])
 
   const requestClear = useCallback(() => {
-    if (previewBusy()) return
+    if (canvasBusy()) return
     if (recovery) {
       toast({ title: "Edição pausada", description: "Importe um fluxo válido ou crie um novo fluxo para continuar.", variant: "destructive" })
       return
@@ -1381,18 +1603,18 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       return
     }
     setConfirmClear(true)
-  }, [ensureApplied, previewBusy, recovery])
+  }, [ensureApplied, canvasBusy, recovery])
 
   const confirmClearFlow = useCallback(() => {
     setConfirmClear(false)
-    if (previewRef.current || !ensureApplied()) return
+    if (previewRef.current || pickRef.current || !ensureApplied()) return
     setDocument(clearedFlow(flowRef.current), "history")
     clearSelection()
     toast({ title: "Fluxo limpo", description: "Componentes e conexões removidos. Use Desfazer (Ctrl+Z) para recuperar." })
   }, [clearSelection, ensureApplied, setDocument])
 
   const openSaved = useCallback((id: string) => {
-    if (previewBusy() || !ensureApplied()) return
+    if (canvasBusy() || !ensureApplied()) return
     let entries: SavedFlow[] = []
     try {
       entries = readLibrary(localStorage)
@@ -1422,10 +1644,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     void setViewport(restored.viewport)
     persist(restored)
     toast({ title: "Fluxo aberto", description: `“${restored.name.trim() || "Sem nome"}” com ${plural(restored.nodes.length, "componente", "componentes")}. O anterior ficou em Meus fluxos.` })
-  }, [backupStored, clearSelection, ensureApplied, getViewport, persist, previewBusy, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
+  }, [backupStored, clearSelection, ensureApplied, getViewport, persist, canvasBusy, recovery, resetHistory, selectSaved, setDocument, setViewport, storeCurrent])
 
   const duplicateSaved = useCallback((id: string) => {
-    if (previewBusy()) return
+    if (canvasBusy()) return
     try {
       const entries = readLibrary(localStorage)
       const entry = entries.find((item) => item.id === id)
@@ -1439,10 +1661,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     } catch {
       toast({ title: "Não foi possível duplicar", description: "O armazenamento do navegador está cheio ou bloqueado. Exporte o JSON antes de continuar.", variant: "destructive" })
     }
-  }, [getViewport, previewBusy])
+  }, [getViewport, canvasBusy])
 
   const deleteSaved = useCallback((id: string) => {
-    if (previewBusy()) return
+    if (canvasBusy()) return
     try {
       const next = removeSaved(readLibrary(localStorage), id)
       writeLibrary(localStorage, next)
@@ -1452,22 +1674,21 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     } catch {
       toast({ title: "Não foi possível excluir", description: "O navegador bloqueou o armazenamento local.", variant: "destructive" })
     }
-  }, [previewBusy, selectSaved])
+  }, [canvasBusy, selectSaved])
+
+  const pickCandidates = pick?.candidates ?? null
 
   const canvasNodes = useMemo<Node<AtendimentoData>[]>(() => {
+    const lock = (id: string) => (pickCandidates ? (pickCandidates.has(id) ? PICK_CANDIDATE_NODE : PICK_DIMMED_NODE) : LOCKED_NODE)
+    const label = (node: AtendimentoNode) => (pickCandidates?.has(node.id) ? undefined : `${getComponentLabel(node.data.type)}, ID ${node.id}`)
     if (preview) return preview.nodes.map((node) => ({
       id: node.id,
       type: "custom",
       position: node.position,
       data: node.data,
       ...previewSizes[node.id],
-      selected: false,
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      deletable: false,
-      focusable: false,
-      ariaLabel: `${getComponentLabel(node.data.type)}, ID ${node.id}`,
+      ...lock(node.id),
+      ariaLabel: label(node),
     }))
     const selected = new Set(selectedNodes)
     return flow.nodes.map((node) => ({
@@ -1476,14 +1697,14 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       position: node.position,
       data: node.data,
       ...sizes[node.id],
-      selected: selected.has(node.id),
-      deletable: node.data.type !== START_TYPE && node.deletable !== false,
-      ariaLabel: `${getComponentLabel(node.data.type)}, ID ${node.id}`,
+      ...(pickCandidates ? lock(node.id) : { selected: selected.has(node.id), deletable: node.data.type !== START_TYPE && node.deletable !== false }),
+      ariaLabel: label(node),
     }))
-  }, [flow.nodes, preview, previewSizes, selectedNodes, sizes])
+  }, [flow.nodes, pickCandidates, preview, previewSizes, selectedNodes, sizes])
 
   const canvasEdges = useMemo<Edge[]>(() => {
-    const selected = new Set(previewing ? [] : selectedEdges)
+    const selected = new Set(locked ? [] : selectedEdges)
+    const lock = picking ? PICK_EDGE : locked ? LOCKED_EDGE : null
     return display.edges.map((edge) => {
       const source = displayById.get(edge.source)
       return {
@@ -1494,11 +1715,16 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
         target: edge.target,
         targetHandle: edge.targetHandle ?? undefined,
         selected: selected.has(edge.id),
-        ...(previewing && { selectable: false, deletable: false, focusable: false, updatable: false }),
+        ...lock,
         ariaLabel: `Conexão de ${source ? `${getComponentLabel(source.data.type)} ${source.id} (${outputLabel(source, edge.sourceHandle)})` : edge.source} para ${edge.target}`,
       }
     })
-  }, [display.edges, displayById, previewing, selectedEdges])
+  }, [display.edges, displayById, locked, picking, selectedEdges])
+
+  const nodePick = useMemo<NodePick | null>(() => (pick ? { candidates: pick.candidates, selected: pick.selected, select: chooseCandidate } : null), [chooseCandidate, pick])
+  const minimapNodeClass = useMemo(() => (pickCandidates ? pickMinimapClass(pickCandidates) : minimapClass), [pickCandidates])
+  const pickedNode = pick?.selected ? displayById.get(pick.selected) : undefined
+  const pickedText = pickedNode ? `${getComponentLabel(pickedNode.data.type)} · ID ${pickedNode.id}` : ""
 
   const edgeActions = useMemo(() => ({ remove: (id: string) => removeEdges([id]) }), [removeEdges])
   const nodeActions = useMemo(() => ({
@@ -1524,14 +1750,14 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
         <ToolButton label="Ajustar à tela" icon={Maximize} onClick={fitCanvas} />
         <ToolButton label="Minimapa" title={showMinimap ? "Ocultar minimapa" : "Mostrar minimapa"} icon={MapIcon} pressed={showMinimap} onClick={() => setShowMinimap((visible) => !visible)} />
         <span className={ui.divider} aria-hidden />
-        <ToolButton label="Desfazer" title="Desfazer (Ctrl+Z)" icon={Undo2} onClick={undo} disabled={!canUndo || previewing} />
-        <ToolButton label="Refazer" title="Refazer (Ctrl+Y)" icon={Redo2} onClick={redo} disabled={!canRedo || previewing} />
+        <ToolButton label="Desfazer" title="Desfazer (Ctrl+Z)" icon={Undo2} onClick={undo} disabled={!canUndo || locked} />
+        <ToolButton label="Refazer" title="Refazer (Ctrl+Y)" icon={Redo2} onClick={redo} disabled={!canRedo || locked} />
         <span className={ui.divider} aria-hidden />
-        <ToolButton label="Novo fluxo" title="Novo fluxo: guarda o atual em Meus fluxos e começa um em branco" icon={FilePlus2} onClick={startNewFlow} disabled={previewing} />
-        <span inert={previewing} className={cn("inline-flex shrink-0", previewing && "opacity-40")}>
-          <SavedFlows open={libraryOpen && !previewing} onOpenChange={(open) => setLibraryOpen(open && !previewRef.current)} entries={library} currentId={currentSavedId} onOpen={openSaved} onDuplicate={duplicateSaved} onDelete={deleteSaved} />
+        <ToolButton label="Novo fluxo" title="Novo fluxo: guarda o atual em Meus fluxos e começa um em branco" icon={FilePlus2} onClick={startNewFlow} disabled={locked} />
+        <span inert={locked} className={cn("inline-flex shrink-0", locked && "opacity-40")}>
+          <SavedFlows open={libraryOpen && !locked} onOpenChange={(open) => setLibraryOpen(open && !previewRef.current && !pickRef.current)} entries={library} currentId={currentSavedId} onOpen={openSaved} onDuplicate={duplicateSaved} onDelete={deleteSaved} />
         </span>
-        <button ref={clearTrigger} type="button" aria-label="Limpar fluxo" title="Limpar fluxo: remove todos os componentes e conexões" className={cn(ui.toolButton, "hover:border-flow-danger hover:text-flow-danger")} onClick={requestClear} disabled={Boolean(recovery) || previewing}>
+        <button ref={clearTrigger} type="button" aria-label="Limpar fluxo" title="Limpar fluxo: remove todos os componentes e conexões" className={cn(ui.toolButton, "hover:border-flow-danger hover:text-flow-danger")} onClick={requestClear} disabled={Boolean(recovery) || locked}>
           <Eraser className="h-4 w-4" aria-hidden />
         </button>
         <span className={ui.divider} aria-hidden />
@@ -1540,7 +1766,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
           value={flow.name}
           placeholder="Nome do fluxo"
           spellCheck={false}
-          disabled={previewing}
+          disabled={locked}
           className="h-8 min-w-[10rem] max-w-md flex-1 truncate rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-flow-fg transition placeholder:text-flow-muted hover:border-flow-border focus-visible:border-flow-accent focus-visible:bg-flow-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/25 disabled:pointer-events-none disabled:opacity-60"
           onChange={(event) => renameFlow(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur() }}
@@ -1549,9 +1775,9 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
           <button
             type="button"
             onClick={() => setShowIssues((open) => !open)}
-            disabled={previewing}
-            aria-expanded={showIssues && !previewing}
-            aria-controls={showIssues && !previewing ? issuesId : undefined}
+            disabled={locked}
+            aria-expanded={showIssues && !locked}
+            aria-controls={showIssues && !locked ? issuesId : undefined}
             title={showIssues ? "Ocultar validação do fluxo" : errorCount ? "Ver pendências do fluxo" : "Ver validação do fluxo"}
             className={cn(
               "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-40",
@@ -1563,26 +1789,26 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             {errorCount ? <TriangleAlert className="h-3.5 w-3.5" aria-hidden /> : <Check className="h-3.5 w-3.5" aria-hidden />}
             {errorCount ? plural(errorCount, "pendência", "pendências") : "Fluxo validado"}
           </button>
-          <button type="button" className={ui.button} onClick={openFile} disabled={previewing} title="Abrir um arquivo JSON de Atendimento">
+          <button type="button" className={ui.button} onClick={openFile} disabled={locked} title="Abrir um arquivo JSON de Atendimento">
             <Upload className="h-3.5 w-3.5" aria-hidden />
             Importar JSON
           </button>
-          <button type="button" className={ui.button} onClick={download} disabled={previewing} title="Baixar o fluxo no formato JSON de Atendimento">
+          <button type="button" className={ui.button} onClick={download} disabled={locked} title="Baixar o fluxo no formato JSON de Atendimento">
             <Download className="h-3.5 w-3.5" aria-hidden />
             Exportar JSON
           </button>
-          <button type="button" className={ui.button} onClick={save} disabled={previewing} title="Salvar neste navegador (Ctrl+S)">
+          <button type="button" className={ui.button} onClick={save} disabled={locked} title="Salvar neste navegador (Ctrl+S)">
             <Save className="h-3.5 w-3.5" aria-hidden />
             Salvar
           </button>
-          <button type="button" className={ui.primaryButton} onClick={execute} disabled={previewing} title="Validar o fluxo e abrir a prévia do atendimento">
+          <button type="button" className={ui.primaryButton} onClick={execute} disabled={locked} title="Validar o fluxo e abrir a prévia do atendimento">
             <Play className="h-3.5 w-3.5" aria-hidden />
             Prévia
           </button>
           <FlowSettings
-            open={settingsOpen && !previewing}
-            disabled={previewing}
-            onOpenChange={(open) => setSettingsOpen(open && !previewRef.current)}
+            open={settingsOpen && !locked}
+            disabled={locked}
+            onOpenChange={(open) => setSettingsOpen(open && !previewRef.current && !pickRef.current)}
             triggerRef={settingsTrigger}
             description={flow.description}
             serviceType={flow.service_type}
@@ -1603,58 +1829,60 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       <div className="relative flex min-h-0 flex-1">
         {showLibrary && <NodeLibrary onAdd={addComponent} />}
         <div ref={canvas} tabIndex={-1} className="flow-background relative min-w-0 flex-1 bg-flow-bg focus:outline-none">
-          <InvalidNodesContext.Provider value={previewing ? NO_INVALID_NODES : invalidNodes}>
+          <InvalidNodesContext.Provider value={locked ? NO_INVALID_NODES : invalidNodes}>
             <AtendimentoEdgesContext.Provider value={display.edges}>
-              <EdgeActionsContext.Provider value={previewing ? NO_EDGE_ACTIONS : edgeActions}>
-                <NodeActionsContext.Provider value={previewing ? null : nodeActions}>
-                  <ReactFlow
-                    nodes={canvasNodes}
-                    edges={canvasEdges}
-                    nodeTypes={nodeTypes}
-                    edgeTypes={edgeTypes}
-                    onNodesChange={handleNodeChanges}
-                    onEdgesChange={handleEdgeChanges}
-                    onNodeDragStart={startDrag}
-                    onNodeDragStop={finishDrag}
-                    onSelectionDragStart={startDrag}
-                    onSelectionDragStop={finishDrag}
-                    onNodeClick={openNode}
-                    onPaneClick={closeOnPane}
-                    isValidConnection={isValidConnection}
-                    onConnect={connect}
-                    onDragOver={dragOver}
-                    onDrop={drop}
-                    onMoveStart={moveStart}
-                    onMoveEnd={moveEnd}
-                    defaultViewport={flow.viewport}
-                    minZoom={MIN_ZOOM}
-                    maxZoom={2}
-                    nodesDraggable={!previewing}
-                    nodesConnectable={!previewing}
-                    nodesFocusable={!previewing}
-                    edgesFocusable={!previewing}
-                    edgesUpdatable={!previewing}
-                    elementsSelectable={!previewing}
-                    deleteKeyCode={dirty || previewing ? null : DELETE_KEYS}
-                    multiSelectionKeyCode={MULTI_SELECTION_KEYS}
-                    selectNodesOnDrag={false}
-                    connectionLineStyle={CONNECTION_LINE_STYLE}
-                    proOptions={PRO_OPTIONS}
-                    className={CANVAS_CLASS}
-                  >
-                    <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="rgb(var(--flow-border))" className="[&_circle]:fill-flow-border" />
-                    {showMinimap && (
-                      <MiniMap
-                        pannable
-                        zoomable
-                        ariaLabel="Minimapa"
-                        nodeColor={minimapColor}
-                        nodeClassName={minimapClass}
-                        nodeBorderRadius={16}
-                        className={MINIMAP_CLASS}
-                      />
-                    )}
-                  </ReactFlow>
+              <EdgeActionsContext.Provider value={locked ? NO_EDGE_ACTIONS : edgeActions}>
+                <NodeActionsContext.Provider value={locked ? null : nodeActions}>
+                  <NodePickContext.Provider value={nodePick}>
+                    <ReactFlow
+                      nodes={canvasNodes}
+                      edges={canvasEdges}
+                      nodeTypes={nodeTypes}
+                      edgeTypes={edgeTypes}
+                      onNodesChange={handleNodeChanges}
+                      onEdgesChange={handleEdgeChanges}
+                      onNodeDragStart={startDrag}
+                      onNodeDragStop={finishDrag}
+                      onSelectionDragStart={startDrag}
+                      onSelectionDragStop={finishDrag}
+                      onNodeClick={openNode}
+                      onPaneClick={closeOnPane}
+                      isValidConnection={isValidConnection}
+                      onConnect={connect}
+                      onDragOver={dragOver}
+                      onDrop={drop}
+                      onMoveStart={moveStart}
+                      onMoveEnd={moveEnd}
+                      defaultViewport={flow.viewport}
+                      minZoom={MIN_ZOOM}
+                      maxZoom={2}
+                      nodesDraggable={!locked}
+                      nodesConnectable={!locked}
+                      nodesFocusable={!locked}
+                      edgesFocusable={!locked}
+                      edgesUpdatable={!locked}
+                      elementsSelectable={!locked}
+                      deleteKeyCode={dirty || locked ? null : DELETE_KEYS}
+                      multiSelectionKeyCode={MULTI_SELECTION_KEYS}
+                      selectNodesOnDrag={false}
+                      connectionLineStyle={CONNECTION_LINE_STYLE}
+                      proOptions={PRO_OPTIONS}
+                      className={CANVAS_CLASS}
+                    >
+                      <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="rgb(var(--flow-border))" className="[&_circle]:fill-flow-border" />
+                      {showMinimap && (
+                        <MiniMap
+                          pannable
+                          zoomable
+                          ariaLabel="Minimapa"
+                          nodeColor={minimapColor}
+                          nodeClassName={minimapNodeClass}
+                          nodeBorderRadius={16}
+                          className={MINIMAP_CLASS}
+                        />
+                      )}
+                    </ReactFlow>
+                  </NodePickContext.Provider>
                 </NodeActionsContext.Provider>
               </EdgeActionsContext.Provider>
             </AtendimentoEdgesContext.Provider>
@@ -1671,12 +1899,13 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
               Componentes
             </button>
           )}
-          {showIssues && !previewing && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
-          {preview && <PreviewBanner nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} />}
+          {showIssues && !locked && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
+          {preview && !pick && <PreviewBanner nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} />}
+          {pick && <PickBanner label={pick.label} selection={pickedText} onCancel={cancelPick} onConfirm={confirmPick} />}
           <CanvasStatus container={canvas} count={display.nodes.length} start={startNode?.position} />
         </div>
         {panelNode && (
-          <div className={previewing ? "hidden" : "contents"}>
+          <div className={locked ? "hidden" : "contents"}>
             <ConfigPanel
               key={panelNode.id}
               node={panelNode}

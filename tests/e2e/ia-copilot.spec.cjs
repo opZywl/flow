@@ -6,7 +6,7 @@ const { importFlow } = require('../../lib/atendimento/format.ts')
 const { START_TYPE } = require('../../lib/atendimento/catalog.ts')
 const { assembleFlow, finalizeFlow } = require('../../lib/atendimento/ai/assemble.ts')
 const { flowToRi } = require('../../lib/atendimento/ai/edit.ts')
-const { INTERVIEW_SCHEMA_NAME } = require('../../lib/atendimento/ai/interview.ts')
+const { INTERVIEW_SCHEMA_NAME, copilotSystemPrompt, interviewSystemPrompt, interviewMessages } = require('../../lib/atendimento/ai/interview.ts')
 
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
 const HOST = 'api.openai.com'
@@ -359,6 +359,13 @@ const you = (text) => `Você: ${text}`
 const says = (turn) => `Copiloto: ${typeof turn === 'string' ? turn : turn.message}`
 const inputOf = (call) => JSON.stringify(call.body.input)
 const historyOf = (call) => JSON.stringify(call.body.input.filter((entry) => entry.role === 'user' || entry.role === 'assistant'))
+const partText = (content) => (typeof content === 'string' ? content : content.map((part) => part.text ?? '').join(''))
+const systemOf = (call) => call.body.input.filter((entry) => entry.role === 'developer' || entry.role === 'system').map((entry) => partText(entry.content))
+const copilotState = (flow, proposal = false) => interviewMessages({ history: [{ role: 'user', text: PROMPT }], flow, fill: true, scope: 'copilot', proposal })[1].content
+function proposalLines(flow) {
+  const plain = copilotState(flow).split('\n')
+  return copilotState(flow, true).split('\n').filter((line) => line.trim() && !plain.includes(line))
+}
 const stored = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('workflow')))
 const saved = async (page) => {
   const flow = await stored(page)
@@ -532,6 +539,8 @@ test('crie uma opcao 8: the Copiloto asks what the new option does before editin
   expect(inputOf(first)).toContain('# Resumo do fluxo aberto')
   expect(inputOf(first)).toContain('Como podemos ajudar?')
   expect(historyOf(first)).toContain(OPTION_REQUEST)
+  expect(systemOf(first), 'o turno do Copiloto usa o prompt e a situação do Copiloto, sem proposta em revisão').toEqual([copilotSystemPrompt(), copilotState(MENU_FLOW)])
+  expect(systemOf(first)).not.toContain(interviewSystemPrompt())
 
   await chips(panel).filter({ hasText: 'Pode ser assim' }).click()
   const cards = await proposal(panel)
@@ -548,6 +557,7 @@ test('crie uma opcao 8: the Copiloto asks what the new option does before editin
   expect(historyOf(second)).toContain(ASK_OPTION.message)
   expect(historyOf(second)).toContain('Pode ser assim')
   expect(inputOf(second)).toContain('# Resumo do fluxo aberto')
+  expect(systemOf(second)).toEqual([copilotSystemPrompt(), copilotState(MENU_FLOW)])
   expect(ai.buildCalls()).toHaveLength(1)
   const build = JSON.stringify(ai.buildCalls()[0].body)
   expect(build).toContain('# Modo de edição')
@@ -866,6 +876,12 @@ test('a refinement asks with the proposal on the canvas, sends the proposal as t
   expect(inputOf(refineTurn)).toContain(BOLETO_TEXT)
   expect(historyOf(refineTurn)).toContain('Proposta pronta no canvas: 2 componentes novos, 1 alterado e 0 removidos.')
   expect(historyOf(refineTurn)).toContain(REFINE_PROMPT)
+  const notice = proposalLines(BASE_FLOW)
+  expect(notice.length).toBeGreaterThan(0)
+  expect(systemOf(ai.turnCalls()[0]), 'o primeiro pedido não fala de proposta em revisão').toEqual([copilotSystemPrompt(), copilotState(BASE_FLOW)])
+  const [refinePrompt, refineState] = systemOf(refineTurn)
+  expect(refinePrompt).toBe(copilotSystemPrompt())
+  for (const line of notice) expect(refineState, 'o ajuste avisa que há uma proposta em revisão').toContain(line)
   expect(ai.buildCalls()).toHaveLength(2)
   const firstSent = JSON.stringify(ai.buildCalls()[0].body)
   const refineSent = JSON.stringify(ai.buildCalls()[1].body)

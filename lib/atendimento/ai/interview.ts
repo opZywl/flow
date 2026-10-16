@@ -23,11 +23,24 @@ export type InterviewAction = "ask" | "generate" | "edit" | "finish"
 
 export type InterviewScope = "builder" | "copilot"
 
+export interface InterviewPick {
+  label: string
+  candidates: string[]
+}
+
 export interface InterviewTurn {
   message: string
   suggestions: string[]
   action: InterviewAction
   plan: string
+  pick?: InterviewPick | null
+}
+
+export interface SettleContext {
+  hasFlow: boolean
+  history: readonly InterviewMessage[]
+  scope?: InterviewScope
+  ids?: Iterable<string>
 }
 
 export interface InterviewInput {
@@ -60,11 +73,26 @@ export const INTERVIEW_SCHEMA_DESCRIPTION = "Próxima fala do assistente que mon
 
 export const SUGGESTION_LIMITS = { min: 2, max: 5, length: 80 } as const
 
-export const interviewSchema: z.ZodType<InterviewTurn> = z.object({
+export const PICK_LIMITS = { min: 2, label: 60 } as const
+
+const TURN_FIELDS = {
   message: z.string().describe("Fala para o usuário: a proposta e uma pergunta, o aviso de montagem ou de edição, ou a despedida"),
   suggestions: z.array(z.string()).describe("De 2 a 5 respostas curtas que o usuário pode clicar; vazio fora de ask"),
   action: z.enum(["ask", "generate", "edit", "finish"]).describe("ask pergunta, generate monta o fluxo novo, edit altera o fluxo aberto, finish encerra a conversa"),
   plan: z.string().describe("Descrição consolidada do atendimento com todas as decisões até aqui; na edição, o pedido de mudança completo"),
+}
+
+export const interviewSchema: z.ZodType<InterviewTurn> = z.object(TURN_FIELDS)
+
+export const copilotSchema: z.ZodType<InterviewTurn> = z.object({
+  ...TURN_FIELDS,
+  pick: z
+    .object({
+      label: z.string().describe("O que o usuário seleciona no canvas, com o artigo, como o menu de opções ou a mensagem"),
+      candidates: z.array(z.string()).describe("IDs do resumo do fluxo de todos os componentes que servem para o pedido"),
+    })
+    .nullable()
+    .describe("Seleção no canvas, com ask, quando mais de um componente do resumo serve para o pedido; null nas outras respostas"),
 })
 
 const HISTORY_MESSAGES = 80
@@ -79,6 +107,13 @@ const FLOW_INVALID = "Não foi possível ler o fluxo aberto. Confira o fluxo e t
 const COPILOT_FLOW_MISSING = "Abra um fluxo com componentes para o Copiloto editar."
 const CONTINUE = "Continue a conversa a partir do último registro."
 const FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action e plan."
+const COPILOT_FORMAT_RETRY = "A resposta anterior não seguiu o formato pedido. Responda de novo só com o objeto: message, suggestions, action, plan e pick."
+const PICK_FALLBACK = "o componente"
+const PICK_LOST = "Em qual componente você quer fazer essa mudança? Escreva o texto que aparece nele."
+const PICK_KEYS = ["pick", "selecao", "seleção", "selection"]
+const PICK_LABEL_KEYS = ["label", "rotulo", "rótulo"]
+const PICK_CANDIDATE_KEYS = ["candidates", "candidatos", "ids"]
+const ARTICLES = new Set(["o", "a", "os", "as", "um", "uma"])
 const OMITTED = "Mensagens anteriores da conversa foram resumidas no plano."
 const ABORTED = "A resposta foi cancelada."
 const UNKNOWN = "Não foi possível continuar a conversa."
@@ -233,7 +268,7 @@ const COPILOT_LINES = [
   "- Na opção Segunda via, envie o link https://lucas-lima.xyz/boleto antes de encerrar.",
   "3. Quando falta uma decisão que muda o resultado, pergunte antes de editar. Estas decisões pedem confirmação:",
   "- o texto de uma opção nova e o que acontece quando o contato escolhe essa opção;",
-  "- o menu ou o ponto do fluxo, quando mais de um serve;",
+  "- o menu, o componente ou o ponto do fluxo, quando mais de um serve: peça para o usuário selecionar no canvas;",
   "- o departamento de uma transferência;",
   "- o horário de atendimento e o que acontece fora dele;",
   "- os dados a coletar e como validar cada um;",
@@ -249,6 +284,14 @@ const COPILOT_LINES = [
   "5. Quando o usuário pede para fazer já, devolva edit com o que já foi decidido e as suas propostas no que faltar. Pedem isso respostas como Pode editar agora e a mensagem Pode editar agora com o que já foi decidido.",
   "6. Quando a resposta traz um pedido novo, junte esse pedido ao que está em andamento e pergunte o que faltar sobre ele.",
   "",
+  "# Seleção no canvas",
+  "1. Quando o pedido cita um componente sem dizer qual e o resumo mostra mais de um que serve, como dois menus de opções ou várias mensagens, peça para o usuário selecionar o componente no canvas, mesmo quando um deles parece o mais provável pelo assunto: devolva ask com pick.",
+  "2. Em pick, label diz o que selecionar, com o artigo, como o menu de opções ou a mensagem, e candidates traz o ID, como aparece no resumo, de cada componente que serve para o pedido.",
+  "3. message conta em uma frase que mais de um componente serve e pede para selecionar o certo no canvas e clicar em Confirmar. Nessa pergunta, suggestions traz atalhos em texto, um para cada candidato, com o texto dele, como No menu Como podemos ajudar, e só esses atalhos.",
+  "4. Quando só um componente do resumo serve, use esse componente direto. Nas outras respostas, pick fica null.",
+  "5. A mensagem do usuário que começa com Selecionei no canvas traz o componente selecionado e o ID dele. Siga o pedido nesse componente: cite em plan o ID e o texto dele e devolva edit quando o pedido fica completo com essa escolha; pergunte só o que ainda faltar.",
+  "6. Depois de Seleção cancelada, o usuário responde por texto: use o componente que o texto indica, ou peça a seleção de novo quando o texto ainda serve para mais de um.",
+  "",
   "# Proposta em revisão",
   "1. Quando a situação atual indica uma proposta em revisão, o resumo já inclui a proposta, e o pedido seguinte ajusta essa proposta: plan traz só o ajuste.",
   "2. O usuário aplica ou descarta a proposta com os botões Aplicar e Descartar, no cartão da proposta. Quando ele pede para aplicar ou descartar, devolva finish e lembre em uma frase que basta clicar em Aplicar ou em Descartar no cartão.",
@@ -260,7 +303,7 @@ const COPILOT_LINES = [
   "",
   "# Ações",
   "Nesta conversa, as ações são ask, edit e finish.",
-  "- ask: falta uma decisão. message traz a proposta e a pergunta, e suggestions traz as respostas sugeridas.",
+  "- ask: falta uma decisão. message traz a proposta e a pergunta, suggestions traz as respostas sugeridas e pick traz a seleção no canvas quando ela se aplica.",
   "- edit: a mudança está clara. message diz em uma frase o que vai mudar, suggestions fica vazio e plan traz o pedido de mudança completo.",
   "- finish: o usuário já tem o que precisa, inclusive quando decide manter o fluxo como está. message traz uma despedida curta e suggestions fica vazio.",
   "",
@@ -270,6 +313,7 @@ const COPILOT_LINES = [
   "- proposta aplicada ao fluxo aberto: Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.",
   "- proposta descartada: Proposta descartada. O fluxo aberto não mudou.",
   "- pedido cancelado antes de a proposta ficar pronta: Pedido cancelado. O fluxo aberto não mudou.",
+  "- seleção no canvas cancelada: Seleção cancelada. Você pode responder por texto.",
   "- pergunta feita depois de aplicar: Precisa mudar mais alguma coisa no fluxo?",
   "A resposta a essa pergunta traz um pedido novo, que segue as regras acima, ou encerra a conversa com finish.",
   "",
@@ -452,33 +496,55 @@ function clipPlan(text: string): string {
   return (space >= LIMITS.prompt / 2 ? cut.slice(0, space) : cut).trim()
 }
 
-function coerceTurn(value: unknown): InterviewTurn | null {
+function candidateTexts(value: unknown): string[] {
+  const list = Array.isArray(value) ? value.map(asText) : typeof value === "string" ? value.split(/[,;]/) : [asText(value)]
+  return list.map((entry) => entry.trim()).filter(Boolean)
+}
+
+function coercePick(value: unknown): InterviewPick | null {
+  if (!isRecord(value)) return null
+  return { label: asText(pick(value, PICK_LABEL_KEYS)), candidates: candidateTexts(pick(value, PICK_CANDIDATE_KEYS)) }
+}
+
+function coerceTurn(value: unknown, copilot = false): InterviewTurn | null {
   if (!isRecord(value)) return null
   const rawSuggestions = pick(value, ["suggestions", "sugestoes", "sugestões", "options", "opcoes", "opções"])
   const suggestions = Array.isArray(rawSuggestions) ? rawSuggestions.map(asText) : typeof rawSuggestions === "string" && rawSuggestions.trim() ? [rawSuggestions] : []
   const rawAction = asText(pick(value, ["action", "acao", "ação"])).trim().toLowerCase()
-  return {
+  const turn: InterviewTurn = {
     message: asText(pick(value, ["message", "mensagem", "pergunta", "question", "text"])),
     suggestions,
     action: (INTERVIEW_ACTIONS as readonly string[]).includes(rawAction) ? (rawAction as InterviewAction) : "ask",
     plan: asText(pick(value, ["plan", "plano", "description", "descricao", "descrição"])),
   }
+  return copilot ? { ...turn, pick: coercePick(pick(value, PICK_KEYS)) } : turn
 }
 
-function repairTurnText(text: string): string | null {
+function repairTurnText(text: string, copilot = false): string | null {
   const parsed = parseJsonText(sliceObject(text))
   if (!parsed.ok) return null
-  const turn = coerceTurn(parsed.value)
+  const turn = coerceTurn(parsed.value, copilot)
   return turn ? JSON.stringify(turn) : null
 }
 
-function partialTurn(value: unknown): Partial<InterviewTurn> | null {
+function partialPick(value: unknown): InterviewPick | null | undefined {
+  if (value === null) return null
+  if (!isRecord(value)) return undefined
+  const candidates = Array.isArray(value.candidates) ? value.candidates.filter((entry): entry is string => typeof entry === "string") : []
+  return { label: typeof value.label === "string" ? tidy(value.label) : "", candidates: candidates.map((entry) => entry.trim()).filter(Boolean) }
+}
+
+function partialTurn(value: unknown, copilot = false): Partial<InterviewTurn> | null {
   if (!isRecord(value)) return null
   const partial: Partial<InterviewTurn> = {}
   if (typeof value.message === "string") partial.message = tidy(value.message)
   if (Array.isArray(value.suggestions)) partial.suggestions = cleanSuggestions(value.suggestions.filter((entry): entry is string => typeof entry === "string"))
   if (typeof value.action === "string" && (INTERVIEW_ACTIONS as readonly string[]).includes(value.action)) partial.action = value.action as InterviewAction
   if (typeof value.plan === "string") partial.plan = value.plan
+  if (copilot) {
+    const selection = partialPick(value.pick)
+    if (selection !== undefined) partial.pick = selection
+  }
   return partial
 }
 
@@ -487,16 +553,75 @@ function userText(messages: readonly InterviewMessage[], last: boolean): string 
   return last ? users[users.length - 1] ?? "" : users.join("\n")
 }
 
-export function settleTurn(raw: InterviewTurn, context: { hasFlow: boolean; history: readonly InterviewMessage[]; scope?: InterviewScope }): InterviewTurn {
+function idResolver(ids: Iterable<string> | undefined): (value: string) => string | undefined {
+  const known = new Set<string>()
+  const folded = new Map<string, string | null>()
+  for (const id of ids ?? []) {
+    if (typeof id !== "string" || !id.trim()) continue
+    known.add(id)
+    const key = foldText(id)
+    const seen = folded.get(key)
+    folded.set(key, seen === undefined || seen === id ? id : null)
+  }
+  return (value) => {
+    const text = value.trim().replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, "").trim()
+    const bare = text.replace(/^id(?:\s*[:#]\s*|\s+)/i, "")
+    for (const option of [value, text, bare]) if (known.has(option)) return option
+    const tagged = text.match(/\bID\s*[:#]?\s*([^\s.,;:]+)[.,;:]*$/i)?.[1]
+    if (tagged && known.has(tagged)) return tagged
+    const found = folded.get(foldText(bare))
+    if (found) return found
+    const head = bare.replace(/^[-#\s]+/, "").split(/[\s(]/)[0]
+    return known.has(head) ? head : folded.get(foldText(head)) ?? undefined
+  }
+}
+
+function pickLabel(value: unknown): string {
+  const strip = (text: string) => text.replace(/[\s.,;:]+$/, "")
+  const text = strip(tidy(asText(value)))
+    .replace(/^selecion(?:e|ar)\b\s*/i, "")
+    .replace(/^no canvas\b[\s,:]*/i, "")
+    .replace(/[\s,]*\bno canvas$/i, "")
+  const label = strip(shorten(strip(text), PICK_LIMITS.label))
+  if (!label) return PICK_FALLBACK
+  const first = label.split(" ")[0]
+  return ARTICLES.has(first.toLowerCase()) ? `${first.toLowerCase()}${label.slice(first.length)}` : label
+}
+
+function settlePick(value: unknown, ids: Iterable<string> | undefined): InterviewPick | null {
+  if (!isRecord(value) || !Array.isArray(value.candidates)) return null
+  const resolve = idResolver(ids)
+  const candidates: string[] = []
+  for (const entry of value.candidates) {
+    const id = resolve(asText(entry))
+    if (id !== undefined && !candidates.includes(id)) candidates.push(id)
+  }
+  return candidates.length >= PICK_LIMITS.min ? { label: pickLabel(value.label), candidates } : null
+}
+
+function wantedPick(value: unknown): boolean {
+  return isRecord(value) && Array.isArray(value.candidates) && value.candidates.some((entry) => asText(entry).trim() !== "")
+}
+
+function settleMessage(said: string, fallback: string, selection: InterviewPick | null, lost: boolean): string {
+  if (lost && (!said || /canvas|selecion|confirmar/i.test(said))) return PICK_LOST
+  if (said) return said
+  return selection ? `Selecione ${selection.label} no canvas e clique em Confirmar.` : fallback
+}
+
+export function settleTurn(raw: InterviewTurn, context: SettleContext): InterviewTurn {
   const copilot = context.scope === "copilot"
   let action = raw.action
   if (action === "generate" && (copilot || context.hasFlow)) action = "edit"
   else if (action === "edit" && !copilot && !context.hasFlow) action = "generate"
   let plan = clipPlan(raw.plan)
-  if ((action === "generate" || action === "edit") && !plan) plan = clipPlan(userText(context.history, action === "edit"))
-  const message = tidy(raw.message) || (copilot ? COPILOT_MESSAGES : DEFAULT_MESSAGES)[action]
+  if ((action === "generate" || action === "edit") && !plan && !copilot) plan = clipPlan(userText(context.history, action === "edit"))
   const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : cleanSuggestions(raw.suggestions)
-  return { message, suggestions, action, plan }
+  const asking = copilot && action === "ask"
+  const selection = asking ? settlePick(raw.pick, context.ids) : null
+  const lost = asking && !selection && wantedPick(raw.pick)
+  const message = settleMessage(tidy(raw.message), (copilot ? COPILOT_MESSAGES : DEFAULT_MESSAGES)[action], selection, lost)
+  return selection ? { message, suggestions, action, plan, pick: selection } : { message, suggestions, action, plan }
 }
 
 function reject(error: string, field?: GenerateFailure["field"]): { ok: false; failure: GenerateFailure } {
@@ -519,16 +644,16 @@ function readContext(input: InterviewMessagesInput, fill: boolean): ContextCheck
   const history = cleanHistory(input.history)
   if (!history) return reject(HISTORY_INVALID, "prompt")
   if (!history.some((message) => message.role === "user")) return reject(HISTORY_EMPTY, "prompt")
+  const scope: InterviewScope = input.scope === "copilot" ? "copilot" : "builder"
   let flow: AtendimentoFlow | null = null
   if (input.flow !== undefined && input.flow !== null) {
     try {
       const opened = importFlow(input.flow)
-      flow = hasComponents(opened) ? opened : null
+      flow = scope === "copilot" || hasComponents(opened) ? opened : null
     } catch {
       return reject(FLOW_INVALID, "base")
     }
   }
-  const scope: InterviewScope = input.scope === "copilot" ? "copilot" : "builder"
   if (scope === "copilot" && !flow) return reject(COPILOT_FLOW_MISSING, "base")
   return { ok: true, context: { history, flow, fill, scope, proposal: input.proposal === true } }
 }
@@ -558,6 +683,15 @@ interface TurnAttempt {
   error?: unknown
 }
 
+interface TurnFormat {
+  schema: z.ZodType<InterviewTurn>
+  copilot: boolean
+  retry: string
+}
+
+const BUILDER_FORMAT: TurnFormat = { schema: interviewSchema, copilot: false, retry: FORMAT_RETRY }
+const COPILOT_FORMAT: TurnFormat = { schema: copilotSchema, copilot: true, retry: COPILOT_FORMAT_RETRY }
+
 async function settleObject(object: PromiseLike<InterviewTurn>, watch: StreamWatch, signal: AbortSignal): Promise<InterviewTurn> {
   let turn: InterviewTurn
   try {
@@ -573,13 +707,13 @@ async function settleObject(object: PromiseLike<InterviewTurn>, watch: StreamWat
   return turn
 }
 
-async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: AbortSignal, onPartial: InterviewHooks["onPartial"]): Promise<TurnAttempt> {
+async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: AbortSignal, onPartial: InterviewHooks["onPartial"], format: TurnFormat): Promise<TurnAttempt> {
   setup.watch.refusal = false
   setup.watch.failed = false
   try {
     const result = streamObject({
       model: setup.model,
-      schema: interviewSchema,
+      schema: format.schema,
       schemaName: INTERVIEW_SCHEMA_NAME,
       schemaDescription: INTERVIEW_SCHEMA_DESCRIPTION,
       messages,
@@ -587,13 +721,13 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
       providerOptions: setup.providerOptions,
       ...(setup.maxOutputTokens !== undefined ? { maxOutputTokens: setup.maxOutputTokens } : {}),
       abortSignal: signal,
-      experimental_repairText: async ({ text }) => repairTurnText(text),
+      experimental_repairText: async ({ text }) => repairTurnText(text, format.copilot),
       onError: () => undefined,
     })
     const follow = async () => {
       for await (const value of result.partialObjectStream) {
         if (!onPartial) continue
-        const partial = partialTurn(value)
+        const partial = partialTurn(value, format.copilot)
         if (partial) notify(onPartial, partial)
       }
     }
@@ -608,11 +742,11 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
   }
 }
 
-async function converse(setup: ModelSetup, messages: ModelMessage[], hooks: InterviewHooks): Promise<InterviewTurn> {
+async function converse(setup: ModelSetup, messages: ModelMessage[], hooks: InterviewHooks, format: TurnFormat): Promise<InterviewTurn> {
   let relaxed = 0
   let corrected = false
   for (;;) {
-    const attempt = await callTurn(setup, messages, hooks.signal, hooks.onPartial)
+    const attempt = await callTurn(setup, messages, hooks.signal, hooks.onPartial, format)
     if (attempt.turn) return attempt.turn
     const { error } = attempt
     if (hooks.signal.aborted) throw error
@@ -623,7 +757,7 @@ async function converse(setup: ModelSetup, messages: ModelMessage[], hooks: Inte
     if (!corrected && isFormatFailure(error)) {
       corrected = true
       const text = NoObjectGeneratedError.isInstance(error) ? (error.text ?? "").slice(0, LIMITS.prompt) : ""
-      messages.push({ role: "assistant", content: text || "{}" }, { role: "user", content: FORMAT_RETRY })
+      messages.push({ role: "assistant", content: text || "{}" }, { role: "user", content: format.retry })
       continue
     }
     throw error
@@ -649,8 +783,9 @@ export async function interviewTurn(input: InterviewInput, hooks: InterviewHooks
     const setup = createSetup(resolved, { transport: hooks.transport, signal: hooks.signal, fetch: hooks.fetch })
     const messages = contextMessages(context, setup.systemOptions)
     try {
-      const raw = await converse(setup, messages, hooks)
-      return { ok: true, turn: settleTurn(raw, { hasFlow: context.flow !== null, history: context.history, scope: context.scope }) }
+      const raw = await converse(setup, messages, hooks, context.scope === "copilot" ? COPILOT_FORMAT : BUILDER_FORMAT)
+      const ids = context.flow ? context.flow.nodes.map((node) => node.id) : []
+      return { ok: true, turn: settleTurn(raw, { hasFlow: context.flow !== null, history: context.history, scope: context.scope, ids }) }
     } catch (error) {
       return { ok: false, failure: interviewFailure(describeFailure(error, resolved.provider, resolved.apiKey, { client: hooks.signal })) }
     }

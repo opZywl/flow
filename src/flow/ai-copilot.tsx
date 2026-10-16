@@ -14,11 +14,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
+  Circle,
   Cpu,
   Eye,
   EyeOff,
   Info,
   Loader2,
+  MousePointerClick,
   RefreshCw,
   RotateCcw,
   SendHorizontal,
@@ -32,6 +34,7 @@ import {
 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { EFFORTS, LIMITS, type GenerationIssue } from "@/lib/atendimento/ai/contracts"
+import type { InterviewInput } from "@/lib/atendimento/ai/interview"
 import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
 import { getComponentLabel } from "@/lib/atendimento/catalog"
 import type { AtendimentoFlow, AtendimentoNode } from "@/lib/atendimento/types"
@@ -62,18 +65,23 @@ import {
 import {
   STATUS_LABELS,
   createCopilot,
+  linkPick,
+  pickKey,
   proposalGroups,
   proposalTitle,
   proposalTone,
   type CopilotAttention,
   type CopilotEntry,
   type CopilotOptions,
+  type CopilotPick,
   type CopilotProposal,
   type CopilotTone,
+  type CopilotTurnInput,
   type ProposalStatus,
 } from "./ai/copilot-store"
 import { useAiSetting } from "./ai/settings-store"
 import { FlowSelect } from "./flow-select"
+import type { CanvasPick } from "./pick"
 import { ui } from "./ui"
 
 type PreviewKind = "create" | "edit"
@@ -88,6 +96,7 @@ export interface AICopilotProps {
   onOpenGenerate: () => void
   dialogBusy?: boolean
   onAttentionChange?: (attention: CopilotAttention | null) => void
+  pick?: CanvasPick
 }
 
 export const COPILOT_EXAMPLES = [
@@ -116,6 +125,8 @@ const EMPTY_NOTICE = "O fluxo aberto só tem o Início. Para criar um fluxo do z
 const BUSY_NOTICE = "Aguarde a geração do Gerar com IA terminar."
 const EDIT_NOW_LABEL = "Editar agora com o que já foi decidido"
 
+export const PICK_REGION = "Seleção do componente"
+
 const iconButton =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
 const iconButtonActive = "bg-flow-accent/15 text-flow-accent hover:bg-flow-accent/20 hover:text-flow-accent"
@@ -126,8 +137,11 @@ const warningText = "mt-1 text-[11px] leading-4 text-flow-warning"
 const summaryClass =
   "flex cursor-pointer select-none list-none items-center gap-1.5 rounded-md py-0.5 text-xs font-semibold text-flow-muted-strong transition hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 [&::-webkit-details-marker]:hidden"
 const chevron = "h-3.5 w-3.5 shrink-0 text-flow-muted transition-transform group-open:rotate-90"
+const candidateButton =
+  "flex w-full items-start gap-2 rounded-lg border border-flow-border bg-flow-surface px-2.5 py-1.5 text-left text-xs leading-5 text-flow-muted-strong transition hover:border-flow-accent/60 hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 disabled:pointer-events-none disabled:opacity-40"
+const candidateActive = "border-flow-accent bg-flow-accent/10 text-flow-fg hover:border-flow-accent"
 const chipButton =
-  "max-w-full truncate rounded-full border border-flow-accent/40 bg-flow-accent/10 px-2.5 py-1 text-xs font-medium text-flow-accent transition hover:bg-flow-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 disabled:pointer-events-none disabled:opacity-40"
+  "max-w-full whitespace-normal break-words rounded-2xl border border-flow-accent/40 bg-flow-accent/10 px-2.5 py-1 text-left text-xs font-medium text-flow-accent transition hover:bg-flow-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 disabled:pointer-events-none disabled:opacity-40"
 
 const CHANGE_DOTS = ["bg-flow-success", "bg-flow-accent", "bg-flow-danger"] as const
 
@@ -165,6 +179,137 @@ function safeFlow(read: () => AtendimentoFlow | null): AtendimentoFlow | null {
 function focusLost(): boolean {
   const active = document.activeElement
   return !active || active === document.body
+}
+
+export function copilotTurnInput({ history, flow, proposal, settings }: CopilotTurnInput): InterviewInput {
+  return {
+    provider: settings.provider,
+    model: settings.model,
+    apiKey: settings.apiKey.trim(),
+    effort: settings.effort,
+    fill: settings.fill,
+    history,
+    flow,
+    scope: "copilot",
+    proposal,
+  }
+}
+
+export function pickHint(label: string, onCanvas: boolean): string {
+  return onCanvas ? `Selecione ${label} no canvas ou na lista e confirme.` : `Selecione ${label} na lista e confirme.`
+}
+
+export function canReply({ busy, dialogBusy, hasFlow, hasPending }: { busy: boolean; dialogBusy: boolean; hasFlow: boolean; hasPending: boolean }): boolean {
+  return !busy && !dialogBusy && (hasFlow || hasPending)
+}
+
+export function landing(entries: readonly CopilotEntry[], pending: string | null): "apply" | "prompt" {
+  return pending !== null && entries[entries.length - 1]?.id === pending ? "apply" : "prompt"
+}
+
+interface RepliesProps {
+  suggestions: readonly string[]
+  editNow: boolean
+  disabled: boolean
+  onAnswer: (text: string) => void
+  onEditNow: () => void
+}
+
+export function Replies({ suggestions, editNow, disabled, onAnswer, onEditNow }: RepliesProps) {
+  if (suggestions.length === 0 && !editNow) return null
+  return (
+    <div className="flex shrink-0 items-start gap-2 border-t border-flow-border px-3 py-2">
+      {suggestions.length > 0 ? (
+        <div role="group" aria-label="Sugestões de resposta" className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+          {suggestions.map((chip) => (
+            <button key={chip} type="button" title={chip} disabled={disabled} onClick={() => onAnswer(chip)} className={chipButton}>
+              {chip}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {editNow ? (
+        <button
+          type="button"
+          onClick={onEditNow}
+          disabled={disabled}
+          aria-label={EDIT_NOW_LABEL}
+          title={EDIT_NOW_LABEL}
+          className={cn(ui.accentButton, "ml-auto h-7 px-2.5")}
+        >
+          <WandSparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          Editar agora
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function CandidateText({ text }: { text: string }) {
+  const cut = text.lastIndexOf(" · ID ")
+  if (cut < 0) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, cut)} <span className="whitespace-nowrap">{text.slice(cut + 1)}</span>
+    </>
+  )
+}
+
+interface PickBoxProps {
+  id: string
+  pick: CopilotPick
+  onCanvas: boolean
+  disabled: boolean
+  onSelect: (id: string) => void
+  onCancel: () => void
+  onConfirm: () => void
+}
+
+export function PickBox({ id, pick, onCanvas, disabled, onSelect, onCancel, onConfirm }: PickBoxProps) {
+  const hintId = `${id}-hint`
+  return (
+    <div role="region" aria-label={PICK_REGION} className="rounded-xl border border-flow-accent/40 bg-flow-accent/10 px-3 py-2.5">
+      <p id={hintId} className="flex items-start gap-2 text-xs font-medium leading-5 text-flow-fg">
+        <MousePointerClick className="mt-0.5 h-3.5 w-3.5 shrink-0 text-flow-accent" aria-hidden="true" />
+        <span className="min-w-0">{pickHint(pick.label, onCanvas)}</span>
+      </p>
+      <ul aria-labelledby={hintId} className="mt-2 max-h-56 space-y-1.5 overflow-y-auto overscroll-contain">
+        {pick.candidates.map((candidate) => {
+          const chosen = candidate.id === pick.selected
+          return (
+            <li key={candidate.id}>
+              <button
+                type="button"
+                aria-pressed={chosen}
+                disabled={disabled}
+                onClick={() => onSelect(candidate.id)}
+                className={cn(candidateButton, chosen && candidateActive)}
+              >
+                {chosen ? (
+                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-flow-accent" aria-hidden="true" />
+                ) : (
+                  <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-flow-muted" aria-hidden="true" />
+                )}
+                <span className="min-w-0 break-words">
+                  <CandidateText text={candidate.text} />
+                </span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      <div className="mt-2.5 flex flex-wrap items-center justify-end gap-2">
+        <button type="button" onClick={onCancel} className={cn(ui.button, "h-7")}>
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+          Cancelar seleção
+        </button>
+        <button type="button" onClick={onConfirm} disabled={disabled || !pick.selected} className={cn(ui.primaryButton, "h-7")}>
+          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+          Confirmar seleção
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function SeverityIcon({ severity }: { severity: GenerationIssue["severity"] }) {
@@ -344,6 +489,7 @@ export default function AICopilot({
   onOpenGenerate,
   dialogBusy = false,
   onAttentionChange,
+  pick,
 }: AICopilotProps) {
   const baseId = useId()
   const idFor = (key: string) => `${baseId}-${key}`
@@ -361,6 +507,8 @@ export default function AICopilot({
   const [clockNow, setClockNow] = useState(() => Date.now())
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
   const [hasFlow, setHasFlow] = useState(() => hasComponents(safeFlow(getCurrentFlow)))
+  const [listKey, setListKey] = useState("")
+  const pickActions = useRef<{ confirm: () => void; cancel: () => void }>({ confirm: () => undefined, cancel: () => undefined })
   const bodyRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const listAbortRef = useRef<AbortController | null>(null)
@@ -387,21 +535,7 @@ export default function AICopilot({
     preview: (flow, done, fresh) => propsRef.current.onLivePreview(flow, done, "edit", fresh),
     applyEdit: (flow) => propsRef.current.onWorkflowEdited(flow),
     generate: generateFlow,
-    turn: ({ history, flow, proposal, settings }, signal) =>
-      requestTurn(
-        {
-          provider: settings.provider,
-          model: settings.model,
-          apiKey: settings.apiKey.trim(),
-          effort: settings.effort,
-          fill: settings.fill,
-          history,
-          flow,
-          scope: "copilot",
-          proposal,
-        },
-        signal,
-      ),
+    turn: (input, signal) => requestTurn(copilotTurnInput(input), signal),
     engine: loadEngine,
     notify: (attention) => toast(ATTENTION_TOASTS[attention]),
   }
@@ -410,12 +544,15 @@ export default function AICopilot({
     latest.current = options
     propsRef.current = { getCurrentFlow, onLivePreview, onWorkflowEdited, onAttentionChange }
     keyRef.current = apiKey
+    pickActions.current = { confirm: confirmSelection, cancel: () => setFocusTarget(idFor("prompt")) }
   })
 
   const [store] = useState(() => createCopilot(() => latest.current))
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const { entries, thinking, running, pending, suggestions, plan, fieldErrors, focus } = state
+  const asked = state.pick
   const busy = thinking || running
+  const arrival = landing(entries, pending)
 
   useEffect(() => () => store.dispose(), [store])
 
@@ -426,6 +563,15 @@ export default function AICopilot({
   useEffect(() => {
     store.setBlocked(dialogBusy)
   }, [dialogBusy, store])
+
+  useEffect(() => {
+    if (!pick) return
+    return linkPick(store, pick, {
+      confirm: () => pickActions.current.confirm(),
+      cancel: () => pickActions.current.cancel(),
+      listOnly: setListKey,
+    })
+  }, [store, pick])
 
   useEffect(() => {
     propsRef.current.onAttentionChange?.(state.attention)
@@ -495,8 +641,8 @@ export default function AICopilot({
       if (open && focusLost()) setFocusTarget(`${baseId}-${focus.field}`)
       return
     }
-    if (ended && open && focusLost()) setFocusTarget(`${baseId}-${pending ? "apply" : "prompt"}`)
-  }, [busy, focus, pending, open, baseId])
+    if (ended && open && focusLost()) setFocusTarget(`${baseId}-${arrival}`)
+  }, [busy, focus, arrival, open, baseId])
 
   useEffect(() => {
     if (!focusTarget) return
@@ -605,15 +751,19 @@ export default function AICopilot({
     }
   }
 
+  const follow = (started: boolean, before: number | undefined) => {
+    if (started) setSettingsOpen(false)
+    else {
+      handleFocusRequest(before)
+      setHasFlow(hasComponents(readFlow()))
+    }
+    if (store.getState().focus?.seq === before) setFocusTarget(idFor("prompt"))
+    return started
+  }
+
   const request = (text: string): boolean => {
     const before = store.getState().focus?.seq
-    if (store.send(text)) {
-      setSettingsOpen(false)
-      return true
-    }
-    handleFocusRequest(before)
-    setHasFlow(hasComponents(readFlow()))
-    return false
+    return follow(store.send(text), before)
   }
 
   const submit = (event?: FormEvent<HTMLFormElement>) => {
@@ -623,13 +773,26 @@ export default function AICopilot({
 
   const retry = () => {
     const before = store.getState().focus?.seq
-    if (!store.retry()) handleFocusRequest(before)
+    follow(store.retry(), before)
   }
 
   const editNow = () => {
     const before = store.getState().focus?.seq
-    if (store.editNow()) setSettingsOpen(false)
-    else handleFocusRequest(before)
+    follow(store.editNow(), before)
+  }
+
+  const confirmSelection = () => {
+    const before = store.getState().focus?.seq
+    follow(store.confirmPick(), before)
+  }
+
+  const cancelSelection = () => {
+    store.cancelPick()
+    setFocusTarget(idFor("prompt"))
+  }
+
+  const leaveCard = () => {
+    if (!store.getState().pending) setFocusTarget(idFor("prompt"))
   }
 
   const onPromptKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -664,9 +827,10 @@ export default function AICopilot({
   const listingBusy = providerListing?.state === "loading"
   const hasPending = Boolean(pending)
   const notice = dialogBusy ? BUSY_NOTICE : !hasFlow && !hasPending && !busy ? EMPTY_NOTICE : ""
-  const canSend = !busy && !dialogBusy && (hasFlow || hasPending) && draft.trim().length > 0
-  const canAnswer = !busy && !dialogBusy
-  const canEditNow = !busy && Boolean(plan)
+  const canAnswer = canReply({ busy, dialogBusy, hasFlow, hasPending })
+  const canSend = canAnswer && draft.trim().length > 0
+  const canEditNow = !busy && !asked && Boolean(plan)
+  const onCanvas = Boolean(pick) && !dialogBusy && listKey !== pickKey(asked)
   const summary = `${info.vendor} · ${currentModelName} · Esforço ${EFFORT_OPTIONS[effort].label.toLowerCase()}`
   const elapsed = state.startedAt ? Math.max(0, Math.floor((clockNow - state.startedAt) / 1000)) : 0
   const empty = entries.length === 0 && !busy
@@ -728,7 +892,7 @@ export default function AICopilot({
           </div>
           {retryable ? (
             <div className="mt-2 flex justify-end">
-              <button type="button" onClick={retry} disabled={dialogBusy} className={cn(ui.button, "h-7")}>
+              <button type="button" onClick={retry} disabled={!canAnswer} className={cn(ui.button, "h-7")}>
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                 Tentar de novo
               </button>
@@ -746,10 +910,16 @@ export default function AICopilot({
         status={entry.status}
         meta={proposalMeta(entry.proposal)}
         applyId={idFor("apply")}
-        canApply={isPending && !busy && !dialogBusy}
+        canApply={isPending && !busy && !dialogBusy && !asked}
         canDiscard={isPending && !busy}
-        onApply={() => store.apply()}
-        onDiscard={() => store.discard()}
+        onApply={() => {
+          store.apply()
+          leaveCard()
+        }}
+        onDiscard={() => {
+          store.discard()
+          leaveCard()
+        }}
       />
     )
   }
@@ -985,38 +1155,25 @@ export default function AICopilot({
 
           {entries.map(renderEntry)}
 
+          {asked ? (
+            <PickBox
+              id={idFor("pick")}
+              pick={asked}
+              onCanvas={onCanvas}
+              disabled={!canAnswer}
+              onSelect={(candidate) => store.selectPick(candidate)}
+              onCancel={cancelSelection}
+              onConfirm={confirmSelection}
+            />
+          ) : null}
+
           {busy ? (
             <Waiting text={running ? stageText(state.progress, true) : THINKING_TEXT} time={running ? clock(elapsed) : undefined} onStop={store.cancel} />
           ) : null}
         </div>
       </div>
 
-      {suggestions.length > 0 || canEditNow ? (
-        <div className="flex shrink-0 items-start gap-2 border-t border-flow-border px-3 py-2">
-          {suggestions.length > 0 ? (
-            <div role="group" aria-label="Sugestões de resposta" className="flex min-w-0 flex-1 flex-wrap gap-1.5">
-              {suggestions.map((chip) => (
-                <button key={chip} type="button" disabled={!canAnswer} onClick={() => request(chip)} className={chipButton}>
-                  {chip}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {canEditNow ? (
-            <button
-              type="button"
-              onClick={editNow}
-              disabled={dialogBusy}
-              aria-label={EDIT_NOW_LABEL}
-              title={EDIT_NOW_LABEL}
-              className={cn(ui.accentButton, "ml-auto h-7 px-2.5")}
-            >
-              <WandSparkles className="h-3.5 w-3.5" aria-hidden="true" />
-              Editar agora
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <Replies suggestions={suggestions} editNow={canEditNow} disabled={!canAnswer} onAnswer={request} onEditNow={editNow} />
 
       <form onSubmit={submit} className="shrink-0 space-y-2 border-t border-flow-border px-3 py-3">
         <label className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-0.5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30">

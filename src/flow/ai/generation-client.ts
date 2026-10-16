@@ -19,7 +19,7 @@ import {
 } from "@/lib/atendimento/ai/contracts"
 import { PROVIDERS, defaultEffort, effortsFor, type ProviderId, type ProviderInfo } from "@/lib/atendimento/ai/providers"
 import type { InterviewInput } from "@/lib/atendimento/ai/interview"
-import { START_TYPE, getComponentLabel } from "@/lib/atendimento/catalog"
+import { START_TYPE, getComponentLabel, getDefinition } from "@/lib/atendimento/catalog"
 import { importFlow, isObject } from "@/lib/atendimento/format"
 import type { AtendimentoFlow, AtendimentoNode, FlowIssue } from "@/lib/atendimento/types"
 import type { FlowSelectOption } from "../flow-select"
@@ -123,6 +123,8 @@ export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 export const MIN_KEY_LENGTH = 8
 
 export const PREVIEW_INTERVAL_MS = 250
+
+export const NODE_TEXT_LIMIT = 48
 
 export const EFFORT_OPTIONS: Readonly<Record<Effort, { label: string; hint: string }>> = {
   low: { label: "Rápido", hint: "Responde mais rápido e gasta menos tokens. Bom para fluxos simples." },
@@ -619,6 +621,25 @@ export function issueSubject(issue: GenerationIssue, nodes: ReadonlyMap<string, 
   if (!issue.nodeId) return ""
   const type = nodes.get(issue.nodeId)?.data.type ?? issue.type
   return `${type ? getComponentLabel(type) : "Componente"} · ID ${issue.nodeId}`
+}
+
+export function nodeText(node: AtendimentoNode, limit = NODE_TEXT_LIMIT): string {
+  const data = isObject(node.data?.data) ? node.data.data : {}
+  for (const key of getDefinition(text(node.data?.type))?.summary ?? []) {
+    const value = data[key]
+    const line = (typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : "").replace(/\s+/g, " ").trim()
+    if (!line) continue
+    if (line.length <= limit) return line
+    const cut = line.slice(0, Math.max(1, limit - 1))
+    const space = cut.lastIndexOf(" ")
+    return `${(space >= limit / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
+  }
+  return ""
+}
+
+export function nodeSubject(node: AtendimentoNode): string {
+  const main = nodeText(node)
+  return `${getComponentLabel(text(node.data?.type))}${main ? ` “${main}”` : ""} · ID ${node.id}`
 }
 
 export function issueLine(issue: GenerationIssue, nodes: ReadonlyMap<string, AtendimentoNode>): string {
