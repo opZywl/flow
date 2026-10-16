@@ -267,6 +267,19 @@ function until(store, check) {
 const settled = (store) => until(store, (state) => !state.thinking && !state.running)
 const started = (store) => until(store, (state) => state.running)
 const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms))
+const waitFor = async (check, limit = 2000) => {
+  const deadline = Date.now() + limit
+  let value = check()
+  while (!value && Date.now() < deadline) {
+    await tick()
+    value = check()
+  }
+  return value
+}
+const liveFrame = (env) => {
+  const frame = lastPreview(env)
+  return frame && frame.done === false && frame.flow.nodes.length > BASE.nodes.length ? frame : null
+}
 const kinds = (state) => state.entries.map((entry) => (entry.kind === 'proposal' ? `proposal:${entry.status}` : entry.kind === 'note' ? `note:${entry.text}` : `${entry.kind}`))
 const texts = (state) => state.entries.map((entry) => (entry.kind === 'proposal' ? `proposal:${entry.status}` : entry.kind === 'error' ? `error:${entry.failure.title}` : `${entry.kind}:${entry.text}`))
 const lastPreview = (env) => env.previews.at(-1)
@@ -766,7 +779,7 @@ test('Parar aborts the edit, restores the canvas and ignores the late answer', a
   await settled(store)
   store.send('Troque o texto do boleto')
   await started(store)
-  await tick()
+  await waitFor(() => lastPreview(env)?.flow === FIRST && lastPreview(env)?.done === false)
   assert.deepEqual(lastPreview(env), { flow: FIRST, done: false })
   store.cancel()
   state = store.getState()
@@ -958,7 +971,7 @@ test('the first frame of a request opens the canvas preview even right after an 
   await started(store)
   assert.deepEqual(env.previews[0], { flow: BASE, done: false })
   assert.equal(env.fresh[0], true)
-  await tick()
+  await waitFor(() => env.previews.length >= 2)
   assert.equal(env.previews.length, 2)
   assert.equal(env.previews[1].done, false)
   assert.equal(env.fresh[1], false)
@@ -982,7 +995,7 @@ test('the live preview builds each partial answer on top of the base', async () 
   })
   store.send('Acrescente a opção Segunda via de boleto')
   await started(store)
-  await tick()
+  await waitFor(() => liveFrame(env))
   assert.deepEqual(store.getState().progress, { stage: 'gerando', round: 1, maxRounds: 3 })
   const live = lastPreview(env)
   assert.equal(live.done, false)
@@ -1006,7 +1019,7 @@ test('reopening while an edit runs shows the latest partial result again', async
   })
   store.send('Acrescente a opção Segunda via de boleto')
   await started(store)
-  await tick()
+  await waitFor(() => liveFrame(env))
   const live = lastPreview(env)
   assert.equal(live.done, false)
   store.setVisible(false)
@@ -1497,7 +1510,7 @@ test('the edit that follows a selection keeps the canvas focus on the chosen com
   store.selectPick(FAREWELL.id)
   store.confirmPick()
   await started(store)
-  await tick()
+  await waitFor(() => env.focus.length >= 2)
   assert.deepEqual(env.focus, [FAREWELL.id, FAREWELL.id])
   assert.deepEqual(env.fresh, [true, false])
   assert.equal(lastPreview(env).done, false)
