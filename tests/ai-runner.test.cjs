@@ -568,7 +568,7 @@ test('a correção do modo edição aplica sobre o estado já editado', async ()
   assert.equal(result.workflow.nodes.filter((node) => node.data.type === 'finalizar').length, OPEN_FLOW.nodes.filter((node) => node.data.type === 'finalizar').length)
   const messages = calls[1].body.input
   assert.deepEqual(messages.map((message) => message.role), ['developer', 'user', 'assistant', 'user'])
-  assert.deepEqual(JSON.parse(textOf(messages[2])), first)
+  assert.deepEqual(JSON.parse(textOf(messages[2])), { ...first, remove: [] })
   const correction = textOf(messages[3])
   assert.match(correction, /\[aviso_fin\]/)
   assert.match(correction, /Mudanças já aplicadas/)
@@ -753,4 +753,130 @@ test('a validação da solicitação aceita fill e aponta o campo fill quando o 
   for (const value of ['false', 'sim', 0, 1, {}, []]) {
     assert.deepEqual(parseGenerationRequest({ ...base, fill: value }), { ok: false, failure: { success: false, code: 'invalid_request', error: 'Escolha se a IA preenche os nomes, IDs e URLs que o pedido não traz.', field: 'fill' } }, JSON.stringify(value))
   }
+})
+
+const { completeDelta, completePart } = require('../lib/atendimento/ai/runner.ts')
+const { newNode } = require('../lib/atendimento/format.ts')
+
+const OPEN_END = nodeOf(OPEN_FLOW, (node) => node.data.type === 'finalizar')
+const REMOVE_PROMPT = 'Remova a despedida e encerre direto na opção Encerrar.'
+const REMOVE_BYE = { name: '', description: '', nodes: [], edges: [{ from: OPEN_MENU.id, output: 'Encerrar', to: OPEN_END.id }], remove: [OPEN_BYE.id] }
+const NEW_END = { name: '', description: '', nodes: [{ id: 'tchau', type: 'finalizar', config: [] }], edges: [{ from: OPEN_MENU.id, output: 'Encerrar', to: 'tchau' }], remove: [OPEN_BYE.id, OPEN_END.id] }
+const SCHEMA_OF = {
+  openai: (body) => ({ name: body.text.format.name, strict: body.text.format.strict, schema: body.text.format.schema }),
+  anthropic: (body) => ({ schema: body.output_config.format.schema }),
+  google: (body) => ({ schema: body.generationConfig.responseSchema }),
+  xai: (body) => ({ name: body.text.format.name, strict: body.text.format.strict, schema: body.text.format.schema }),
+}
+
+function interrupted(text) {
+  const events = [
+    { type: 'response.created', response: { id: 'resp_1', created_at: 1760000000, model: MODELS.openai } },
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'msg_1' } },
+    ...pieces(text).map((delta) => ({ type: 'response.output_text.delta', item_id: 'msg_1', delta })),
+  ]
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')))
+      setTimeout(() => controller.error(new TypeError('terminated', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) })), 5)
+    },
+  })
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+}
+
+test('no modo edição cada provedor recebe o esquema com remove e devolve o fluxo sem o componente removido, e o modo criar segue sem remove', async () => {
+  for (const provider of ['openai', 'anthropic', 'google', 'xai']) {
+    calls.length = 0
+    const result = await runGeneration(editInput(provider, { prompt: REMOVE_PROMPT }), hooks(() => reply[provider](JSON.stringify(REMOVE_BYE))))
+    assert.equal(result.success, true, provider)
+    assert.deepEqual([result.rounds, calls.length], [1, 1], provider)
+    assert.deepEqual(result.changes, { added: 0, changed: 1, removed: 1 }, provider)
+    assert.equal(result.workflow.nodes.some((node) => node.id === OPEN_BYE.id), false, provider)
+    assert.equal(result.workflow.edges.find((edge) => edge.source === OPEN_MENU.id && edge.sourceHandle === 'output-1').target, OPEN_END.id, provider)
+    assertKept(result, [OPEN_MENU.id, OPEN_BYE.id])
+    assert.deepEqual(validateFlow(result.workflow).filter((issue) => issue.severity === 'error'), [], provider)
+    assertNoKey(result, KEYS[provider])
+    const edit = SCHEMA_OF[provider](calls[0].body)
+    assert.deepEqual(Object.keys(edit.schema.properties), ['name', 'description', 'nodes', 'edges', 'remove'], provider)
+    assert.ok(edit.schema.required.includes('remove'), provider)
+    assert.deepEqual([edit.schema.properties.remove.type, edit.schema.properties.remove.items.type], ['array', 'string'], provider)
+    if (provider === 'openai' || provider === 'xai') assert.deepEqual([edit.name, edit.strict, edit.schema.additionalProperties], ['edicao_ri', true, false], provider)
+    if (provider === 'google') assert.equal(JSON.stringify(edit.schema).includes('additionalProperties'), false)
+    calls.length = 0
+    const created = await runGeneration(input(provider), hooks(() => reply[provider](JSON.stringify(RI))))
+    assert.equal(created.success, true, provider)
+    const plain = SCHEMA_OF[provider](calls[0].body)
+    assert.deepEqual(Object.keys(plain.schema.properties), ['name', 'description', 'nodes', 'edges'], provider)
+    assert.ok(!plain.schema.required.includes('remove'), provider)
+    if (provider === 'openai' || provider === 'xai') assert.equal(plain.name, 'fluxo_ri', provider)
+  }
+})
+
+test('limpar o fluxo mantendo o Início e as notas termina em uma rodada, sem a falha de nenhuma mudança', async () => {
+  const note = newNode('note', { x: 40, y: 600 }, '99')
+  note.data.data.text = 'Revisar o atendimento com a equipe.'
+  const noted = { ...OPEN_FLOW, nodes: [...OPEN_FLOW.nodes, note] }
+  const components = OPEN_FLOW.nodes.filter((node) => node.id !== START_ID).map((node) => node.id)
+  const clear = { name: '', description: '', nodes: [], edges: [], remove: components }
+  const result = await runGeneration(editInput('openai', { base: noted, prompt: 'Remova todos os componentes do fluxo, mantendo o Início e as notas.' }), hooks(() => reply.openai(JSON.stringify(clear))))
+  assert.equal(result.success, true, JSON.stringify(result))
+  assert.deepEqual([result.rounds, calls.length], [1, 1])
+  assert.deepEqual(result.changes, { added: 0, changed: 0, removed: components.length })
+  assert.deepEqual(result.workflow.nodes.map((node) => node.id), [START_ID, note.id])
+  assert.deepEqual(result.workflow.edges, [])
+  assert.equal(result.issues.some((issue) => issue.scope === 'ia'), false)
+  assert.match(textOf(calls[0].body.input[0]), /Para limpar o fluxo, liste em remove todos os componentes/)
+  calls.length = 0
+  const empty = await runGeneration(editInput('openai', { base: noted, prompt: 'Limpe o fluxo.' }), hooks(() => reply.openai(JSON.stringify({ ...clear, remove: [] }))))
+  assert.deepEqual([empty.code, empty.error, calls.length], ['invalid_output', 'O modelo não fez nenhuma mudança no fluxo para este pedido.', 3])
+  assert.match(textOf(calls[1].body.input[3]), /os ids dos componentes que saem do fluxo em remove/)
+})
+
+test('onPartial do modo edição leva remove, e previewEdit tira do canvas o que sai enquanto a resposta chega', async () => {
+  const partials = []
+  const result = await runGeneration(editInput('google', { prompt: REMOVE_PROMPT }), hooks(() => reply.google(JSON.stringify(NEW_END)), { onPartial: (ri) => partials.push(ri) }))
+  assert.equal(result.success, true)
+  assert.deepEqual(result.changes, { added: 1, changed: 1, removed: 2 })
+  assert.ok(partials.length > 1)
+  assert.ok(partials.every((ri) => Array.isArray(ri.remove)))
+  const streaming = partials.find((ri) => ri.remove.length === 1)
+  assert.deepEqual(streaming.remove, [OPEN_BYE.id])
+  const preview = previewEdit(OPEN_FLOW, streaming)
+  assert.equal(preview.nodes.some((node) => node.id === OPEN_BYE.id), false)
+  assert.ok(preview.nodes.some((node) => node.id === OPEN_END.id))
+  assert.deepEqual(partials.at(-1).remove, [OPEN_BYE.id, OPEN_END.id])
+  const last = previewEdit(OPEN_FLOW, partials.at(-1))
+  assert.deepEqual(last.nodes.map((node) => node.id).sort(), result.workflow.nodes.map((node) => node.id).sort())
+})
+
+test('uma queda no meio da lista remove aproveita os ids completos e a retomada termina a remoção sem duplicar componentes', async () => {
+  const text = JSON.stringify(NEW_END)
+  const head = text.slice(0, text.lastIndexOf(OPEN_END.id) + OPEN_END.id.length)
+  const result = await runGeneration(editInput('openai', { prompt: REMOVE_PROMPT }), hooks((call, index) => (index === 0 ? interrupted(head) : reply.openai(text))))
+  assert.equal(result.success, true, JSON.stringify(result))
+  assert.deepEqual([result.rounds, calls.length, result.partial], [2, 2, undefined])
+  const salvaged = JSON.parse(textOf(calls[1].body.input[2]))
+  assert.deepEqual(salvaged, { ...NEW_END, remove: [OPEN_BYE.id] })
+  const resume = textOf(calls[1].body.input[3])
+  assert.match(resume, /interrompida/)
+  assert.ok(resume.includes(`Componentes removidos pela lista remove: ${OPEN_BYE.id}.`))
+  assert.ok(resume.includes(`Componentes removidos por deixarem de ser alcançados a partir do início: ${OPEN_END.id}.`))
+  assert.match(result.transcript, /Retomada 1/)
+  assert.deepEqual(result.changes, { added: 1, changed: 1, removed: 2 })
+  assert.equal(result.workflow.nodes.filter((node) => node.data.type === 'finalizar').length, 1)
+  assert.equal(result.workflow.nodes.some((node) => node.id === OPEN_BYE.id || node.id === OPEN_END.id), false)
+  assert.deepEqual(validateFlow(result.workflow).filter((issue) => issue.severity === 'error'), [])
+})
+
+test('completeDelta deixa de fora o último item da lista aberta e mantém as conexões para componentes do fluxo aberto', () => {
+  const edges = [{ from: OPEN_MENU.id, output: 'Encerrar', to: OPEN_END.id }, { from: 'inicio', output: '', to: OPEN_MENU.id }]
+  assert.deepEqual(completeDelta({ name: '', description: '', nodes: [], edges, remove: [OPEN_BYE.id, OPEN_WELCOME.id] }), { name: '', description: '', nodes: [], edges, remove: [OPEN_BYE.id] })
+  assert.deepEqual(completeDelta({ nodes: [], edges, remove: [] }).edges, edges)
+  assert.deepEqual(completeDelta({ nodes: [], edges }).edges, edges.slice(0, 1))
+  assert.deepEqual(completeDelta({ remove: [OPEN_BYE.id], edges }).remove, [OPEN_BYE.id])
+  assert.deepEqual(completeDelta({ nodes: [{ id: 'novo', type: 'finalizar', config: [] }, { id: 'meio', type: 'envio_p' }] }), { name: '', description: '', nodes: [{ id: 'novo', type: 'finalizar', config: [] }], edges: [], remove: [] })
+  assert.deepEqual(completeDelta({ nodes: [], edges: [{ from: '', output: '', to: OPEN_END.id }, { from: OPEN_MENU.id, output: '', to: ' ' }], remove: [] }).edges, [])
+  for (const value of [null, undefined, [], 'texto']) assert.equal(completeDelta(value), null, String(value))
+  assert.deepEqual(completePart({ nodes: [], edges, remove: [] }).edges, [])
+  assert.equal('remove' in completePart({ nodes: [], edges: [], remove: [OPEN_BYE.id] }), false)
 })

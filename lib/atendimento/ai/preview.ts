@@ -2,7 +2,7 @@ import { NOTE_TYPE, START_TYPE } from "../catalog"
 import type { AtendimentoFlow } from "../types"
 import { assembleFlow } from "./assemble"
 import { applyEdit } from "./edit"
-import { canonicalType, coerceRi } from "./ri"
+import { canonicalType, coerceDelta, coerceRi } from "./ri"
 import type { RiNode } from "./ri"
 
 const PREVIEW_DATE = new Date()
@@ -29,11 +29,11 @@ export function previewFlow(ri: unknown): AtendimentoFlow | null {
 }
 
 export function previewEdit(base: AtendimentoFlow, partialDelta: unknown): AtendimentoFlow | null {
-  const delta = coerceRi(partialDelta)
+  const delta = coerceDelta(partialDelta)
   if (!delta) return null
   const nodes = delta.nodes.filter(usable)
   const edges = delta.edges.filter((edge) => edge.from.trim() !== "" && edge.to.trim() !== "")
-  if (!nodes.length && !edges.length && !delta.name.trim() && !delta.description.trim()) return null
+  if (!nodes.length && !edges.length && !delta.remove.length && !delta.name.trim() && !delta.description.trim()) return null
   try {
     return applyEdit(base, { ...delta, nodes, edges }, { now: PREVIEW_DATE, prune: false }).flow
   } catch {

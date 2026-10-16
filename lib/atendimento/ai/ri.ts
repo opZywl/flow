@@ -27,12 +27,18 @@ export interface RiFlow {
   edges: RiEdge[]
 }
 
+export interface RiDelta extends RiFlow {
+  remove: string[]
+}
+
 export const RI_TYPES = componentCatalog.map((definition) => definition.nativeType ?? definition.id) as [string, ...string[]]
 
 export const RI_SCHEMA_NAME = "fluxo_ri"
 export const RI_SCHEMA_DESCRIPTION = "Representação intermediária de um fluxo de atendimento"
+export const RI_EDIT_SCHEMA_NAME = "edicao_ri"
+export const RI_EDIT_SCHEMA_DESCRIPTION = "Mudanças no fluxo de atendimento aberto, em representação intermediária"
 
-export const riSchema: z.ZodType<RiFlow> = z.object({
+const RI_FIELDS = {
   name: z.string().describe("Nome curto do fluxo"),
   description: z.string().describe("Resumo do fluxo em uma frase"),
   nodes: z
@@ -60,6 +66,13 @@ export const riSchema: z.ZodType<RiFlow> = z.object({
       }),
     )
     .describe("Conexões entre os componentes"),
+}
+
+export const riSchema: z.ZodType<RiFlow> = z.object(RI_FIELDS)
+
+export const riEditSchema: z.ZodType<RiDelta> = z.object({
+  ...RI_FIELDS,
+  remove: z.array(z.string()).describe("IDs do fluxo atual dos componentes que saem do fluxo junto com as conexões deles; vazio quando nada sai"),
 })
 
 export const RI_PROVIDER_OPTIONS: Readonly<Record<ProviderId, Readonly<Record<string, Readonly<Record<string, string | boolean>>>>>> = {
@@ -155,6 +168,29 @@ export function repairRiText(text: string): string | null {
   if (!parsed.ok) return null
   const ri = coerceRi(parsed.value)
   return ri ? JSON.stringify(ri) : null
+}
+
+function idOf(entry: unknown): string {
+  if (isRecord(entry)) return asText(pick(entry, ["id"])).trim()
+  return typeof entry === "string" || typeof entry === "number" ? String(entry).trim() : ""
+}
+
+function coerceIds(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,;\n]/) : value === undefined || value === null ? [] : [value]
+  return list.map(idOf).filter(Boolean)
+}
+
+export function coerceDelta(value: unknown): RiDelta | null {
+  const ri = coerceRi(value)
+  if (!ri || !isRecord(value)) return null
+  return { ...ri, remove: coerceIds(pick(value, ["remove", "remover", "removidos", "removed", "delete"])) }
+}
+
+export function repairDeltaText(text: string): string | null {
+  const parsed = parseJsonText(sliceObject(text))
+  if (!parsed.ok) return null
+  const delta = coerceDelta(parsed.value)
+  return delta ? JSON.stringify(delta) : null
 }
 
 export function countRi(value: unknown): { nodes: number; edges: number } {

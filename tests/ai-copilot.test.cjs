@@ -2623,6 +2623,20 @@ test('the proposal card warns in the open when the edit did not change the selec
   assert.match(html, />Edição pronta</)
 })
 
+test('the proposal card lists every removed component, the ones the edit listed in remove and the ones left without a path from the start', () => {
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const panel = loadPanel()
+  const end = BASE.nodes.find((node) => node.id === BASE.edges.find((edge) => edge.source === FAREWELL.id).target)
+  const flow = applyEdit(BASE, { name: '', description: '', nodes: [], edges: [], remove: [FAREWELL.id] }, { now: NOW }).flow
+  const diff = diffFlows(BASE, flow)
+  assert.deepEqual(diff.removed, [FAREWELL.id, end.id])
+  const proposal = { flow, original: BASE, base: BASE, prompt: 'Remova a despedida.', issues: [], blocking: 0, changes: { added: 0, changed: 0, removed: 2 }, diff, removed: [FAREWELL, end], partial: false, rounds: 1, provider: 'openai', model: 'gpt-6.1-sol', effort: 'medium', fill: true, focus: null, missed: false }
+  const html = renderToStaticMarkup(React.createElement(panel.ProposalCard, { entryId: 'p1', proposal, status: 'pending', meta: 'GPT', applyId: 'aplicar', canApply: true, canDiscard: true, onApply: () => undefined, onDiscard: () => undefined }))
+  assert.ok(html.includes(`Componentes removidos: Enviar Mensagem · ID ${FAREWELL.id}, Encerrar Conversa · ID ${end.id}.`), html)
+  assert.ok(!html.includes('deixarem de ser alcançados'))
+})
+
 test('the reply bar shows the full text of each suggestion in a tooltip and locks with the composer', () => {
   const React = require('react')
   const { renderToStaticMarkup } = require('react-dom/server')

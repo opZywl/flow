@@ -416,7 +416,7 @@ export function ProposalCard({ entryId, proposal, status, meta, applyId, canAppl
 
       {proposal.removed.length > 0 ? (
         <p className={ui.hint}>
-          Removidos por deixarem de ser alcançados a partir do início:{" "}
+          Componentes removidos:{" "}
           {proposal.removed.map((node: AtendimentoNode) => `${getComponentLabel(node.data.type)} · ID ${node.id}`).join(", ")}.
         </p>
       ) : null}

@@ -2,8 +2,8 @@ require('../../scripts/register-typescript.cjs')
 const { test: base, expect } = require('@playwright/test')
 const crypto = require('node:crypto')
 const https = require('node:https')
-const { importFlow, newFlow, newNode } = require('../../lib/atendimento/format.ts')
-const { START_TYPE } = require('../../lib/atendimento/catalog.ts')
+const { importFlow, maxNumericId, newFlow, newNode } = require('../../lib/atendimento/format.ts')
+const { NOTE_TYPE, START_TYPE, getComponentLabel } = require('../../lib/atendimento/catalog.ts')
 const { assembleFlow, finalizeFlow } = require('../../lib/atendimento/ai/assemble.ts')
 const { flowToRi } = require('../../lib/atendimento/ai/edit.ts')
 const { INTERVIEW_SCHEMA_NAME, copilotSystemPrompt, interviewSystemPrompt, interviewMessages } = require('../../lib/atendimento/ai/interview.ts')
@@ -189,6 +189,74 @@ const NOTE_FLOW = (() => {
   return importFlow(JSON.parse(JSON.stringify(flow)))
 })()
 const NOTE_NODE = NOTE_FLOW.nodes.find((node) => node.data.type === 'note')
+
+const CLEAR_REQUEST = 'limpe o fluxo pra mim'
+const CLEAR_ANSWER = 'Pode limpar'
+const CLEAR_PLAN = 'Remova todos os componentes do fluxo, mantendo o Início e as notas.'
+const ASK_CLEAR = {
+  message: 'Vou remover todos os componentes do fluxo, das boas-vindas à despedida, e deixar só o Início e as notas. Posso limpar?',
+  suggestions: [CLEAR_ANSWER, 'Manter como está'],
+  action: 'ask',
+  plan: CLEAR_PLAN,
+}
+const CLEAR_TURN = { message: 'Vou limpar o fluxo, mantendo só o Início e as notas.', suggestions: [], action: 'edit', plan: CLEAR_PLAN }
+const CLEAR_NOTES = [NOTE_TEXT, 'Conferir com a recepção o departamento do agendamento.']
+const CLEAR_FLOW = (() => {
+  const flow = JSON.parse(JSON.stringify(BASE_FLOW))
+  let id = maxNumericId(flow.nodes.map((node) => node.id))
+  CLEAR_NOTES.forEach((text, index) => {
+    id += 1
+    const note = newNode(NOTE_TYPE, { x: 120 + index * 420, y: 640 }, String(id))
+    note.data.data.text = text
+    flow.nodes.push(note)
+  })
+  return importFlow(JSON.parse(JSON.stringify(flow)))
+})()
+const CLEAR_KEPT = CLEAR_FLOW.nodes.filter((node) => node.data.type === START_TYPE || node.data.type === NOTE_TYPE)
+const CLEAR_IDS = CLEAR_FLOW.nodes.filter((node) => !CLEAR_KEPT.includes(node)).map((node) => node.id)
+const CLEAR_DELTA = { name: '', description: '', nodes: [], edges: [], remove: CLEAR_IDS }
+const CLEAR_TEXT = JSON.stringify(CLEAR_DELTA)
+const CLEAR_STATE = { name: CLEAR_FLOW.name, nodes: CLEAR_FLOW.nodes.map((node) => node.id) }
+
+const DROPPED_OPTION = 'Resultado de exames'
+const EXAMS_TEXT = 'Os resultados ficam em https://exames.exemplo.com.br.'
+const DROP_REQUEST = `remova a opção ${DROPPED_OPTION}`
+
+function dropOption(flow, option) {
+  const ri = flowToRi(flow)
+  const menu = ri.nodes.find((node) => node.type === 'envio_mensagem')
+  const branch = []
+  let next = ri.edges.find((edge) => edge.from === menu.id && edge.output === option)?.to
+  while (next) {
+    const at = next
+    branch.push(at)
+    next = ri.edges.find((edge) => edge.from === at)?.to
+  }
+  return {
+    menu,
+    branch,
+    delta: {
+      name: '',
+      description: '',
+      nodes: [
+        {
+          id: menu.id,
+          type: 'envio_mensagem',
+          config: menu.config.map((entry) => (entry.key === 'options' ? { key: 'options', value: JSON.stringify(JSON.parse(entry.value).filter((item) => item.text !== option)) } : entry)),
+        },
+      ],
+      edges: ri.edges.filter((edge) => edge.from === menu.id && edge.output !== option),
+      remove: branch,
+    },
+  }
+}
+
+const DROP = dropOption(MENU_FLOW, DROPPED_OPTION)
+const DROP_TEXT = JSON.stringify(DROP.delta)
+const DROP_KEPT = OPTIONS.filter((text) => text !== DROPPED_OPTION)
+const DROP_PLAN = `No menu Como podemos ajudar?, tire a opção ${DROPPED_OPTION} e remova os componentes que só ela alcança: a mensagem Os resultados ficam em https://exames.exemplo.com.br, ID ${DROP.branch[0]}, a despedida Obrigado pelo contato, ID ${DROP.branch[1]}, e o Encerrar Conversa, ID ${DROP.branch[2]}. As outras opções continuam como estão.`
+const DROP_TURN = { message: `Vou tirar a opção ${DROPPED_OPTION} do menu e remover a mensagem e a despedida que só ela usava.`, suggestions: [], action: 'edit', plan: DROP_PLAN }
+const MENU_STATE = { name: MENU_FLOW.name, nodes: MENU_FLOW.nodes.map((node) => node.id) }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const event = (payload) => `data: ${JSON.stringify(payload)}\n\n`
@@ -410,6 +478,7 @@ const saved = async (page) => {
 }
 const library = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('workflow-library') || '[]').map((entry) => ({ id: entry.id, name: entry.flow.name, nodes: entry.flow.nodes.map((node) => node.id) })))
 const components = (flow) => flow.nodes.filter((node) => node.data.type !== START_TYPE).length
+const removedList = (flow, ids) => ids.map((id) => `${getComponentLabel(flow.nodes.find((node) => node.id === id).data.type)} · ID ${id}`).join(', ')
 
 async function openEditor(page, flow = BASE_FLOW) {
   await page.goto('/flow')
@@ -1190,4 +1259,181 @@ test('a key typed in Gerar com IA is reused by the Copiloto and a missing key ke
   expect(ai.buildCalls()).toHaveLength(1)
   expect(ai.turnCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
   expect(ai.buildCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
+})
+
+test('limpe o fluxo: the Copiloto confirms, Pode limpar edits with remove listing every component, Aplicar leaves only Início and the notes and Desfazer brings the flow back', async ({ page, ai }) => {
+  const result = await engineEdit(CLEAR_FLOW, CLEAR_TEXT, CLEAR_PLAN)
+  const final = result.workflow
+  expect(result.changes).toEqual({ added: 0, changed: 0, removed: CLEAR_IDS.length })
+  expect(result.rounds, 'a limpeza sai na primeira rodada').toBe(1)
+  expect(final.nodes.map((node) => node.id)).toEqual(CLEAR_KEPT.map((node) => node.id))
+  expect(final.edges).toEqual([])
+  const hold = ai.hold()
+  const third = `"${CLEAR_IDS[2]}",`
+  const cut = CLEAR_TEXT.indexOf(third, CLEAR_TEXT.indexOf('"remove"')) + third.length
+  ai.say(ASK_CLEAR)
+  ai.say(CLEAR_TURN)
+  ai.builds.push({ steps: [CLEAR_TEXT.slice(0, cut), hold, CLEAR_TEXT.slice(cut)] })
+
+  await openEditor(page, CLEAR_FLOW)
+  const nodes = page.locator('.react-flow__node')
+  const canvas = page.locator('.react-flow')
+  const undo = page.getByRole('button', { name: 'Desfazer', exact: true })
+  const shown = (id) => page.locator(`.react-flow__node[data-id="${id}"]`)
+  for (const text of CLEAR_NOTES) await expect(canvas).toContainText(text)
+  const panel = await openCopilot(page)
+  await typeKey(panel)
+  await ask(panel, CLEAR_REQUEST)
+  await expect(messages(panel)).toHaveText([you(CLEAR_REQUEST), says(ASK_CLEAR)])
+  await expect(chips(panel)).toHaveText(ASK_CLEAR.suggestions)
+  await expect(nodes).toHaveCount(CLEAR_FLOW.nodes.length)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+  expect(historyOf(ai.turnCalls()[0])).toContain(CLEAR_REQUEST)
+  expect(systemOf(ai.turnCalls()[0]), 'o turno do Copiloto recebe o fluxo com os componentes e as notas').toEqual([copilotSystemPrompt(), copilotState(CLEAR_FLOW)])
+
+  await chips(panel).filter({ hasText: CLEAR_ANSWER }).click()
+  await hold.reached
+  await expect(messages(panel)).toHaveText([you(CLEAR_REQUEST), says(ASK_CLEAR), you(CLEAR_ANSWER), says(CLEAR_TURN)])
+  await expect(page.getByText(EDIT_BANNER)).toBeVisible()
+  for (const id of CLEAR_IDS.slice(0, 2)) await expect(shown(id), 'a prévia ao vivo já tira o que chegou em remove').toHaveCount(0)
+  for (const id of CLEAR_IDS.slice(3)) await expect(shown(id), 'o que ainda não chegou em remove continua no canvas').toHaveCount(1)
+  await expect(canvas).toContainText(FAREWELL)
+  for (const node of CLEAR_KEPT) await expect(shown(node.id)).toHaveCount(1)
+  expect(await saved(page)).toEqual(CLEAR_STATE)
+  hold.open()
+
+  const changes = await proposal(panel)
+  await expect(changes).toHaveText(['0 componentes novos', '0 alterados', `${CLEAR_IDS.length} removidos`])
+  await expect(panel.getByText(removedList(CLEAR_FLOW, CLEAR_IDS)), 'o cartão lista cada componente removido').toBeVisible()
+  await expect(page.getByText(EDIT_DONE)).toBeVisible()
+  await expect(nodes).toHaveCount(CLEAR_KEPT.length)
+  await expect(page.locator('.react-flow__edge')).toHaveCount(0)
+  for (const text of CLEAR_NOTES) await expect(canvas).toContainText(text)
+  await expect(canvas).not.toContainText(FAREWELL)
+  await expect(canvas).not.toContainText('Como podemos ajudar?')
+  expect(await saved(page)).toEqual(CLEAR_STATE)
+
+  expect(ai.turnCalls()).toHaveLength(2)
+  const confirmed = ai.turnCalls()[1]
+  expect(historyOf(confirmed)).toContain(CLEAR_REQUEST)
+  expect(historyOf(confirmed)).toContain(ASK_CLEAR.message)
+  expect(historyOf(confirmed)).toContain(CLEAR_ANSWER)
+  expect(ai.buildCalls(), 'a limpeza não pede rodada de correção').toHaveLength(1)
+  const build = ai.buildCalls()[0]
+  const sent = JSON.stringify(build.body)
+  expect(sent).toContain('# Modo de edição')
+  expect(sent).toContain('# Fluxo atual')
+  expect(sent).toContain(CLEAR_PLAN)
+  expect(sent).not.toContain(CLEAR_REQUEST)
+  const format = build.body.text.format
+  expect(format).toMatchObject({ type: 'json_schema', strict: true })
+  expect(format.schema.required, 'remove vem sempre na resposta da edição').toContain('remove')
+  expect(format.schema.properties.remove).toMatchObject({ type: 'array', items: { type: 'string' } })
+  expect(build.headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(ai.fallbacks).toEqual([])
+
+  await panel.getByText(FULL_REQUEST, { exact: true }).click()
+  await expect(panel.getByText(CLEAR_PLAN, { exact: true })).toBeVisible()
+
+  await panel.getByRole('button', { name: 'Aplicar', exact: true }).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect(messages(panel)).toHaveText([you(CLEAR_REQUEST), says(ASK_CLEAR), you(CLEAR_ANSWER), says(CLEAR_TURN), APPLIED, says(FOLLOW_UP)])
+  await expect(panel.getByText('Aplicada', { exact: true })).toBeVisible()
+  await expect(nodes).toHaveCount(CLEAR_KEPT.length)
+  await expect(page.locator('.react-flow__edge')).toHaveCount(0)
+  await expect.poll(() => saved(page)).toEqual({ name: CLEAR_FLOW.name, nodes: CLEAR_KEPT.map((node) => node.id) })
+  const after = await stored(page)
+  expect(after.edges, 'nenhuma conexão fica no fluxo limpo').toEqual([])
+  for (const node of CLEAR_KEPT) {
+    const kept = after.nodes.find((item) => item.id === node.id)
+    expect(kept.data, node.id).toEqual(node.data)
+    expect(kept.position, node.id).toEqual(node.position)
+  }
+  for (const text of CLEAR_NOTES) await expect(canvas).toContainText(text)
+
+  await undo.click()
+  await expect(nodes).toHaveCount(CLEAR_FLOW.nodes.length)
+  await expect(canvas).toContainText(FAREWELL)
+  await expect.poll(() => saved(page)).toEqual(CLEAR_STATE)
+  const undone = await stored(page)
+  expect(undone.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data }))).toEqual(CLEAR_FLOW.nodes.map((node) => ({ id: node.id, position: node.position, data: node.data })))
+  expect(undone.edges).toEqual(CLEAR_FLOW.edges)
+  await expect(undo, 'Aplicar entra como um só passo no histórico').toBeDisabled()
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(ai.buildCalls()).toHaveLength(1)
+})
+
+test('remova a opção: the edit sends the menu without the option, remove takes its branch away, and the proposal and the applied flow show it', async ({ page, ai }) => {
+  const result = await engineEdit(MENU_FLOW, DROP_TEXT, DROP_PLAN)
+  const final = result.workflow
+  expect(DROP.branch).toHaveLength(3)
+  expect(result.changes).toEqual({ added: 0, changed: 1, removed: DROP.branch.length })
+  expect(result.rounds).toBe(1)
+  expect(final.nodes.map((node) => node.id)).toEqual(MENU_FLOW.nodes.map((node) => node.id).filter((id) => !DROP.branch.includes(id)))
+  ai.say(DROP_TURN)
+  ai.builds.push({ steps: [DROP_TEXT] })
+
+  await openEditor(page, MENU_FLOW)
+  const nodes = page.locator('.react-flow__node')
+  const canvas = page.locator('.react-flow')
+  await expect(canvas).toContainText(DROPPED_OPTION)
+  await expect(canvas).toContainText(EXAMS_TEXT)
+  const panel = await openCopilot(page)
+  await typeKey(panel)
+  await ask(panel, DROP_REQUEST)
+  const changes = await proposal(panel)
+  await expect(changes).toHaveText(['0 componentes novos', '1 alterado', `${DROP.branch.length} removidos`])
+  await expect(panel.getByRole('heading', { name: 'Edição pronta', exact: true })).toBeVisible()
+  await expect(panel.getByText(removedList(MENU_FLOW, DROP.branch)), 'o cartão lista o ramo removido').toBeVisible()
+  await expect(messages(panel)).toHaveText([you(DROP_REQUEST), says(DROP_TURN)])
+  await expect(page.getByText(EDIT_DONE)).toBeVisible()
+  await expect(nodes).toHaveCount(final.nodes.length)
+  await expect(canvas).not.toContainText(DROPPED_OPTION)
+  await expect(canvas).not.toContainText(EXAMS_TEXT)
+  for (const text of DROP_KEPT) await expect(canvas).toContainText(text)
+  for (const id of DROP.branch) await expect(page.locator(`.react-flow__node[data-id="${id}"]`)).toHaveCount(0)
+  expect(await saved(page)).toEqual(MENU_STATE)
+
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(historyOf(ai.turnCalls()[0])).toContain(DROP_REQUEST)
+  expect(systemOf(ai.turnCalls()[0])).toEqual([copilotSystemPrompt(), copilotState(MENU_FLOW)])
+  expect(ai.buildCalls()).toHaveLength(1)
+  const sent = JSON.stringify(ai.buildCalls()[0].body)
+  expect(sent).toContain('# Modo de edição')
+  expect(sent).toContain(DROP_PLAN)
+  expect(sent).not.toContain(DROP_REQUEST)
+  expect(ai.buildCalls()[0].body.text.format.schema.required).toContain('remove')
+  expect(ai.fallbacks).toEqual([])
+
+  await panel.getByRole('button', { name: 'Aplicar', exact: true }).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect(messages(panel)).toHaveText([you(DROP_REQUEST), says(DROP_TURN), APPLIED, says(FOLLOW_UP)])
+  await expect(nodes).toHaveCount(final.nodes.length)
+  await expect(page.locator('.react-flow__edge')).toHaveCount(final.edges.length)
+  await expect(canvas).not.toContainText(DROPPED_OPTION)
+  await expect.poll(() => saved(page)).toEqual({ name: MENU_FLOW.name, nodes: final.nodes.map((node) => node.id) })
+  const after = await stored(page)
+  const applied = flowToRi(importFlow(after))
+  expect(applied, 'o fluxo aplicado é o da proposta').toEqual(flowToRi(final))
+  const menu = applied.nodes.find((node) => node.id === DROP.menu.id)
+  expect(JSON.parse(menu.config.find((entry) => entry.key === 'options').value).map((item) => item.text)).toEqual(DROP_KEPT)
+  expect(applied.edges.filter((edge) => edge.from === DROP.menu.id), 'as outras opções seguem para os mesmos destinos').toEqual(DROP.delta.edges)
+  expect(after.edges.some((edge) => DROP.branch.includes(edge.source) || DROP.branch.includes(edge.target)), 'as conexões do ramo saem junto').toBe(false)
+  for (const node of MENU_FLOW.nodes) {
+    if (node.id === DROP.menu.id || DROP.branch.includes(node.id)) continue
+    const kept = after.nodes.find((item) => item.id === node.id)
+    expect(kept.data, node.id).toEqual(node.data)
+    expect(kept.position, node.id).toEqual(node.position)
+  }
+
+  await page.getByRole('button', { name: 'Desfazer', exact: true }).click()
+  await expect(nodes).toHaveCount(MENU_FLOW.nodes.length)
+  await expect(canvas).toContainText(DROPPED_OPTION)
+  await expect(canvas).toContainText(EXAMS_TEXT)
+  await expect.poll(() => saved(page)).toEqual(MENU_STATE)
+  const undone = await stored(page)
+  expect(undone.edges).toEqual(MENU_FLOW.edges)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(1)
 })

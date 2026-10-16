@@ -15,7 +15,7 @@ const { createGoogleGenerativeAI } = require('@ai-sdk/google')
 const { createXai } = require('@ai-sdk/xai')
 const { exportFlow, importFlow, validateFlow, outputHandles, outputLabel, stampExport } = require('../lib/atendimento/format.ts')
 const { componentCatalog, getDefinition, mirrorKeys, START_ID, START_TYPE } = require('../lib/atendimento/catalog.ts')
-const { RI_TYPES, riSchema, repairRiText, coerceRi, canonicalType, countRi, RI_PROVIDER_OPTIONS, RI_SCHEMA_NAME, RI_SCHEMA_DESCRIPTION } = require('../lib/atendimento/ai/ri.ts')
+const { RI_TYPES, riSchema, riEditSchema, repairRiText, repairDeltaText, coerceRi, coerceDelta, canonicalType, countRi, RI_PROVIDER_OPTIONS, RI_SCHEMA_NAME, RI_SCHEMA_DESCRIPTION, RI_EDIT_SCHEMA_NAME, RI_EDIT_SCHEMA_DESCRIPTION } = require('../lib/atendimento/ai/ri.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
 const { configureNode, acceptedKeys, fixedKeys, balanceWeights, daysOf, timeOf } = require('../lib/atendimento/ai/values.ts')
 const { layoutBox } = require('../lib/atendimento/ai/layout.ts')
@@ -249,6 +249,91 @@ test('the official provider packages send the RI schema as strict structured out
   assert.equal(xai.url, 'https://api.x.ai/v1/chat/completions')
   assert.equal(xai.body.response_format.json_schema.strict, true)
   assert.deepEqual(xai.body.response_format.json_schema.schema, schema)
+})
+
+test('the edit schema is the RI schema plus remove, portable and strict, and the create schema keeps its four fields', () => {
+  const create = zodSchema(riSchema).jsonSchema
+  const edit = zodSchema(riEditSchema).jsonSchema
+  assert.deepEqual(Object.keys(create.properties), ['name', 'description', 'nodes', 'edges'])
+  assert.deepEqual(create.required, ['name', 'description', 'nodes', 'edges'])
+  assert.deepEqual(Object.keys(edit.properties), ['name', 'description', 'nodes', 'edges', 'remove'])
+  assert.deepEqual(edit.required, ['name', 'description', 'nodes', 'edges', 'remove'])
+  const { remove, ...shared } = edit.properties
+  assert.deepEqual(shared, create.properties)
+  assert.deepEqual({ ...edit, properties: shared, required: create.required }, create)
+  assert.deepEqual([remove.type, remove.items], ['array', { type: 'string' }])
+  assert.match(remove.description, /^IDs do fluxo atual dos componentes que saem do fluxo junto com as conexões deles; vazio quando nada sai$/)
+  const forbidden = ['anyOf', 'oneOf', 'allOf', '$ref', 'not', 'format', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern', 'default', 'nullable', 'const']
+  let objects = 0
+  walkSchema(edit, (schema, trail) => {
+    for (const key of forbidden) assert.equal(schema[key], undefined, `${trail} ${key}`)
+    if (schema.type === 'object') {
+      objects++
+      assert.equal(schema.additionalProperties, false, trail)
+      assert.deepEqual([...schema.required].sort(), Object.keys(schema.properties).sort(), trail)
+    }
+  })
+  assert.equal(objects, 4)
+  assert.ok(JSON.stringify(edit).length < 3000)
+  assert.equal(RI_EDIT_SCHEMA_NAME, 'edicao_ri')
+  assert.match(RI_EDIT_SCHEMA_NAME, /^[a-zA-Z0-9_-]{1,64}$/)
+  assert.notEqual(RI_EDIT_SCHEMA_NAME, RI_SCHEMA_NAME)
+  assert.ok(RI_EDIT_SCHEMA_DESCRIPTION.length > 10)
+  for (const example of PROMPT_EXAMPLES) {
+    assert.equal(riEditSchema.safeParse(example.ri).success, false, example.title)
+    assert.equal(riEditSchema.safeParse({ ...example.ri, remove: [] }).success, true, example.title)
+    assert.equal(riSchema.safeParse(example.ri).success, true, example.title)
+  }
+})
+
+test('the official provider packages send the edit schema with remove as strict structured output', async () => {
+  const run = async (factory, provider, model) => {
+    let request
+    const fetch = async (url, init) => {
+      request = { url: String(url), body: JSON.parse(init.body) }
+      return new Response(JSON.stringify({ error: { message: 'chave inválida', type: 'authentication_error' } }), { status: 401, headers: { 'content-type': 'application/json' } })
+    }
+    const result = streamObject({ model: factory(fetch)(model), schema: riEditSchema, schemaName: RI_EDIT_SCHEMA_NAME, schemaDescription: RI_EDIT_SCHEMA_DESCRIPTION, prompt: 'Teste', maxRetries: 0, providerOptions: RI_PROVIDER_OPTIONS[provider], onError: () => undefined })
+    await assert.rejects(result.object)
+    return request
+  }
+  const schema = zodSchema(riEditSchema).jsonSchema
+  const openai = await run(fetch => createOpenAI({ apiKey: 'teste-openai', fetch }).responses, 'openai', defaultModel('openai').id)
+  assert.deepEqual([openai.body.text.format.type, openai.body.text.format.strict, openai.body.text.format.name], ['json_schema', true, RI_EDIT_SCHEMA_NAME])
+  assert.deepEqual(openai.body.text.format.schema, schema)
+  const anthropic = await run(fetch => createAnthropic({ apiKey: 'teste-anthropic', fetch }), 'anthropic', 'claude-sonnet-5-5')
+  assert.equal(anthropic.body.output_config.format.type, 'json_schema')
+  assert.deepEqual(anthropic.body.output_config.format.schema.properties.remove, schema.properties.remove)
+  assert.ok(anthropic.body.output_config.format.schema.required.includes('remove'))
+  assert.deepEqual([anthropic.body.tools, anthropic.body.tool_choice], [undefined, undefined])
+  const google = await run(fetch => createGoogleGenerativeAI({ apiKey: 'teste-google', fetch }), 'google', defaultModel('google').id)
+  const response = google.body.generationConfig.responseSchema
+  assert.equal(google.body.generationConfig.responseMimeType, 'application/json')
+  assert.deepEqual([response.properties.remove.type, response.properties.remove.items.type], ['array', 'string'])
+  assert.ok(response.required.includes('remove'))
+  assert.deepEqual(response.properties.nodes.items.properties.type.enum, RI_TYPES)
+  assert.ok(!JSON.stringify(response).includes('additionalProperties'))
+  const xai = await run(fetch => createXai({ apiKey: 'teste-xai', fetch }), 'xai', defaultModel('xai').id)
+  assert.equal(xai.body.response_format.json_schema.strict, true)
+  assert.equal(xai.body.response_format.json_schema.name, RI_EDIT_SCHEMA_NAME)
+  assert.deepEqual(xai.body.response_format.json_schema.schema, schema)
+  const responses = await run(fetch => createXai({ apiKey: 'teste-xai', fetch }).responses, 'xai', defaultModel('xai').id)
+  assert.deepEqual([responses.body.text.format.strict, responses.body.text.format.name], [true, RI_EDIT_SCHEMA_NAME])
+  assert.deepEqual(responses.body.text.format.schema, schema)
+})
+
+test('repairDeltaText completes remove and coerceDelta reads the removal list without touching the create RI', () => {
+  const repaired = JSON.parse(repairDeltaText('```json\n{"nodes":[{"id":"aviso","type":"Enviar Mensagem","config":{"template":"Oi."}}],"edges":[]}\n```'))
+  assert.deepEqual(repaired, { name: '', description: '', nodes: [{ id: 'aviso', type: 'envio_pergunta', config: [{ key: 'template', value: 'Oi.' }] }], edges: [], remove: [] })
+  assert.equal(riEditSchema.safeParse(repaired).success, true)
+  assert.deepEqual(coerceDelta({ remove: [7, ' 9 ', '', null, { id: '12' }, 'menu_suporte'] }).remove, ['7', '9', '12', 'menu_suporte'])
+  assert.deepEqual(coerceDelta({ remover: '7, 9; 11' }).remove, ['7', '9', '11'])
+  assert.deepEqual(coerceDelta({ nodes: [] }).remove, [])
+  assert.equal(coerceDelta(null), null)
+  assert.equal(coerceDelta([1]), null)
+  assert.equal(repairDeltaText('sem json'), null)
+  assert.equal('remove' in coerceRi({ nodes: [], edges: [], remove: ['7'] }), false)
+  assert.equal(repairRiText('{"name":"x","nodes":[],"edges":[],"remove":["7"]}'), JSON.stringify({ name: 'x', description: '', nodes: [], edges: [] }))
 })
 
 test('a RI with the 62 types becomes a valid Atendimento flow that exports and reimports byte for byte', () => {

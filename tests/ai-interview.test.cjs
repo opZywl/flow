@@ -1137,3 +1137,29 @@ test('o prompt do Copiloto monta a partir do Início no fluxo só com o Início,
   for (const text of ['As notas no fim do resumo são anotações do usuário no canvas, fora do caminho do atendimento, e ficam no fluxo como estão', 'Use o texto delas como contexto quando o pedido citar uma nota', 'trate em plan e em candidates só dos componentes']) assert.ok(notes.includes(text), text)
   for (const text of ['Componentes: 0', 'a partir do Início', 'anotações do usuário']) assert.ok(!interviewSystemPrompt().includes(text), text)
 })
+
+test('no Copiloto, o plano de remoção cita cada componente pelo texto e pelo ID e, para limpar o fluxo, remove todos os componentes mantendo o Início e as notas', async () => {
+  const prompt = copilotSystemPrompt()
+  const plan = prompt.slice(prompt.indexOf('# Plano'), prompt.indexOf('# Ações'))
+  const rules = plan.split('\n').filter((line) => /^\d+\. /.test(line))
+  assert.deepEqual(rules.map((line) => Number(line.split('.')[0])), [1, 2, 3, 4])
+  const removal = rules[3]
+  for (const text of ['4. Na remoção, plan cita cada componente que sai do fluxo pelo texto e pelo ID que aparecem no resumo', 'como em: Remova a mensagem Aguarde um instante, ID 7, e ligue a opção Boletos direto à mensagem com o link do boleto, ID 9.', 'Quando o usuário pede para limpar o fluxo, plan pede para remover todos os componentes, mantendo o Início e as notas.']) assert.ok(removal.includes(text), text)
+  assert.ok(!/[—–!]/.test(removal))
+  for (const text of ['Na remoção', 'limpar o fluxo', 'mantendo o Início e as notas']) assert.ok(!interviewSystemPrompt().includes(text), text)
+  const history = [
+    { role: 'user', text: 'limpe o fluxo pra mim' },
+    { role: 'assistant', text: 'Posso remover todos os componentes e deixar só o Início. Quer manter as notas do canvas?' },
+    { role: 'user', text: 'Pode limpar, mantendo só o Início e as notas' },
+  ]
+  const clear = { message: 'Vou remover todos os componentes, mantendo o Início e as notas.', suggestions: [], action: 'edit', plan: 'Remova todos os componentes do fluxo, mantendo o Início e as notas.' }
+  const noted = { ...FLOW, nodes: [...FLOW.nodes, noteNode('999', 'Revisar com o financeiro.')] }
+  for (const provider of PROVIDERS) {
+    calls.length = 0
+    const result = await interviewTurn(copilotInput(provider, { history, flow: noted }), hooks(() => reply[provider](JSON.stringify({ ...clear, pick: null }))))
+    assert.deepEqual([result.ok, result.turn, calls.length], [true, clear, 1], provider)
+    const body = bodyText(calls[0])
+    assert.ok(body.includes(removal.slice(3)), provider)
+    assert.ok(body.includes('Pode limpar, mantendo só o Início e as notas'), provider)
+  }
+})

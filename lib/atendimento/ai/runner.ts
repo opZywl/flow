@@ -28,8 +28,8 @@ import { findPreset, getProvider, isEffort, isProviderId, providerEffort, rateLi
 import type { ProviderEffort, ProviderId } from "./providers"
 import { concludeGeneration, evaluateRi, needsCorrection, pickBetter } from "./review"
 import type { RoundEvaluation } from "./review"
-import { RI_PROVIDER_OPTIONS, RI_SCHEMA_DESCRIPTION, RI_SCHEMA_NAME, canonicalType, coerceRi, countRi, repairRiText, riSchema } from "./ri"
-import type { RiEdge, RiFlow } from "./ri"
+import { RI_EDIT_SCHEMA_DESCRIPTION, RI_EDIT_SCHEMA_NAME, RI_PROVIDER_OPTIONS, RI_SCHEMA_DESCRIPTION, RI_SCHEMA_NAME, canonicalType, coerceDelta, coerceRi, countRi, repairDeltaText, repairRiText, riEditSchema, riSchema } from "./ri"
+import type { RiDelta, RiEdge, RiFlow } from "./ri"
 
 globalThis.AI_SDK_LOG_WARNINGS = false
 
@@ -98,7 +98,7 @@ export interface Abort {
 }
 
 interface EditRound extends EditReview {
-  delta: RiFlow
+  delta: RiDelta
   result: EditResult
 }
 
@@ -108,6 +108,16 @@ interface Attempt {
   partial: unknown
   usage?: LanguageModelUsage
 }
+
+interface RiFormat {
+  schema: typeof riSchema | typeof riEditSchema
+  name: string
+  description: string
+  repair: (text: string) => string | null
+}
+
+const CREATE_FORMAT: RiFormat = { schema: riSchema, name: RI_SCHEMA_NAME, description: RI_SCHEMA_DESCRIPTION, repair: repairRiText }
+const EDIT_FORMAT: RiFormat = { schema: riEditSchema, name: RI_EDIT_SCHEMA_NAME, description: RI_EDIT_SCHEMA_DESCRIPTION, repair: repairDeltaText }
 
 export const INTERRUPTED_NOTICE = "A geração foi interrompida antes do fim e o fluxo pode estar incompleto."
 
@@ -622,6 +632,19 @@ export function salvageRi(partial: unknown): RiFlow | null {
   return ri && ri.nodes.some((node) => isComponent(canonicalType(node.type))) ? ri : null
 }
 
+export function completeDelta(partial: unknown): RiDelta | null {
+  if (!isRecord(partial)) return null
+  const open = Object.keys(partial).at(-1)
+  const list = open === undefined ? undefined : partial[open]
+  const delta = coerceDelta(open !== undefined && Array.isArray(list) ? { ...partial, [open]: list.slice(0, -1) } : partial)
+  if (!delta) return null
+  return {
+    ...delta,
+    nodes: delta.nodes.filter((node) => node.id.trim() !== "" && canonicalType(node.type) !== undefined),
+    edges: delta.edges.filter((edge) => edge.from.trim() !== "" && edge.to.trim() !== ""),
+  }
+}
+
 const edgeKey = (edge: RiEdge) => `${edge.from.trim()}\u0000${edge.output.trim()}`
 
 export function overlayRi(base: RiFlow | null, ri: RiFlow): RiFlow {
@@ -652,22 +675,22 @@ function withNotice(issues: GenerationIssue[]): GenerationIssue[] {
   return index < 0 ? [...issues, notice] : [...issues.slice(0, index), notice, ...issues.slice(index)]
 }
 
-async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: AbortSignal, onUpdate: (partial: unknown) => void): Promise<Attempt> {
+async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: AbortSignal, onUpdate: (partial: unknown) => void, format: RiFormat): Promise<Attempt> {
   setup.watch.refusal = false
   setup.watch.failed = false
   let partial: unknown
   try {
     const result = streamObject({
       model: setup.model,
-      schema: riSchema,
-      schemaName: RI_SCHEMA_NAME,
-      schemaDescription: RI_SCHEMA_DESCRIPTION,
+      schema: format.schema,
+      schemaName: format.name,
+      schemaDescription: format.description,
       messages,
       allowSystemInMessages: true,
       providerOptions: setup.providerOptions,
       ...(setup.maxOutputTokens !== undefined ? { maxOutputTokens: setup.maxOutputTokens } : {}),
       abortSignal: signal,
-      experimental_repairText: async ({ text }) => repairRiText(text),
+      experimental_repairText: async ({ text }) => format.repair(text),
       onError: () => undefined,
     })
     const follow = async () => {
@@ -698,9 +721,9 @@ export function notify<T>(listener: ((value: T) => void) | undefined, value: T):
   }
 }
 
-function salvageDelta(partial: unknown): RiFlow | null {
-  const ri = completePart(partial)
-  return ri && (ri.nodes.length > 0 || ri.edges.length > 0) ? ri : null
+function salvageDelta(partial: unknown): RiDelta | null {
+  const delta = completeDelta(partial)
+  return delta && (delta.nodes.length > 0 || delta.edges.length > 0 || delta.remove.length > 0) ? delta : null
 }
 
 async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hooks: RunHooks, abort: Abort): Promise<GenerateSuccess> {
@@ -725,8 +748,8 @@ async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hoo
   const salvaged = new WeakSet<EditRound>()
   const initial: EditResult = { flow: original, notes: [], changes: { added: 0, changed: 0, removed: 0 }, ids: new Map(), detached: { nodes: [], edges: [] } }
   let state = initial
-  const apply = (delta: RiFlow, prune = true) => applyEdit(state.flow, delta, { now, ids: state.ids, detached: state.detached, prune })
-  const evaluate = (delta: RiFlow, round: number): EditRound => {
+  const apply = (delta: RiDelta, prune = true) => applyEdit(state.flow, delta, { now, ids: state.ids, detached: state.detached, prune })
+  const evaluate = (delta: RiDelta, round: number): EditRound => {
     progress({ stage: "montando", round, maxRounds: MAX_ROUNDS })
     const applied = apply(delta)
     const present = new Set(applied.flow.nodes.map((node) => node.id))
@@ -736,7 +759,7 @@ async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hoo
     progress({ stage: "validando", round, maxRounds: MAX_ROUNDS })
     return { ...review, delta, result }
   }
-  const relay = (piece: RiFlow) => {
+  const relay = (piece: RiDelta) => {
     if (state === initial) {
       show(piece)
       return
@@ -767,16 +790,16 @@ async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hoo
         progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, ...counts })
       }
       if (!hooks.onPartial) return
-      const piece = completePart(partial)
+      const piece = completeDelta(partial)
       if (!piece) return
-      const signature = `${piece.nodes.length}:${piece.edges.length}:${piece.name}:${piece.description}`
+      const signature = `${piece.nodes.length}:${piece.edges.length}:${piece.remove.length}:${piece.name}:${piece.description}`
       if (signature === relayed) return
       relayed = signature
       relay(piece)
-    })
+    }, EDIT_FORMAT)
     addUsage(usage, attempt.usage)
     if (attempt.ri) {
-      const delta = attempt.ri
+      const delta = coerceDelta(attempt.ri) ?? { ...attempt.ri, remove: [] }
       progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, nodes: delta.nodes.length, edges: delta.edges.length })
       const evaluation = evaluate(delta, round)
       state = evaluation.result
@@ -891,7 +914,7 @@ async function generate(input: ResolvedInput, hooks: RunHooks, abort: Abort): Pr
       if (!hooks.onPartial) return
       const ri = layer ? completePart(partial) : coerceRi(partial)
       if (ri) show(overlayRi(layer, ri))
-    })
+    }, CREATE_FORMAT)
     addUsage(usage, attempt.usage)
     if (attempt.ri) {
       const ri = attempt.ri

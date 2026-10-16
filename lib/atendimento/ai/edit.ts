@@ -11,8 +11,8 @@ import { FILL_CORRECTION, systemPrompt } from "./prompt"
 import type { PromptOptions } from "./prompt"
 import { compareScores, correctionItems, reviewFlow, scoreOf } from "./review"
 import type { Score } from "./review"
-import { canonicalType, coerceRi } from "./ri"
-import type { RiConfigEntry, RiEdge, RiFlow, RiNode } from "./ri"
+import { canonicalType, coerceDelta } from "./ri"
+import type { RiConfigEntry, RiDelta, RiEdge, RiFlow, RiNode } from "./ri"
 import { compactKey, foldText, listQuoted, quote, shorten } from "./text"
 import { acceptedKeys, configureNode, fixedKeys, settleData } from "./values"
 import type { ConfigContext, ValueNote } from "./values"
@@ -26,6 +26,7 @@ export interface EditChanges {
 export interface EditDetached {
   nodes: Array<{ index: number; node: AtendimentoNode }>
   edges: AtendimentoEdge[]
+  removed?: string[]
 }
 
 export interface EditOptions {
@@ -60,6 +61,7 @@ export interface EditReview {
 export interface EditSnapshot {
   changes: RiFlow
   removed: string[]
+  unreached?: string[]
 }
 
 export interface EditFillOptions {
@@ -83,7 +85,8 @@ const INDEXED: Partial<Record<FieldSpec["kind"], RegExp>> = {
 }
 const UNCHECKED_KINDS = new Set<FieldSpec["kind"]>(["menuOptions", "conditionPairs", "menuNode"])
 const GAP = 24
-const NO_CHANGE = "[fluxo] A resposta não trouxe nenhuma mudança. Aplique o pedido ao fluxo atual: componentes novos ou alterados em nodes e as saídas que mudam em edges."
+const NO_CHANGE = "[fluxo] A resposta não trouxe nenhuma mudança. Aplique o pedido ao fluxo atual: componentes novos ou alterados em nodes, as saídas que mudam em edges e os ids dos componentes que saem do fluxo em remove."
+const CONNECT_OUTPUT = "Conecte a saída "
 const EMPTY_DETACHED: EditDetached = { nodes: [], edges: [] }
 
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -257,7 +260,7 @@ function startChanged(before: AtendimentoFlow, after: AtendimentoFlow): boolean 
   return outputs(before) !== outputs(after)
 }
 
-export function deltaBetween(before: AtendimentoFlow, after: AtendimentoFlow, ids?: ReadonlyMap<string, string>): RiFlow {
+export function deltaBetween(before: AtendimentoFlow, after: AtendimentoFlow, ids?: ReadonlyMap<string, string>): RiDelta {
   const name = namer(ids)
   const diff = diffFlows(before, after)
   const touched = new Set([...diff.added, ...diff.changed])
@@ -272,11 +275,15 @@ export function deltaBetween(before: AtendimentoFlow, after: AtendimentoFlow, id
       return node ? [nodeToRi(node, name)] : []
     }),
     edges: edgesToRi(after, sources, name),
+    remove: diff.removed.map(name),
   }
 }
 
-export function editSnapshot(original: AtendimentoFlow, result: Pick<EditResult, "flow" | "ids">): EditSnapshot {
-  return { changes: deltaBetween(original, result.flow, result.ids), removed: diffFlows(original, result.flow).removed }
+export function editSnapshot(original: AtendimentoFlow, result: Pick<EditResult, "flow" | "ids"> & Partial<Pick<EditResult, "detached">>): EditSnapshot {
+  const { remove, ...changes } = deltaBetween(original, result.flow, result.ids)
+  const name = namer(result.ids)
+  const unreached = new Set((result.detached?.nodes ?? []).map((entry) => name(entry.node.id)))
+  return { changes, removed: remove.filter((id) => !unreached.has(id)), unreached: remove.filter((id) => unreached.has(id)) }
 }
 
 function resolveOutput(node: AtendimentoNode, handles: readonly string[], output: string, busy: ReadonlySet<string>): string | undefined {
@@ -521,9 +528,10 @@ function remap(before: AtendimentoNode, after: AtendimentoNode, edges: readonly 
 }
 
 export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOptions = {}): EditResult {
-  const ri = coerceRi(delta) ?? { name: "", description: "", nodes: [], edges: [] }
+  const ri = coerceDelta(delta) ?? { name: "", description: "", nodes: [], edges: [], remove: [] }
   const flow = copy(base)
   const incoming = options.detached ?? EMPTY_DETACHED
+  const gone = new Set(incoming.removed ?? [])
   const before = reachFrom(flow.edges, [START_ID])
   for (const { node } of incoming.nodes) before.add(node.id)
   restore(flow, incoming)
@@ -534,7 +542,7 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
   const fresh = new Map<string, string>()
   let sequence = (options.now ?? new Date()).getTime()
   const context: ConfigContext = { ruleId: () => `rule-${sequence++}` }
-  let counter = maxNumericId([...nodes.keys(), ...ids.keys(), ...ids.values()])
+  let counter = maxNumericId([...nodes.keys(), ...ids.keys(), ...ids.values(), ...gone])
   const allocate = () => {
     do counter++
     while (nodes.has(String(counter)) || ids.has(String(counter)))
@@ -580,6 +588,23 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
     if (node.data.type !== PROTOCOL_TYPE || node.data.data.opt !== "URL" || text(node.data.data.url_api).trim() !== "") return
     node.data.data.opt = "Automático"
     notes.push(noteOf("warning", "plataforma", "Sem a URL da API de protocolo no pedido, o tipo passou para Automático. Informe a URL no editor para usar o tipo URL.", { riId, nodeId: node.id, type: PROTOCOL_TYPE }))
+  }
+
+  const removal = new Set<string>()
+  const leaving = new Set<string>()
+  for (const reference of ri.remove) {
+    const id = lookup(reference, false)
+    const node = id ? nodes.get(id) : undefined
+    if (!id || !node || isStart(node)) continue
+    removal.add(id)
+    leaving.add(reference.trim().toLowerCase())
+    leaving.add(id.toLowerCase())
+    for (const [name, value] of ids) if (value === id) leaving.add(name.toLowerCase())
+  }
+  if (removal.size) {
+    flow.nodes = flow.nodes.filter((node) => !removal.has(node.id))
+    flow.edges = flow.edges.filter((edge) => !removal.has(edge.source) && !removal.has(edge.target))
+    for (const id of removal) nodes.delete(id)
   }
 
   ri.nodes.forEach((raw, index) => {
@@ -704,7 +729,7 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
     const sourceType = sourceNode?.data.type
     const report = (message: string, level: AssemblyNote["level"] = "warning") => notes.push(noteOf(level, "ia", message, { riId: source ? nameOf(source) : undefined, nodeId: source, type: sourceType }))
     if (!source || !sourceNode) {
-      notes.push(noteOf("warning", "ia", `A conexão de ${quote(from)} para ${quote(to)} foi descartada: o id ${quote(from)} não existe.`))
+      if (!leaving.has(from.toLowerCase())) notes.push(noteOf("warning", "ia", `A conexão de ${quote(from)} para ${quote(to)} foi descartada: o id ${quote(from)} não existe.`))
       continue
     }
     const targetNode = target ? nodes.get(target) : undefined
@@ -843,6 +868,8 @@ export function applyEdit(base: AtendimentoFlow, delta: unknown, options: EditOp
       for (const id of removed) nodes.delete(id)
     }
   }
+  const gathered = [...new Set([...gone, ...removal])]
+  if (gathered.length) detached.removed = gathered
 
   for (const id of touched) {
     const node = nodes.get(id)
@@ -913,7 +940,7 @@ export function concludeEdit(original: AtendimentoFlow, result: EditResult, opti
   const previous = new Map(original.nodes.map((node) => [node.id, node]))
   const linkedBefore = new Set(original.edges.map((edge) => `${edge.source}\u0000${edge.sourceHandle}`))
   const reachable = reachFrom(flow.edges, [START_ID])
-  let counter = maxNumericId([...flow.nodes.map((node) => node.id), ...result.ids.keys(), ...result.detached.nodes.map((entry) => entry.node.id)])
+  let counter = maxNumericId([...flow.nodes.map((node) => node.id), ...result.ids.keys(), ...result.detached.nodes.map((entry) => entry.node.id), ...(result.detached.removed ?? [])])
   const taken = new Set([...flow.nodes.map((node) => node.id), ...result.ids.keys()])
   const allocate = () => {
     do counter++
@@ -1003,7 +1030,15 @@ function provisionalNotes(flow: AtendimentoFlow, touched: ReadonlySet<string>, n
   return notes
 }
 
-export function reviewEdit(original: AtendimentoFlow, result: Pick<EditResult, "flow" | "notes" | "ids">, options: EditFillOptions = {}): EditReview {
+function startLinked(flow: AtendimentoFlow): boolean {
+  return flow.edges.some((edge) => edge.source === START_ID)
+}
+
+function cleared(original: AtendimentoFlow, result: Pick<EditResult, "flow"> & Partial<Pick<EditResult, "detached">>): boolean {
+  return startLinked(original) && !startLinked(result.flow) && !result.detached?.nodes.length
+}
+
+export function reviewEdit(original: AtendimentoFlow, result: Pick<EditResult, "flow" | "notes" | "ids"> & Partial<Pick<EditResult, "detached">>, options: EditFillOptions = {}): EditReview {
   const fill = options.fill !== false
   const diff = diffFlows(original, result.flow)
   const unchanged = !diff.added.length && !diff.changed.length && !diff.removed.length && result.flow.name === original.name && result.flow.description === original.description
@@ -1015,7 +1050,8 @@ export function reviewEdit(original: AtendimentoFlow, result: Pick<EditResult, "
   const notes = [...result.notes.filter((note) => !note.nodeId || present.has(note.nodeId)), ...requiredNotes(result.flow, touched, name, fill), ...provisionalNotes(result.flow, touched, name, request)]
   const assembled = { flow: result.flow, platformIds: new Map<string, string>(), riIds, notes, ...(fill ? {} : { fill: false }) }
   const known = issuesOf(original)
-  const issues = reviewFlow(assembled).filter((issue) => !known.has(issueKey(issue)))
+  const empty = cleared(original, result)
+  const issues = reviewFlow(assembled).filter((issue) => !known.has(issueKey(issue)) && !(empty && issue.nodeId === START_ID && issue.message.startsWith(CONNECT_OUTPUT)))
   const pending = correctionItems(assembled, issues)
   if (unchanged) pending.unshift(NO_CHANGE)
   return { issues, pending, score: scoreOf(issues), changes: countOf(diff), unchanged }
@@ -1033,19 +1069,19 @@ export function pickEdit<T extends EditReview>(current: T | null | undefined, ca
 
 const EDIT_RULES: readonly string[] = [
   "# Modo de edição",
-  "Nesta conversa você edita um fluxo que já existe. O pedido traz o fluxo atual em RI: cada componente com o id que ele tem no editor, o tipo, as chaves de config preenchidas e as conexões pelo rótulo da saída. As regras acima valem para tudo o que você criar ou alterar, mas a resposta traz só as mudanças, no mesmo formato da RI:",
+  "Nesta conversa você edita um fluxo que já existe. O pedido traz o fluxo atual em RI: cada componente com o id que ele tem no editor, o tipo, as chaves de config preenchidas e as conexões pelo rótulo da saída. As regras acima valem para tudo o que você criar ou alterar, mas a resposta traz só as mudanças, no formato da RI com a lista remove:",
   "1. nodes traz só os componentes novos e os alterados, cada um com a config completa de como deve ficar. Copie do fluxo atual os valores que não mudam.",
   "2. Componente alterado mantém o id do fluxo atual. Componente novo usa um id novo, curto e em texto, como menu_suporte, diferente de todos os ids do fluxo atual.",
   "3. Quando as saídas de um componente mudam, ele entra em nodes e edges traz todas as saídas dele, com o destino de cada uma. Quando a ligação do início muda, edges traz a conexão que sai de inicio.",
   "4. Componente que não aparece na resposta fica exatamente como está, com as mesmas conexões. Não repita o que não muda.",
-  "5. Para remover componentes, desligue: ligue a saída que levava a eles a outro destino ou tire a opção do menu. O que deixa de ser alcançado a partir do início é removido, junto com o que só ele alcançava. Notas e componentes que já estavam soltos ficam.",
+  "5. Para remover componentes, liste os ids deles em remove, e eles saem do fluxo junto com as conexões. Quando o caminho continua depois do que sai, ligue em edges a saída anterior ao destino seguinte. Para tirar uma opção de um menu, envie o menu em nodes sem essa opção e liste em remove o que só essa opção alcançava. Para limpar o fluxo, liste em remove todos os componentes: o Início fica, e as notas ficam, a menos que o pedido peça para remover as notas. Quando nada sai do fluxo, remove fica vazio.",
   "6. Para inserir um passo no meio do caminho, ligue a saída anterior ao componente novo e a saída do componente novo ao destino que vinha depois.",
   "7. Cada componente recebe no máximo uma conexão. Para voltar a um menu do fluxo atual, use Retornar ao Menu com targetNodeId igual ao id desse menu.",
   "8. Preencha todas as chaves obrigatórias dos componentes novos e alterados, com valores do pedido ou do fluxo atual. Nunca deixe uma chave obrigatória vazia.",
   "9. name e description ficam vazios, a menos que o pedido peça para mudar o nome ou a descrição do fluxo.",
 ]
 
-const EDIT_DELIVERY = "Responda só com as mudanças, no formato do modo de edição: os componentes novos e os alterados com a config completa, todas as saídas de cada componente cujas conexões mudam e nada do que fica igual."
+const EDIT_DELIVERY = "Responda só com as mudanças, no formato do modo de edição: os componentes novos e os alterados com a config completa, todas as saídas de cada componente cujas conexões mudam, os ids dos componentes que saem do fluxo em remove e nada do que fica igual."
 
 const cachedEditSystem = new Map<string, string>()
 
@@ -1072,7 +1108,8 @@ export function editRequestPrompt(base: AtendimentoFlow, description: string, ha
 function snapshotSection(applied: EditSnapshot | undefined): string[] {
   if (!applied) return []
   const lines = ["", "# Mudanças já aplicadas", "Componentes novos e alterados, com as saídas atuais:", JSON.stringify(applied.changes)]
-  if (applied.removed.length) lines.push(`Componentes removidos por deixarem de ser alcançados a partir do início: ${applied.removed.join(", ")}.`)
+  if (applied.removed.length) lines.push(`Componentes removidos pela lista remove: ${applied.removed.join(", ")}.`)
+  if (applied.unreached?.length) lines.push(`Componentes removidos por deixarem de ser alcançados a partir do início: ${applied.unreached.join(", ")}. Para manter um deles, ligue a ele uma saída do fluxo.`)
   return lines
 }
 

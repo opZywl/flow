@@ -315,6 +315,7 @@ const COPILOT_LINES = [
   "1. plan traz o pedido de mudança completo, escrito como um cliente pede a quem edita o fluxo: o que criar, alterar ou remover, citando os componentes pelo texto ou pelo nome que aparecem no resumo, os textos novos, as opções na ordem e o destino de cada saída.",
   "2. Atualize plan em toda resposta, inclusive nas perguntas, com as decisões tomadas e as suas propostas para o que falta.",
   "3. plan descreve só a mudança desta conversa que ainda falta fazer no fluxo do resumo, e todo o resto do fluxo continua como está. As mudanças já aplicadas e a proposta em revisão já aparecem no resumo.",
+  "4. Na remoção, plan cita cada componente que sai do fluxo pelo texto e pelo ID que aparecem no resumo, como em: Remova a mensagem Aguarde um instante, ID 7, e ligue a opção Boletos direto à mensagem com o link do boleto, ID 9. Quando o usuário pede para limpar o fluxo, plan pede para remover todos os componentes, mantendo o Início e as notas.",
   "",
   "# Ações",
   "Nesta conversa, as ações são ask, edit e finish.",
