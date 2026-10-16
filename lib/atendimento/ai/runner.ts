@@ -92,6 +92,7 @@ export interface ModelSetup {
   watch: StreamWatch
   maxOutputTokens?: number
   effortKey?: string
+  summaryKey?: string
 }
 
 export interface Abort {
@@ -127,7 +128,7 @@ const ROUND_RESERVE_MS = 75_000
 const PARTIAL_INTERVAL_MS = 250
 const REPLY_LIMIT = 20_000
 const DETAIL_LIMIT = 300
-const RELAX_LIMIT = 2
+const RELAX_LIMIT = 3
 const KEY_MIN = 8
 const RESERVED_LIMIT = 1000
 const STREAM_RETRIES = 1
@@ -157,6 +158,7 @@ const RATE_MESSAGE = /rate[ _-]?limit|too many requests|resource_exhausted|excee
 const BUSY_MESSAGE = /overloaded|server_error|api_error|internal|unavailable/i
 const TOKENS_MESSAGE = /max[ _-]?(?:output[ _-]?)?tokens|maxOutputTokens|max_completion_tokens|output token/i
 const EFFORT_MESSAGE = /reasoning|effort|thinking/i
+const SUMMARY_MESSAGE = /summar/i
 const NETWORK_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT", "EPIPE", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_CLOSED"])
 const TIMEOUT_CODES = new Set(["UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"])
 const MASK = "[chave oculta]"
@@ -396,10 +398,11 @@ export function createSetup(input: ResolvedInput, hooks: RunHooks): ModelSetup {
   if (provider === "openai") {
     return {
       model: createOpenAI({ apiKey, baseURL: BASE_URLS.openai, fetch }).responses(model),
-      providerOptions: { openai: { ...RI_PROVIDER_OPTIONS.openai.openai, ...(effort ? { reasoningEffort: effort } : {}) } },
+      providerOptions: { openai: { ...RI_PROVIDER_OPTIONS.openai.openai, ...(effort ? { reasoningEffort: effort, reasoningSummary: "auto" } : {}) } },
       watch,
       maxOutputTokens,
       effortKey: effort ? "reasoningEffort" : undefined,
+      summaryKey: effort ? "reasoningSummary" : undefined,
     }
   }
   if (provider === "anthropic") {
@@ -620,6 +623,11 @@ export function relax(setup: ModelSetup, error: unknown): boolean {
   const text = `${cause.message} ${(cause.responseBody ?? "").slice(0, 2000)}`
   if (setup.maxOutputTokens !== undefined && TOKENS_MESSAGE.test(text)) {
     setup.maxOutputTokens = undefined
+    return true
+  }
+  if (setup.summaryKey && SUMMARY_MESSAGE.test(text)) {
+    for (const options of Object.values(setup.providerOptions)) if (isRecord(options)) delete options[setup.summaryKey]
+    setup.summaryKey = undefined
     return true
   }
   if (setup.effortKey && EFFORT_MESSAGE.test(text)) {

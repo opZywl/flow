@@ -280,6 +280,23 @@ test('recusa do limite de saída ou do esforço repete a mesma rodada sem eles',
   assert.equal(calls[2].body.reasoning?.effort, undefined)
 })
 
+test('na OpenAI o pedido traz o resumo do raciocínio para a resposta não ficar parada enquanto o modelo pensa, e uma conta sem resumo repete sem ele e mantém o esforço', async () => {
+  let result = await runGeneration(input('openai', { effort: 'high' }), hooks(() => reply.openai(JSON.stringify(RI))))
+  assert.equal(result.success, true)
+  assert.deepEqual(calls[0].body.reasoning, { effort: 'high', summary: 'auto' })
+  calls.length = 0
+  const unverified = { error: { message: 'Your organization must be verified to generate reasoning summaries. Please go to the organization settings and click on Verify Organization.', type: 'invalid_request_error', param: 'reasoning.summary', code: 'unsupported_value' } }
+  result = await runGeneration(input('openai', { effort: 'high' }), hooks((call, index) => (index === 0 ? new Response(JSON.stringify(unverified), { status: 400, headers: { 'content-type': 'application/json' } }) : reply.openai(JSON.stringify(RI)))))
+  assert.equal(result.success, true)
+  assert.equal(result.rounds, 1)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(calls[1].body.reasoning, { effort: 'high' })
+  calls.length = 0
+  result = await runGeneration(input('xai', { effort: 'high' }), hooks(() => reply.xai(JSON.stringify(RI))))
+  assert.equal(result.success, true)
+  assert.equal(calls[0].body.reasoning?.summary, undefined)
+})
+
 test('stream que cai no meio aproveita os componentes completos e pede a continuação', async () => {
   const partials = []
   let resumed = false
