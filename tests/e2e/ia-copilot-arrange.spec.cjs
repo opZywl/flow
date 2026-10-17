@@ -6,6 +6,8 @@ const { importFlow, maxNumericId, newNode } = require('../../lib/atendimento/for
 const { NOTE_TYPE, START_ID } = require('../../lib/atendimento/catalog.ts')
 const { assembleFlow, finalizeFlow } = require('../../lib/atendimento/ai/assemble.ts')
 const { arrangeFlow } = require('../../lib/atendimento/ai/arrange.ts')
+const { countChanges, flowToRi } = require('../../lib/atendimento/ai/edit.ts')
+const { layoutBox } = require('../../lib/atendimento/ai/layout.ts')
 const { INTERVIEW_SCHEMA_NAME, copilotSystemPrompt } = require('../../lib/atendimento/ai/interview.ts')
 
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
@@ -19,10 +21,22 @@ const EDIT_BANNER = 'Editando com IA. As mudanças aparecem aqui conforme chegam
 const PLACEHOLDER = 'O que você quer mudar no fluxo?'
 const REFINE_PLACEHOLDER = 'Peça um ajuste nesta proposta'
 const ARRANGED_TITLE = 'Organização pronta'
+const EDITED_TITLE = 'Edição pronta'
+const REFINED_STATUS = 'Ajustada no pedido seguinte'
 const ARRANGE_LOST = 'Qual formato você quer para o fluxo? Por exemplo: em L, em coluna ou como uma casa.'
 const ARRANGE_SECTION = '# Organização no canvas'
 const movedLabel = (count) => `${count} ${count === 1 ? 'componente movido' : 'componentes movidos'}`
 const arrangedSummary = (count) => `Organização pronta no canvas: ${movedLabel(count)}.`
+const labels = ({ added, changed, removed }) => [
+  `${added} ${added === 1 ? 'componente novo' : 'componentes novos'}`,
+  `${changed} ${changed === 1 ? 'alterado' : 'alterados'}`,
+  `${removed} ${removed === 1 ? 'removido' : 'removidos'}`,
+]
+const editedSummary = (changes) => {
+  const [added, changed, removed] = labels(changes)
+  return `Proposta pronta no canvas: ${added}, ${changed} e ${removed}.`
+}
+const ONE_CHANGE = { added: 0, changed: 1, removed: 0 }
 
 const WELCOME_TEXT = 'Olá, #NAME. Você está no atendimento da Clínica Exemplo.'
 const HOURS_TEXT = 'Atendemos de segunda a sexta, das 8h às 18h.'
@@ -104,6 +118,35 @@ const LOST_TURN = {
   layout: SOURCE.nodes.map((node, index) => (index < 3 ? { id: node.id, col: 0, row: index + 1 } : { id: node.id, col: index - 2, row: 3 })),
 }
 
+const GRID_REQUEST = 'organize o fluxo em uma grade de 3 colunas'
+const GRID_LAYOUT = PATH.map((id, index) => ({ id, col: index % 3, row: Math.floor(index / 3) }))
+const GRID = arrangeFlow(BASE_FLOW, GRID_LAYOUT)
+const GRID_TURN = {
+  message: 'Vou organizar o fluxo em uma grade de 3 colunas, seguindo o caminho a partir do Início.',
+  suggestions: [],
+  action: 'arrange',
+  plan: '',
+  pick: null,
+  adds: false,
+  after: '',
+  layout: GRID_LAYOUT,
+}
+
+const idOf = (flow, text) => flowToRi(flow).nodes.find((node) => node.config.some((entry) => entry.value === text)).id
+const FAREWELL = idOf(BASE_FLOW, FAREWELL_TEXT)
+const HOURS = idOf(BASE_FLOW, HOURS_TEXT)
+const NEW_FAREWELL = 'Obrigado pelo contato. Volte sempre.'
+const NEW_HOURS = 'Atendemos de segunda a sábado, das 8h às 18h.'
+const textDelta = (id, text) => JSON.stringify({ name: '', description: '', nodes: [{ id, type: 'envio_pergunta', config: [{ key: 'template', value: text }] }], edges: [] })
+const FAREWELL_DELTA = textDelta(FAREWELL, NEW_FAREWELL)
+const HOURS_DELTA = textDelta(HOURS, NEW_HOURS)
+const FAREWELL_REQUEST = `troque a despedida para ${NEW_FAREWELL}`
+const FAREWELL_PLAN = `Troque o texto do Enviar Mensagem ${FAREWELL_TEXT} ID ${FAREWELL} para ${NEW_FAREWELL}`
+const EDIT_FAREWELL = { message: 'Vou trocar o texto da despedida e manter o fluxo organizado.', suggestions: [], action: 'edit', plan: FAREWELL_PLAN, pick: null, adds: false, after: '', layout: [] }
+const HOURS_REQUEST = 'troque o horário para segunda a sábado'
+const HOURS_PLAN = `Troque o texto do Enviar Mensagem ${HOURS_TEXT} ID ${HOURS} para ${NEW_HOURS}`
+const EDIT_HOURS = { message: 'Vou trocar o texto do horário.', suggestions: [], action: 'edit', plan: HOURS_PLAN, pick: null, adds: false, after: '', layout: [] }
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const event = (payload) => `data: ${JSON.stringify(payload)}\n\n`
 
@@ -125,6 +168,25 @@ function script(steps) {
     event({ type: 'response.completed', response: { incomplete_details: null, usage: { input_tokens: 11, output_tokens: 22 } } }),
   ]
 }
+
+async function engineEdit(baseFlow, text, prompt) {
+  const { runGeneration } = require('../../lib/atendimento/ai/runner.ts')
+  const body = script([text]).join('')
+  const result = await runGeneration(
+    { provider: 'openai', model: 'gpt-6.1-sol', apiKey: KEY, prompt, size: 'auto', effort: 'medium', mode: 'edit', base: baseFlow, fill: true },
+    { transport: 'server', signal: new AbortController().signal, fetch: async () => new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } }) },
+  )
+  if (!result.success) throw new Error(`O motor não aplicou a edição de referência: ${result.error}`)
+  return result
+}
+
+function once(make) {
+  let value
+  return () => (value ??= make())
+}
+
+const expectedRefined = once(() => engineEdit(ARRANGED.flow, FAREWELL_DELTA, FAREWELL_PLAN))
+const expectedLater = once(async () => engineEdit((await expectedRefined()).workflow, HOURS_DELTA, HOURS_PLAN))
 
 function certificate() {
   const length = (size) => {
@@ -250,6 +312,7 @@ const undoButton = (page) => page.getByRole('button', { name: 'Desfazer', exact:
 const saveButton = (page) => page.getByRole('button', { name: 'Salvar', exact: true })
 const nodes = (page) => page.locator('.react-flow__node')
 const edges = (page) => page.locator('.react-flow__edge')
+const canvas = (page) => page.locator('.react-flow')
 const you = (text) => `Você: ${text}`
 const says = (turn) => `Copiloto: ${typeof turn === 'string' ? turn : turn.message}`
 const inputOf = (call) => JSON.stringify(call.body.input)
@@ -308,6 +371,31 @@ function expectL(shown) {
   expect(Math.min(...path.map((point) => point.x)), 'a coluna fica à esquerda').toBe(column[0].x)
   expect(Math.min(...path.map((point) => point.y)), 'o Início fica no alto da coluna').toBe(shown[START_ID].y)
 }
+
+function expectGrid(shown) {
+  const lines = (key) => [...new Set(GRID_LAYOUT.map((cell) => cell[key]))].sort((first, second) => first - second).map((value) => GRID_LAYOUT.filter((cell) => cell[key] === value).map((cell) => shown[cell.id]))
+  const columns = lines('col')
+  const rows = lines('row')
+  expect(columns, 'a grade tem 3 colunas').toHaveLength(3)
+  for (const column of columns) expect(new Set(column.map((point) => point.x)).size, 'cada coluna da grade fica alinhada').toBe(1)
+  for (const row of rows) expect(new Set(row.map((point) => point.y)).size, 'cada linha da grade fica alinhada').toBe(1)
+  expect(ascending(columns.map((column) => column[0].x)), 'as colunas seguem para a direita').toBe(true)
+  expect(ascending(rows.map((row) => row[0].y)), 'as linhas descem a partir do Início').toBe(true)
+  const points = GRID_LAYOUT.map((cell) => shown[cell.id])
+  expect(shown[START_ID], 'o Início fica no canto de cima, à esquerda').toEqual({ x: Math.min(...points.map((point) => point.x)), y: Math.min(...points.map((point) => point.y)) })
+}
+
+const boxOf = (flow, id) => {
+  const node = flow.nodes.find((entry) => entry.id === id)
+  return { ...node.position, ...layoutBox(node) }
+}
+const crossing = (first, second) => first.x < second.x + second.width && second.x < first.x + first.width && first.y < second.y + second.height && second.y < first.y + first.height
+const overlapsIn = (flow) => flow.nodes.flatMap((node, index) => flow.nodes.slice(index + 1).filter((other) => crossing(boxOf(flow, node.id), boxOf(flow, other.id))).map((other) => `${node.id} e ${other.id}`))
+
+const overlapping = (page) => page.evaluate(() => {
+  const boxes = [...document.querySelectorAll('.react-flow__node')].map((node) => ({ id: node.getAttribute('data-id'), box: node.getBoundingClientRect() }))
+  return boxes.flatMap((first, index) => boxes.slice(index + 1).filter((second) => first.box.left < second.box.right && second.box.left < first.box.right && first.box.top < second.box.bottom && second.box.top < first.box.bottom).map((second) => `${first.id} e ${second.id}`))
+})
 
 async function start(page) {
   await page.goto('/flow')
@@ -474,4 +562,111 @@ test('an arrange answer that only names IDs outside the flow becomes the questio
   expect(ai.buildCalls()).toHaveLength(0)
   expect(ai.fallbacks).toEqual([])
   expect(shapeOf(await stored(page))).toEqual(shapeOf(BASE_FLOW))
+})
+
+test('organize o fluxo em uma grade de 3 colunas with a component landing where the note is: the note moves to a free spot and counts as moved, nothing overlaps on the canvas, and Aplicar saves it that way', async ({ page, ai }) => {
+  const before = placesOf(BASE_FLOW)
+  const landed = COMPONENTS.filter((id) => crossing(boxOf(GRID.flow, id), boxOf(BASE_FLOW, NOTE)))
+  expect(landed, 'um componente da grade cai onde a nota estava').not.toEqual([])
+  expect(GRID.moved, 'a nota sai do lugar e entra na conta dos movidos').toContain(NOTE)
+  expect([...GRID.moved].sort(), 'além da nota, só os componentes que mudaram de lugar contam').toEqual([...PATH.slice(1), NOTE].sort())
+  expect(overlapsIn(GRID.flow), 'nada fica embaixo de nada na grade').toEqual([])
+  expect(GRID.flow.nodes.find((node) => node.id === NOTE).data, 'a nota continua com o mesmo texto').toEqual(BASE_FLOW.nodes.find((node) => node.id === NOTE).data)
+  expect(GRID.flow.edges).toEqual(BASE_FLOW.edges)
+  expect(ARRANGED.moved, 'na organização em L a nota não atrapalha e fica onde estava').not.toContain(NOTE)
+  const panel = await start(page)
+  expect(await overlapping(page), 'antes do pedido nada se sobrepõe no canvas').toEqual([])
+
+  ai.say(GRID_TURN)
+  await ask(panel, GRID_REQUEST)
+  await expect(arrangedCards(panel)).toHaveCount(1, { timeout: 15000 })
+  await expect(changesOf(panel), 'a nota conta entre os componentes movidos').toHaveText([movedLabel(GRID.moved.length)])
+  await expect(messages(panel)).toHaveText([you(GRID_REQUEST), says(GRID_TURN)])
+  await expect(applyButton(panel)).toBeEnabled()
+  await expect.poll(() => places(page), { message: 'o canvas mostra a grade com a nota fora do caminho' }).toEqual(placesOf(GRID.flow))
+  const shown = await places(page)
+  expectGrid(shown)
+  expect(shown[NOTE], 'a nota sai de onde estava').not.toEqual(before[NOTE])
+  await expect.poll(() => overlapping(page), { message: 'nenhum componente fica embaixo da nota no canvas' }).toEqual([])
+  await expect(nodes(page)).toHaveCount(BASE_FLOW.nodes.length)
+  await expect(edges(page)).toHaveCount(BASE_FLOW.edges.length)
+  await expect(page.locator(`.react-flow__node[data-id="${NOTE}"]`), 'a nota continua no canvas com o mesmo texto').toContainText(NOTE_TEXT)
+  await expectFramed(page)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls(), 'a organização sai do turno, sem pedido de edição').toHaveLength(0)
+  expect(ai.fallbacks).toEqual([])
+  expect(shapeOf(await stored(page)), 'a prévia não salva nada').toEqual(shapeOf(BASE_FLOW))
+
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect.poll(async () => shapeOf(await stored(page)), { message: 'Aplicar salva a grade e a nota no lugar novo' }).toEqual(shapeOf(GRID.flow))
+  const after = await stored(page)
+  expect(after.edges, 'as conexões continuam as mesmas').toEqual(BASE_FLOW.edges)
+  expect(overlapsIn(after), 'o fluxo salvo não tem nada embaixo da nota').toEqual([])
+  await expect.poll(() => places(page)).toEqual(placesOf(GRID.flow))
+  expect(await overlapping(page)).toEqual([])
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+})
+
+test('an edit after an arrangement counts only what really changed: refining the pending arrangement keeps the new positions without counting them as altered, and an edit after Aplicar does the same', async ({ page, ai }) => {
+  const refined = await expectedRefined()
+  const later = await expectedLater()
+  expect(refined.changes, 'sobre a organização, a edição muda só a despedida').toEqual(ONE_CHANGE)
+  expect(placesOf(refined.workflow), 'a edição mantém as posições da organização').toEqual(placesOf(ARRANGED.flow))
+  expect(countChanges(BASE_FLOW, refined.workflow).changed, 'contra o fluxo aberto, as posições novas somariam como alteradas').toBeGreaterThan(ONE_CHANGE.changed)
+  expect(later.changes, 'depois de aplicar, a edição muda só o horário').toEqual(ONE_CHANGE)
+  expect(placesOf(later.workflow)).toEqual(placesOf(ARRANGED.flow))
+  const panel = await start(page)
+  const edited = panel.getByRole('heading', { name: EDITED_TITLE, exact: true })
+
+  ai.say(ARRANGE_TURN)
+  await ask(panel, REQUEST)
+  await expect(arrangedCards(panel)).toHaveCount(1, { timeout: 15000 })
+  await expect(changesOf(panel)).toHaveText([movedLabel(MOVED)])
+  await expect.poll(() => places(page), { message: 'o canvas mostra a organização pendente' }).toEqual(placesOf(ARRANGED.flow))
+
+  ai.say(EDIT_FAREWELL)
+  ai.builds.push({ steps: [FAREWELL_DELTA] })
+  await ask(panel, FAREWELL_REQUEST)
+  await expect(edited).toHaveCount(1, { timeout: 15000 })
+  await expect(changesOf(panel, 1), 'só a despedida conta como alterada, e os componentes que só mudaram de lugar ficam de fora').toHaveText(labels(ONE_CHANGE))
+  await expect(panel.getByText(REFINED_STATUS, { exact: true }), 'a edição ajusta a organização pendente').toBeVisible()
+  await expect(arrangedCards(panel)).toHaveCount(1)
+  await expect(applyButton(panel)).toBeEnabled()
+  await expect(messages(panel)).toHaveText([you(REQUEST), says(ARRANGE_TURN), you(FAREWELL_REQUEST), says(EDIT_FAREWELL)])
+  await expect(page.getByText(EDIT_DONE)).toBeVisible()
+  await expect(canvas(page)).toContainText(NEW_FAREWELL)
+  await expect.poll(() => places(page), { message: 'a edição continua com o fluxo organizado' }).toEqual(placesOf(ARRANGED.flow))
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(historyOf(ai.turnCalls()[1]), 'o ajuste sabe da organização pendente').toContain(arrangedSummary(MOVED))
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(JSON.stringify(ai.buildCalls()[0].body)).toContain(FAREWELL_PLAN)
+  expect(shapeOf(await stored(page)), 'a prévia não salva nada').toEqual(shapeOf(BASE_FLOW))
+
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect.poll(async () => shapeOf(await stored(page)), { message: 'Aplicar salva a organização com o texto novo' }).toEqual(shapeOf(refined.workflow))
+  await expect.poll(() => places(page)).toEqual(placesOf(ARRANGED.flow))
+
+  ai.say(EDIT_HOURS)
+  ai.builds.push({ steps: [HOURS_DELTA] })
+  await ask(panel, HOURS_REQUEST)
+  await expect(edited).toHaveCount(2, { timeout: 15000 })
+  await expect(changesOf(panel, 2), 'depois de aplicar, só o horário conta como alterado').toHaveText(labels(ONE_CHANGE))
+  await expect(canvas(page)).toContainText(NEW_HOURS)
+  await expect.poll(() => places(page), { message: 'as posições continuam as da organização' }).toEqual(placesOf(ARRANGED.flow))
+  expect(ai.turnCalls()).toHaveLength(3)
+  const third = historyOf(ai.turnCalls()[2])
+  expect(third, 'o Copiloto fica sabendo que a edição anterior mudou um componente só').toContain(editedSummary(ONE_CHANGE))
+  expect(third).toContain(APPLIED)
+  expect(third).toContain(HOURS_REQUEST)
+  expect(ai.buildCalls()).toHaveLength(2)
+  expect(JSON.stringify(ai.buildCalls()[1].body)).toContain(HOURS_PLAN)
+  expect(ai.fallbacks).toEqual([])
+
+  await applyButton(panel).click()
+  await expect.poll(async () => shapeOf(await stored(page)), { message: 'Aplicar salva o horário novo sem tirar o fluxo da organização' }).toEqual(shapeOf(later.workflow))
+  expect((await stored(page)).edges).toEqual(later.workflow.edges)
+  await expect.poll(() => places(page)).toEqual(placesOf(ARRANGED.flow))
 })

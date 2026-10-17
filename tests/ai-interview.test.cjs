@@ -13,6 +13,7 @@ globalThis.fetch = async () => {
 const { zodSchema } = require('ai')
 const { interviewTurn, interviewSystemPrompt, copilotSystemPrompt, interviewMessages, interviewFlowSummary, interviewSchema, copilotSchema, settleTurn, placeGiven, INTERVIEW_SCHEMA_NAME, SUGGESTION_LIMITS, PICK_LIMITS, PLACE_LABEL, PLACE_PROPOSED, PLACE_ASK, ARRANGE_LOST } = require('../lib/atendimento/ai/interview.ts')
 const { ARRANGE_LIMIT } = require('../lib/atendimento/ai/arrange.ts')
+const { RI_LIMITS } = require('../lib/atendimento/ai/contracts.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
 const { componentCatalog, START_TYPE, NOTE_TYPE } = require('../lib/atendimento/catalog.ts')
 const { newNode, importFlow, outputHandles } = require('../lib/atendimento/format.ts')
@@ -1346,8 +1347,14 @@ const PLACE_EDIT = { message: 'Vou acrescentar a mensagem de agradecimento logo 
 const PLACE_CONTEXT = { hasFlow: true, history: THANKS, scope: 'copilot', ids: MENUS_IDS, anchors: ANCHOR_IDS, texts: summaryTexts(MENUS) }
 const PROPOSAL_DONE = 'Proposta pronta no canvas: 1 componente novo, 1 alterado e 0 removidos.'
 const APPLIED_DONE = 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.'
+const CANCELLED_DONE = 'Pedido cancelado. O fluxo aberto não mudou.'
+const PICK_DROPPED = 'Seleção cancelada. Você pode responder por texto.'
 const FOLLOW_UP = 'Precisa mudar mais alguma coisa no fluxo?'
-const placePick = (selected) => ({ label: PLACE_LABEL, candidates: [], ready: true, any: true, ...(selected === undefined ? {} : { selected }) })
+const WELCOME_CHOICE = `Selecionei no canvas: Enviar Mensagem “Olá, #NAME. Você está no atendimento da Lucas Lima.” · ID ${WELCOME}`
+const MENU_CHOICE = `Selecionei no canvas: Menu de Opções “Como podemos ajudar?” · ID ${MENU_IDS[0]}`
+const SPOT_QUESTION = 'Pensei em colocar a mensagem logo depois das boas-vindas. Pode ser nesse ponto?'
+const WHICH_MENU = 'Qual menu você quer mudar? Selecione no canvas o menu e confirme.'
+const placePick = (selected) => ({ label: PLACE_LABEL, candidates: [], ready: selected !== undefined, any: true, ...(selected === undefined ? {} : { selected }) })
 const placeAsk = (message, selected, plan = PLACE_PLAN) => ({ message, suggestions: [], action: 'ask', plan, pick: placePick(selected) })
 const editOf = (turn) => ({ message: turn.message, suggestions: [], action: 'edit', plan: turn.plan })
 const complete = (turn) => ({ pick: null, adds: false, after: '', layout: [], ...turn })
@@ -1376,7 +1383,7 @@ test('os textos da seleção do lugar e da organização são os combinados, sem
   assert.equal(PLACE_PROPOSED, 'Antes de editar, confirme no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado, e a minha sugestão já está marcada.')
   assert.equal(PLACE_ASK, 'Antes de editar, selecione no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado.')
   assert.equal(ARRANGE_LOST, 'Qual formato você quer para o fluxo? Por exemplo: em L, em coluna ou como uma casa.')
-  assert.equal(ARRANGE_LIMIT, 60)
+  assert.equal(ARRANGE_LIMIT, RI_LIMITS.nodes)
   for (const text of [PLACE_LABEL, PLACE_PROPOSED, PLACE_ASK, ARRANGE_LOST]) assert.ok(!/[—–!]|[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text), text)
   assert.ok(PLACE_LABEL.length <= PICK_LIMITS.label)
 })
@@ -1441,18 +1448,20 @@ test('placeGiven vale pela seleção no canvas, por palavra de posição, por ID
   assert.equal(given(said(base)), false)
   assert.equal(given(said(base, 'pode ser uma mensagem curta')), false)
   assert.equal(given([]), false)
-  assert.equal(given(said(base, `Selecionei no canvas: Enviar Mensagem “Olá, #NAME. Você está no atendimento da Lucas Lima.” · ID ${WELCOME}`)), true)
+  assert.equal(given(said(base, answer(PLACE_PROPOSED), `Selecionei no canvas: Enviar Mensagem “Olá, #NAME. Você está no atendimento da Lucas Lima.” · ID ${WELCOME}`)), true)
   for (const choice of ['Selecionei no canvas: Encerrar Conversa', 'selecionei no CANVAS: Encerrar Conversa', 'Logo antes do selecionado\n\nSelecionei no canvas: Encerrar Conversa']) assert.equal(given(said(base, answer(PLACE_ASK), choice)), true, choice)
   assert.equal(given(said(base, answer(PLACE_ASK), 'Encerrar Conversa')), false)
-  const positions = ['depois do menu', 'antes da despedida', 'após o menu', 'entre o menu e a despedida', 'no início do fluxo', 'no começo do fluxo', 'no fim do fluxo', 'no final do fluxo', 'logo depois do menu', 'logo após o menu', 'em seguida', 'no lugar de uma mensagem antiga']
+  const positions = ['depois do menu', 'antes da despedida', 'após o menu', 'entre o menu e a despedida', 'no início do fluxo', 'no começo do fluxo', 'no fim do fluxo', 'no final do fluxo', 'no fim', 'logo depois do menu', 'logo após o menu', 'no lugar de uma mensagem antiga']
   for (const phrase of positions) {
     assert.equal(given(said(`${base} ${phrase}`)), true, phrase)
     assert.equal(given(said(base, answer('Onde ela entra?'), phrase)), true, phrase)
   }
+  for (const alone of ['em seguida', 'Em seguida.']) assert.equal(given(said(base, answer('Onde ela entra?'), alone)), true, alone)
+  assert.equal(given(said(`${base} em seguida`)), false)
   for (const phrase of [`na saída do ID ${WELCOME}`, `na saída do #${WELCOME}`, 'na saída do ID 3', 'na saída do id 4']) assert.equal(given(said(`${base} ${phrase}`)), true, phrase)
-  for (const phrase of ['na saída do menu Como podemos ajudar', 'no menu QUAL BOLETO VOCE QUER', 'na mensagem obrigado pelo contato. ate logo']) assert.equal(given(said(`${base} ${phrase}`)), true, phrase)
+  for (const phrase of ['na saída do menu Como podemos ajudar', 'no menu QUAL BOLETO VOCE QUER', 'na mensagem obrigado pelo contato. ate logo', 'na mensagem Olá, #NAME. Você está no atendimento da Lucas Lima.']) assert.equal(given(said(`${base} ${phrase}`)), true, phrase)
   assert.equal(given(said(base, answer('Onde ela entra? Depois do menu Como podemos ajudar?'))), false)
-  const boundaries = [answer(PROPOSAL_DONE), answer(`Vou acrescentar a mensagem.\n\n${PROPOSAL_DONE}`), answer(APPLIED_DONE), answer(`${APPLIED_DONE}\n\n${FOLLOW_UP}`), answer('Organização pronta no canvas: 5 componentes movidos.')]
+  const boundaries = [answer(PROPOSAL_DONE), answer(`Vou acrescentar a mensagem.\n\n${PROPOSAL_DONE}`), answer(APPLIED_DONE), answer(`${APPLIED_DONE}\n\n${FOLLOW_UP}`), answer('Organização pronta no canvas: 5 componentes movidos.'), answer(CANCELLED_DONE), answer(`Vou colocar a mensagem depois do menu.\n\n${CANCELLED_DONE}`)]
   for (const boundary of boundaries) {
     assert.equal(given(said(`${base} depois do menu`, boundary, 'adicione também uma tag Cliente')), false, boundary.text)
     assert.equal(given(said(`Selecionei no canvas: Menu de Opções Como podemos ajudar? · ID 3`, boundary, 'adicione também uma tag Cliente')), false, boundary.text)
@@ -1462,7 +1471,7 @@ test('placeGiven vale pela seleção no canvas, por palavra de posição, por ID
   assert.equal(given(said(`${base} depois do menu`, answer(PROPOSAL_DONE), 'agora uma tag', answer(APPLIED_DONE), 'adicione também uma tag Cliente')), false)
   assert.equal(given(said(base, answer(PROPOSAL_DONE), 'agora depois do menu', answer('Qual tag?'), 'Cliente')), true)
   assert.equal(given(said(`${base} depois do menu`, answer('Vou acrescentar a mensagem. Fica assim?'), 'adicione também uma tag Cliente')), true)
-  for (const chip of ['Logo depois do selecionado', 'Logo antes do selecionado', 'depois da selecionada', 'Logo depois do componente selecionado']) assert.equal(given(said(base, answer('Depois de qual componente ela entra?'), chip)), false, chip)
+  for (const chip of ['Logo depois do selecionado', 'Logo antes do selecionado', 'depois da selecionada', 'Logo depois do componente selecionado', 'Logo antes da mensagem selecionada', 'depois do menu selecionado']) assert.equal(given(said(base, answer('Depois de qual componente ela entra?'), chip)), false, chip)
   assert.equal(given(said(base, answer('Depois de qual componente ela entra?'), 'Logo antes do selecionado, no fim do fluxo')), true)
   for (const phrase of ['quero falar da entrega', 'com antecedência', 'no menu', 'para os suportes']) assert.equal(given(said(`${base} ${phrase}`)), false, phrase)
   for (const phrase of ['na saída do ID 99', 'na saída do #99', 'na saída do ID 20']) {
@@ -1481,6 +1490,104 @@ test('placeGiven vale pela seleção no canvas, por palavra de posição, por ID
   const sizes = new Map([['e', '“Boleto”'], ['f', '“Plano”']])
   assert.deepEqual([placeGiven(said(`${base} no boleto`), sizes, ['e', 'f']), placeGiven(said(`${base} no plano`), sizes, ['e', 'f'])], [true, false])
   for (const history of [null, undefined, 'depois do menu', [{ role: 'user' }, { role: 'system', text: 'depois do menu' }, { text: 'depois do menu' }]]) assert.equal(placeGiven(history, texts, MENUS_IDS), false, JSON.stringify(history))
+})
+
+test('placeGiven lê só as palavras do próprio usuário: o texto ditado, o texto entre aspas e a posição sem um componente depois dela não dão o lugar', () => {
+  const given = (...history) => placeGiven(said(...history), summaryTexts(MENUS), MENUS_IDS)
+  for (const text of [
+    'adicione a mensagem: Aguarde, em seguida um atendente vai falar com você.',
+    'adicione uma mensagem: Entre em contato pelo 0800 123 4567.',
+    'adicione uma mensagem: Antes de continuar, tenha o seu CPF em mãos.',
+    'adicione uma pergunta com o texto: Depois do envio, qual o seu CPF?',
+    'adicione um aviso com a mensagem:\nDepois do almoço retornamos.\nObrigado pela espera.',
+    'adicione a mensagem “Depois do almoço retornamos, obrigado pela espera”',
+    'adicione a mensagem "Antes do envio, confira o seu CPF"',
+    `adicione a mensagem: Seu protocolo é o #${WELCOME}`,
+    'adicione uma mensagem de agradecimento, depois eu ajusto o texto',
+    'adicione uma pergunta de CPF, depois o atendente valida',
+    'adicione uma mensagem avisando que no fim de semana o atendimento é pelo site',
+    'adicione uma mensagem avisando que no final de semana não atendemos',
+    'adicione uma mensagem avisando que depois das 18h o atendimento é por email',
+    'adicione uma mensagem avisando que antes das 8h não atendemos',
+  ]) assert.equal(given(text), false, text)
+  for (const [question, text] of [
+    ['Qual texto você quer no aviso?', 'Seu pedido foi recebido e em seguida enviamos o boleto'],
+    [ANY_ASK.message, 'Logo depois dele'],
+    [ANY_ASK.message, 'Pode ser logo depois'],
+    [ANY_ASK.message, 'Pode ser em seguida'],
+  ]) assert.equal(given('adicione um aviso', answer(question), text), false, text)
+  for (const text of [
+    'adicione depois do menu a mensagem: Aguarde, em seguida um atendente vai falar com você.',
+    'coloque depois da mensagem: Obrigado pelo contato. Até logo.',
+    'adicione depois das boas-vindas a mensagem “Antes de continuar, tenha o seu CPF em mãos”',
+    `na saída do ID ${WELCOME}, adicione a mensagem: Entre em contato pelo 0800 123 4567.`,
+    'adicione uma mensagem no fim, depois eu ajusto o texto',
+  ]) assert.equal(given(text), true, text)
+})
+
+test('placeGiven: o nome de uma palavra vale com no, na ou o tipo do componente logo antes, e o nome de mais palavras vale em qualquer ponto da fala', () => {
+  const names = new Map([['3', '“Cliente”'], ['5', '“Atendimento”'], ['6', '“Equipe de Suporte”']])
+  const given = (text) => placeGiven(said(text), names, ['3', '5', '6'])
+  for (const text of [
+    'adicione o horário de atendimento, de segunda a sexta das 8h às 18h',
+    'adicione uma pesquisa de satisfação do atendimento',
+    'adicione uma mensagem avisando que o atendimento responde em até 2 horas',
+    'adicione uma pergunta pedindo o CPF do cliente',
+    'adicione uma tag cliente',
+  ]) assert.equal(given(text), false, text)
+  for (const text of [
+    'adicione uma mensagem no Atendimento',
+    'adicione uma mensagem no departamento Atendimento',
+    'adicione uma pergunta de CPF na tag Cliente',
+    'adicione uma pergunta de CPF depois do Cliente',
+    'adicione uma mensagem para a equipe de suporte',
+  ]) assert.equal(given(text), true, text)
+})
+
+test('placeGiven reconhece ao fim, ao final e na saída de um componente, lê as opções dos menus como nomes, com no, na ou opção antes delas, e o lugar proposto pela IA segue para a seleção', () => {
+  const texts = new Map([['2', '“Olá, tudo bem?”'], ['3', '“Como podemos ajudar?” opções: Agendar consulta, Boletos, Segunda via, Encerrar'], ['4', '“Escolha” opções (12): Primeira opção longa, Segunda opção cortada…']])
+  const given = (...history) => placeGiven(said(...history), texts, ['2', '3', '4'])
+  for (const text of [
+    'adicione uma pesquisa de satisfação ao final do fluxo',
+    'adicione uma pesquisa ao fim do atendimento',
+    'coloque uma tag Cliente na saída da mensagem de boas-vindas',
+    'coloque uma tag Cliente na saída do menu',
+    'na opção Agendar consulta, envie a mensagem Vamos agendar',
+    'na opção Boletos, envie o link do boleto',
+    'no Boletos, envie o link do boleto',
+    'nas opções Segunda via e Boletos, envie o link',
+    'na primeira opção longa, envie o link',
+  ]) assert.equal(given(text), true, text)
+  for (const text of [
+    'adicione uma mensagem avisando que a segunda via chega por email',
+    'adicione uma mensagem para quem quer agendar consulta',
+    'quero falar dos boletos atrasados',
+    'na segunda opção cortada, envie o link',
+    'adicione uma pergunta: Na opção Boletos, qual o seu CPF?',
+  ]) assert.equal(given(text), false, text)
+  const proposal = 'Vou colocar a opção 3 no menu Como podemos ajudar. Pensei em Falar com atendente, que transfere para o departamento Atendimento. Fica assim ou quer outro texto e outro destino?'
+  assert.equal(given('crie uma opção 3', answer(proposal), 'Pode ser assim'), false)
+  assert.equal(given('crie a opção Falar com atendente no menu principal'), false)
+})
+
+test('placeGiven: a seleção no canvas vale como lugar só depois de uma pergunta sobre o lugar do componente novo, e Pedido cancelado fecha o pedido', () => {
+  const given = (...history) => placeGiven(said(...history), summaryTexts(MENUS), MENUS_IDS)
+  const base = 'adicione uma mensagem de agradecimento'
+  for (const question of [PLACE_PROPOSED, PLACE_ASK, `Vou acrescentar a mensagem.\n\n${PLACE_PROPOSED}`, ANY_ASK.message, ANY_MESSAGE, SPOT_QUESTION, 'Em qual menu ela entra?', 'Qual componente vem antes dela?', 'Selecione no canvas o componente que vem antes da mensagem nova.']) {
+    assert.equal(given(base, answer(question), WELCOME_CHOICE), true, question)
+  }
+  const compound = 'troque o título do menu para Escolha uma opção e acrescente uma mensagem de agradecimento'
+  for (const question of [WHICH_MENU, PICK_MESSAGE, PICK_ASK.message, 'Qual mensagem você quer trocar?', FOLLOW_UP]) {
+    assert.equal(given(compound, answer(question), MENU_CHOICE), false, question)
+    assert.equal(given(compound, answer(question), `${MENU_CHOICE}\n\nLogo depois da despedida`), true, question)
+  }
+  assert.equal(given(base, WELCOME_CHOICE), false)
+  assert.equal(given(compound, answer(WHICH_MENU), MENU_CHOICE, answer('Qual texto você quer no agradecimento?'), 'Obrigado pela preferência'), false)
+  assert.equal(given(compound, answer(WHICH_MENU), MENU_CHOICE, answer(PLACE_PROPOSED), WELCOME_CHOICE), true)
+  assert.equal(given(`${base} depois do menu`, answer(PICK_DROPPED), 'pode ser assim'), true)
+  assert.equal(given(base, answer(ANY_ASK.message), answer(PICK_DROPPED), 'depois da despedida'), true)
+  assert.equal(given('adicione uma mensagem de aviso depois do menu', answer(`Vou colocar o aviso depois do menu.\n\n${CANCELLED_DONE}`), 'adicione uma tag Cliente'), false)
+  assert.equal(given('adicione uma mensagem de aviso', answer(PLACE_PROPOSED), WELCOME_CHOICE, answer(CANCELLED_DONE), 'adicione uma tag Cliente'), false)
 })
 
 test('settleTurn: o edit do Copiloto que cria componente sem o lugar dito pelo usuário vira a seleção no canvas, com a sugestão do Copiloto marcada quando ela tem saída', () => {
@@ -1506,6 +1613,11 @@ test('settleTurn: o edit do Copiloto que cria componente sem o lugar dito pelo u
   for (const history of [chosen, worded]) assert.deepEqual(settle({}, { ...PLACE_CONTEXT, history }), editOf(PLACE_EDIT), history.at(-1).text)
   const later = [...worded, answer(PROPOSAL_DONE), { role: 'user', text: 'adicione também uma tag Cliente' }]
   assert.deepEqual(settle({}, { ...PLACE_CONTEXT, history: later }), placeAsk(PLACE_PROPOSED, WELCOME))
+  const cancelled = [{ role: 'user', text: 'adicione uma mensagem de aviso depois do menu' }, answer(`Vou colocar o aviso depois do menu.\n\n${CANCELLED_DONE}`), { role: 'user', text: 'adicione uma tag Cliente' }]
+  const compound = [{ role: 'user', text: 'troque o título do menu para Escolha uma opção e acrescente uma mensagem de agradecimento' }, answer(WHICH_MENU), { role: 'user', text: MENU_CHOICE }]
+  for (const history of [cancelled, compound]) assert.deepEqual(settle({}, { ...PLACE_CONTEXT, history }), placeAsk(PLACE_PROPOSED, WELCOME), history.at(-1).text)
+  assert.deepEqual(settle({}, { ...PLACE_CONTEXT, history: [...compound.slice(0, 2), { role: 'user', text: `${MENU_CHOICE}\n\nLogo depois das boas-vindas` }] }), editOf(PLACE_EDIT))
+  assert.deepEqual([settle().pick.ready, settle({ after: CLOSED_IDS[0] }).pick.ready, settle({ after: '' }).pick.ready, settle({ message: question, after: '99' }).pick.ready], [true, false, false, false])
   for (const after of [`ID ${WELCOME}`, ` ${WELCOME} `, `${WELCOME} (Enviar Mensagem)`, `#${WELCOME}`]) assert.deepEqual(settle({ after }).pick, placePick(WELCOME), after)
   for (const after of [null, undefined, 2, ['2']]) assert.deepEqual(settle({ after }).pick, after === 2 ? placePick(WELCOME) : placePick(), String(after))
   assert.deepEqual(settle({ plan: '' }), placeAsk(PLACE_PROPOSED, WELCOME, ''))
@@ -1548,6 +1660,72 @@ test('no Copiloto, os 4 provedores levam o componente novo à seleção do lugar
   assert.deepEqual(result.turn, editOf(PLACE_EDIT))
 })
 
+test('no Copiloto, os 4 provedores pedem o lugar depois de um pedido cancelado e depois da seleção feita para outra mudança, e seguem com a seleção feita para o lugar', async () => {
+  const cancelled = said('adicione uma mensagem de aviso depois do menu', answer(`Vou colocar o aviso depois do menu.\n\n${CANCELLED_DONE}`), 'adicione uma tag Cliente')
+  const compound = said('troque o título do menu para Escolha uma opção e acrescente uma mensagem de agradecimento', answer(WHICH_MENU), MENU_CHOICE)
+  const spotted = said('adicione uma mensagem de agradecimento', answer(SPOT_QUESTION), WELCOME_CHOICE)
+  const anywhere = said('adicione uma mensagem de agradecimento', answer(ANY_ASK.message), WELCOME_CHOICE)
+  for (const provider of PROVIDERS) {
+    for (const history of [cancelled, compound]) {
+      calls.length = 0
+      const result = await interviewTurn(menusInput(provider, { history }), hooks(() => reply[provider](JSON.stringify(PLACE_EDIT))))
+      assert.deepEqual([result.turn, calls.length], [placeAsk(PLACE_PROPOSED, WELCOME), 1], `${provider} ${history.at(-1).text}`)
+    }
+    for (const history of [spotted, anywhere]) {
+      calls.length = 0
+      const result = await interviewTurn(menusInput(provider, { history }), hooks(() => reply[provider](JSON.stringify(PLACE_EDIT))))
+      assert.deepEqual([result.turn, calls.length], [editOf(PLACE_EDIT), 1], `${provider} ${history[1].text}`)
+    }
+  }
+})
+
+const clinicFlow = (department) => importFlow(JSON.parse(JSON.stringify(finalizeFlow(assembleFlow({
+  name: 'Atendimento Clínica Exemplo',
+  description: 'Boas-vindas, tag, menu e transferência',
+  nodes: [
+    { id: 'boas_vindas', type: 'envio_pergunta', config: [{ key: 'template', value: 'Olá, #NAME. Você está no atendimento da Clínica Exemplo.' }] },
+    { id: 'tag', type: 'tags', config: [{ key: 'tags', value: 'Cliente' }] },
+    { id: 'menu', type: 'envio_mensagem', config: [{ key: 'title', value: 'Como podemos ajudar?' }, { key: 'options', value: JSON.stringify([{ text: 'Agendar consulta' }, { text: 'Boletos' }]) }] },
+    { id: 'agenda', type: 'departamentos', config: [{ key: 'name', value: department }, { key: 'departamento', value: department.toLowerCase() }] },
+    { id: 'boletos', type: 'envio_pergunta', config: [{ key: 'template', value: 'Acesse https://lucas-lima.xyz/boleto para baixar o boleto.' }] },
+    { id: 'fim', type: 'finalizar', config: [] },
+  ],
+  edges: [
+    { from: 'inicio', output: '', to: 'boas_vindas' },
+    { from: 'boas_vindas', output: '', to: 'tag' },
+    { from: 'tag', output: '', to: 'menu' },
+    { from: 'menu', output: 'Agendar consulta', to: 'agenda' },
+    { from: 'menu', output: 'Boletos', to: 'boletos' },
+    { from: 'boletos', output: '', to: 'fim' },
+  ],
+}, { now: NOW })).flow)))
+
+test('no Copiloto, o texto ditado, a resposta solta e o nome comum de uma palavra levam à seleção do lugar, e ao final, na saída e a opção do menu dão o lugar', async () => {
+  const flow = clinicFlow('Atendimento')
+  const welcome = flow.nodes.find((node) => node.data.type === 'envio_pergunta').id
+  const plan = `Logo depois da mensagem de boas-vindas, ID ${welcome}, acrescente o pedido.`
+  const edit = { message: 'Vou acrescentar o pedido.', suggestions: [], action: 'edit', plan, pick: null, adds: true, after: welcome, layout: [] }
+  const run = async (history) => (await interviewTurn(copilotInput('openai', { history, flow }), hooks(() => reply.openai(JSON.stringify(edit))))).turn
+  const asked = { message: PLACE_PROPOSED, suggestions: [], action: 'ask', plan, pick: placePick(welcome) }
+  for (const history of [
+    said('adicione a mensagem: Aguarde, em seguida um atendente vai falar com você.'),
+    said('adicione uma mensagem: Entre em contato pelo 0800 123 4567.'),
+    said('adicione uma mensagem: Antes de continuar, tenha o seu CPF em mãos.'),
+    said('adicione uma mensagem de agradecimento, depois eu ajusto o texto'),
+    said('adicione um aviso', answer('Qual texto você quer no aviso?'), 'Seu pedido foi recebido e em seguida enviamos o boleto'),
+    said('adicione uma mensagem de agradecimento', answer(ANY_ASK.message), 'Logo depois dele'),
+    said('adicione o horário de atendimento, de segunda a sexta das 8h às 18h'),
+    said('adicione uma pesquisa de satisfação do atendimento'),
+    said('adicione uma pergunta pedindo o CPF do cliente'),
+  ]) assert.deepEqual(await run(history), asked, history.at(-1).text)
+  for (const history of [
+    said('adicione uma pesquisa de satisfação ao final do fluxo'),
+    said('coloque uma mensagem na saída da tag Cliente'),
+    said('na opção Agendar consulta, envie a mensagem Vamos agendar'),
+    said('adicione uma mensagem no Atendimento'),
+  ]) assert.deepEqual(await run(history), { message: edit.message, suggestions: [], action: 'edit', plan }, history.at(-1).text)
+})
+
 test('settleTurn: arrange do Copiloto guarda só as células dos componentes do fluxo, arredondadas e dentro do limite, e com menos de 2 células vira pergunta', () => {
   const settle = (extra = {}, context = ARRANGE_CONTEXT) => settleTurn({ ...ARRANGE, ...extra }, context)
   assert.deepEqual(settle(), arranged())
@@ -1562,7 +1740,8 @@ test('settleTurn: arrange do Copiloto guarda só as células dos componentes do 
   const question = 'Qual formato você quer, em L ou em coluna?'
   assert.deepEqual([settle({ layout: [], message: question }).action, settle({ layout: [], message: question }).message], ['ask', question])
   assert.deepEqual(settle({ layout: [], message: question, suggestions: ['Em L.', 'Em coluna', 'em coluna', 'Como uma casa'] }), { message: question, suggestions: ['Em L', 'Em coluna', 'Como uma casa'], action: 'ask', plan: '' })
-  assert.deepEqual(settle({ layout: [L_CELLS[0]], message: 'Vou organizar o fluxo em L.', suggestions: ['Em L'], plan: 'Organize o fluxo em L.' }), { message: ARRANGE_LOST, suggestions: [], action: 'ask', plan: 'Organize o fluxo em L.' })
+  assert.deepEqual(settle({ layout: [L_CELLS[0]], message: 'Vou organizar o fluxo em L.', suggestions: ['Em L'], plan: 'Organize o fluxo em L.' }), { message: ARRANGE_LOST, suggestions: [], action: 'ask', plan: '' })
+  assert.deepEqual(settle({ layout: [], message: question, suggestions: ['Em L'], plan: 'Organize o fluxo em L.' }), { message: question, suggestions: ['Em L'], action: 'ask', plan: '' })
   assert.deepEqual(settle({ message: '' }), arranged(L_CELLS, 'Vou organizar os componentes no canvas.'))
   assert.deepEqual(settle({}, { ...ARRANGE_CONTEXT, ids: undefined }).message, ARRANGE_LOST)
   const loose = [{ id: 'ID 3', col: '2', row: 1 }, { id: '3', col: 5, row: 5 }, { id: '4', col: 'x', row: 0 }, { id: '5', col: 1 }, { id: ' inicio ', col: 0, row: 0 }, 'inicio', null, { id: 6, col: 3, row: 3 }]
@@ -1584,8 +1763,8 @@ test('no Copiloto, os 4 provedores devolvem a organização com arrange e as cé
     const result = await interviewTurn(menusInput(provider, { history: SHAPE }), hooks(() => reply[provider](JSON.stringify(ARRANGE))))
     assert.deepEqual([result.turn, calls.length], [arranged(), 1], provider)
     calls.length = 0
-    const lost = await interviewTurn(menusInput(provider, { history: SHAPE }), hooks(() => reply[provider](JSON.stringify({ ...ARRANGE, message: '', layout: [L_CELLS[0], { id: '99', col: 0, row: 1 }] }))))
-    assert.deepEqual([lost.turn.action, lost.turn.message, 'layout' in lost.turn, calls.length], ['ask', ARRANGE_LOST, false, 1], provider)
+    const lost = await interviewTurn(menusInput(provider, { history: SHAPE }), hooks(() => reply[provider](JSON.stringify({ ...ARRANGE, message: '', plan: 'Organize os componentes no canvas em L, com o Início no alto da coluna.', layout: [L_CELLS[0], { id: '99', col: 0, row: 1 }] }))))
+    assert.deepEqual([lost.turn.action, lost.turn.message, lost.turn.plan, 'layout' in lost.turn, calls.length], ['ask', ARRANGE_LOST, '', false, 1], provider)
   }
   const noted = { ...MENUS, nodes: [...MENUS.nodes, noteNode('999', 'Revisar com o financeiro.')] }
   const result = await interviewTurn(menusInput('openai', { history: SHAPE, flow: noted }), hooks(() => reply.openai(JSON.stringify({ ...ARRANGE, layout: [...L_CELLS, { id: '999', col: 5, row: 0 }] }))))

@@ -161,12 +161,21 @@ const CELL_ID_KEYS = ["id", "componente"]
 const CELL_COL_KEYS = ["col", "coluna", "column"]
 const CELL_ROW_KEYS = ["row", "linha"]
 const ARRANGE_MIN = 2
-const PLACE_MARKS = ["Proposta pronta no canvas", "Organização pronta no canvas", "Alterações aplicadas no fluxo"]
+const PLACE_MARKS = ["Proposta pronta no canvas", "Organização pronta no canvas", "Alterações aplicadas no fluxo", "Pedido cancelado"]
 const PLACE_PICKED = "selecionei no canvas"
-const PLACE_WORDS = /(?:^| )(?:depois|antes|apos|entre|no inicio|no comeco|no fim|no final|logo depois|logo apos|em seguida|no lugar de)(?= |$)/
-const PLACE_SELECTED = /(?:^| )(?:logo )?(?:depois|antes|apos) (?:d[oa]|o|a) (?:componente )?selecionad[oa](?= |$)/g
+const PLACE_WORDS = /(?:^| )(?:(?:(?:logo )?(?:depois|antes) d[oa]s?|(?:logo )?apos (?:d[oa]s?|o|a|os|as)|entre (?:o|a|os|as)|na saida d[oa]s?|no lugar d[eoa]s?) (?=\p{L})|(?:no inicio|no comeco|no fim|no final|ao fim|ao final)(?! de semana)(?= |$))/u
+const PLACE_ALONE = /^em seguida$/
+const PLACE_SELECTED = /(?:^| )(?:logo )?(?:depois|antes|apos) (?:d[oa]s?|o|a|os|as) (?:\S+ )?selecionad[oa]s?(?= |$)/g
+const PLACE_QUESTION = /(?:^| )(?:onde|entra|entram|ponto|lugar|posicao|(?:depois|antes|apos) de qual|(?:vem|fica) (?:logo )?(?:antes|depois)|(?:logo )?(?:depois|antes) d[oa]s?|(?:logo )?apos (?:d[oa]s?|o|a|os|as))(?= |$)/
+const PLACE_SELECT = /(?:^| )(?:selecione|selecionar|escolha|escolher|clique|marque)(?= |$)/
+const PLACE_QUOTED = /“[^”]*(?:”|$)|‘[^’]*(?:’|$)|«[^»]*(?:»|$)|"[^"]*(?:"|$)|'[^']*(?:'|$)/g
+const PLACE_DICTATED = /(?<![\p{L}\p{N}])(?:mensagem|texto|pergunta|aviso|frase|t[ií]tulo|op[cç][aã]o|op[cç][oõ]es|dizendo)\s*:/iu
+const PLACE_OPTIONS = /(?:^|\s)opções(?: \(\d+\))?: (.+)$/u
 const PLACE_LOOSE_ID = /(?:\bid\s*[:#]?\s*|#)\d+(?![\p{L}\p{N}_-])/iu
+const PLACE_ID_REF = /(?:(?<![\p{L}\p{N}])ids?(?!\p{L})\s*[:#]?\s*|#)([^\s,;:.()]+)/giu
 const PLACE_NAME_MIN = 6
+const PLACE_AT = new Set(["no", "na", "nos", "nas"])
+const PLACE_KINDS = new Set(["menu", "opcao", "opcoes", "mensagem", "tag", "departamento", "pergunta", "componente", "botao", "etapa"])
 const ARTICLES = new Set(["o", "a", "os", "as", "um", "uma"])
 const OMITTED = "Mensagens anteriores da conversa foram resumidas no plano."
 const ABORTED = "A resposta foi cancelada."
@@ -796,31 +805,103 @@ function spoken(message: unknown, role: InterviewMessage["role"]): string | null
   return isRecord(message) && message.role === role && typeof message.text === "string" ? message.text : null
 }
 
-function placeWindow(history: readonly InterviewMessage[]): string[] {
+interface PlaceSaid {
+  text: string
+  asked: boolean
+}
+
+interface PlaceName {
+  words: string[]
+  located: boolean
+}
+
+function asksPlace(text: string): boolean {
+  if (text.includes(PLACE_PROPOSED) || text.includes(PLACE_ASK)) return true
+  return text.split(/(?<=[.?!])\s+|\n+/).some((sentence) => {
+    const plain = plainText(sentence)
+    return (sentence.trim().endsWith("?") || PLACE_SELECT.test(plain)) && PLACE_QUESTION.test(plain)
+  })
+}
+
+function placeWindow(history: readonly InterviewMessage[]): PlaceSaid[] {
   if (!Array.isArray(history)) return []
   let start = 0
   history.forEach((message, index) => {
     const text = spoken(message, "assistant")
     if (text !== null && PLACE_MARKS.some((mark) => text.includes(mark))) start = index + 1
   })
-  return history.slice(start).flatMap((message) => {
-    const text = spoken(message, "user")
-    return text === null ? [] : [text]
+  const said: PlaceSaid[] = []
+  let asked = false
+  history.forEach((message, index) => {
+    const question = spoken(message, "assistant")
+    if (question !== null) asked = asksPlace(question)
+    const text = index >= start ? spoken(message, "user") : null
+    if (text !== null) said.push({ text, asked })
   })
+  return said
 }
 
-function placeNames(texts: ReadonlyMap<string, string> | undefined, known: readonly string[] | null): string[] {
+function optionLabels(text: string): string[] {
+  const listed = text.replace(/“[^”]*”/g, " ").match(PLACE_OPTIONS)?.[1]
+  if (!listed) return []
+  const labels = listed.split(", ")
+  if (labels[labels.length - 1].endsWith("…")) labels.pop()
+  return labels
+}
+
+function placeNames(texts: ReadonlyMap<string, string> | undefined, known: readonly string[] | null): PlaceName[] {
   if (!(texts instanceof Map)) return []
-  const names = new Set<string>()
+  const names = new Map<string, boolean>()
+  const add = (part: string, option: boolean) => {
+    const name = plainText(part)
+    if (name.length < PLACE_NAME_MIN) return
+    const located = option || !name.includes(" ")
+    names.set(name, (names.get(name) ?? true) && located)
+  }
   for (const [id, text] of texts) {
     if (typeof text !== "string" || (known && !known.includes(id))) continue
     const quoted = [...text.matchAll(/“([^”]*)”/g)].map((match) => match[1])
-    for (const part of quoted.length ? quoted : [text]) {
-      const name = plainText(part)
-      if (name.length >= PLACE_NAME_MIN) names.add(name)
-    }
+    const options = optionLabels(text)
+    for (const part of quoted) add(part, false)
+    for (const part of options) add(part, true)
+    if (!quoted.length && !options.length) add(text, false)
   }
-  return [...names]
+  return [...names].map(([name, located]) => ({ words: name.split(" "), located }))
+}
+
+function picked(line: string): boolean {
+  return plainText(line).startsWith(PLACE_PICKED)
+}
+
+function ownWords(text: string): string[] {
+  const own: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    if (picked(line)) continue
+    const bare = line.replace(PLACE_QUOTED, " ")
+    const dictated = PLACE_DICTATED.exec(bare)
+    if (!dictated) {
+      own.push(bare)
+      continue
+    }
+    own.push(bare.slice(0, dictated.index + dictated[0].length - 1))
+    break
+  }
+  return own
+}
+
+function knownRefs(text: string, known: readonly string[] | null): string {
+  return text.replace(PLACE_ID_REF, (match: string, id: string) => ((known ? known.includes(id) : /^\d+$/.test(id)) ? match : " "))
+}
+
+function namedAt(words: readonly string[], name: PlaceName): boolean {
+  const size = name.words.length
+  for (let at = 0; at + size <= words.length; at++) {
+    if (name.words.some((word, offset) => words[at + offset] !== word)) continue
+    if (!name.located) return true
+    const before = words[at - 1]
+    if (PLACE_AT.has(before) || (PLACE_KINDS.has(before) && PLACE_AT.has(words[at - 2]))) return true
+  }
+  return false
 }
 
 export function placeGiven(history: readonly InterviewMessage[], texts?: ReadonlyMap<string, string>, ids?: Iterable<string>): boolean {
@@ -828,19 +909,22 @@ export function placeGiven(history: readonly InterviewMessage[], texts?: Readonl
   if (!said.length) return false
   const known = ids === undefined || ids === null ? null : [...ids].filter((id) => typeof id === "string" && id.trim() !== "")
   const names = placeNames(texts, known)
-  return said.some((text) => {
-    if (text.split("\n").some((line) => plainText(line).startsWith(PLACE_PICKED))) return true
-    const plain = plainText(text)
-    if (PLACE_WORDS.test(plain.replace(PLACE_SELECTED, " "))) return true
-    if (known ? known.some((id) => citesId(text, id) || hashesId(text, id)) : PLACE_LOOSE_ID.test(text)) return true
-    const padded = ` ${plain} `
-    return names.some((name) => padded.includes(` ${name} `))
+  return said.some(({ text, asked }) => {
+    if (asked && text.split(/\r?\n/).some(picked)) return true
+    const own = ownWords(text)
+    if (own.some((line) => PLACE_ALONE.test(plainText(line)))) return true
+    const spoke = own.join("\n")
+    if (PLACE_WORDS.test(plainText(knownRefs(spoke, known)).replace(PLACE_SELECTED, " "))) return true
+    if (known ? known.some((id) => citesId(spoke, id) || hashesId(spoke, id)) : PLACE_LOOSE_ID.test(spoke)) return true
+    const plain = plainText(spoke)
+    const words = plain ? plain.split(" ") : []
+    return names.some((name) => namedAt(words, name))
   })
 }
 
 function placeTurn(said: string, plan: string, after: unknown, anchors: readonly string[]): InterviewTurn {
   const proposed = idResolver(anchors)(asText(after))
-  const pick: InterviewPick = { label: PLACE_LABEL, candidates: [], ready: true, any: true, ...(proposed === undefined ? {} : { selected: proposed }) }
+  const pick: InterviewPick = { label: PLACE_LABEL, candidates: [], ready: proposed !== undefined, any: true, ...(proposed === undefined ? {} : { selected: proposed }) }
   const message = said.endsWith("?") ? said : proposed === undefined ? PLACE_ASK : PLACE_PROPOSED
   return { message, suggestions: [], action: "ask", plan, pick }
 }
@@ -862,11 +946,11 @@ function settleLayout(value: unknown, ids: readonly string[]): LayoutCell[] {
   return cells
 }
 
-function settleArrange(raw: InterviewReply, ids: readonly string[], said: string, plan: string, chips: readonly string[]): InterviewTurn {
+function settleArrange(raw: InterviewReply, ids: readonly string[], said: string, chips: readonly string[]): InterviewTurn {
   const layout = settleLayout(raw.layout, ids)
   if (layout.length >= ARRANGE_MIN) return { message: said || COPILOT_MESSAGES.arrange, suggestions: [], action: "arrange", plan: "", layout }
-  if (said.endsWith("?")) return { message: said, suggestions: cleanSuggestions(chips), action: "ask", plan }
-  return { message: ARRANGE_LOST, suggestions: [], action: "ask", plan }
+  if (said.endsWith("?")) return { message: said, suggestions: cleanSuggestions(chips), action: "ask", plan: "" }
+  return { message: ARRANGE_LOST, suggestions: [], action: "ask", plan: "" }
 }
 
 function wordsOf(text: string): Set<string> {
@@ -911,7 +995,7 @@ export function settleTurn(raw: InterviewReply, context: SettleContext): Intervi
   let plan = clipPlan(asText(raw.plan))
   if ((action === "generate" || action === "edit") && !plan && !copilot) plan = clipPlan(userText(context.history, action === "edit"))
   let said = tidy(asText(raw.message))
-  if (action === "arrange") return settleArrange(raw, ids, said, plan, chips)
+  if (action === "arrange") return settleArrange(raw, ids, said, chips)
   const anchors = context.anchors === undefined ? ids : [...context.anchors]
   const offered = copilot && action !== "finish" ? settlePick(raw.pick, ids, plan, anchors) : null
   const unplaced = offered !== null && action === "edit" && !(offered.any ? ids : offered.candidates).some((id) => citesId(plan, id))

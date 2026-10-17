@@ -1,6 +1,7 @@
 import { NOTE_TYPE, START_ID } from "../catalog"
 import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode } from "../types"
-import { LAYOUT, layoutBox } from "./layout"
+import { RI_LIMITS } from "./contracts"
+import { LAYOUT, layoutBox, notePosition } from "./layout"
 
 export interface LayoutCell {
   id: string
@@ -8,11 +9,18 @@ export interface LayoutCell {
   row: number
 }
 
-export const ARRANGE_LIMIT = 60
+export const ARRANGE_LIMIT = RI_LIMITS.nodes
 
 interface Cell {
   col: number
   row: number
+}
+
+interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 const OUTPUT_HANDLE = /^output-(\d+)$/
@@ -25,6 +33,9 @@ const numeric = (value: unknown): value is number => typeof value === "number" &
 const clampCell = (value: number) => Math.min(ARRANGE_LIMIT, Math.max(0, Math.round(value)))
 const cellKey = (col: number, row: number) => `${col}:${row}`
 const round = (value: number) => Math.round(value * 100) / 100
+const rectOf = (node: AtendimentoNode): Rect => ({ ...node.position, ...layoutBox(node) })
+const span = (start: number, size: number, other: number, otherSize: number) => Math.max(0, Math.min(start + size, other + otherSize) - Math.max(start, other))
+const shared = (a: Rect, b: Rect) => span(a.x, a.width, b.x, b.width) * span(a.y, a.height, b.y, b.height)
 
 function pathOrder(flow: AtendimentoFlow): string[] {
   const components = new Set(flow.nodes.filter((node) => !isNote(node)).map((node) => node.id))
@@ -83,6 +94,28 @@ function corner(nodes: readonly AtendimentoNode[]): { x: number; y: number } {
   return { x: Number.isFinite(x) ? x : LAYOUT.origin, y: Number.isFinite(y) ? y : LAYOUT.origin }
 }
 
+function clearNotes(nodes: readonly AtendimentoNode[], placed: ReadonlyMap<string, Cell>): string[] {
+  const grid = nodes.filter((node) => placed.has(node.id)).map((node) => ({ node, box: rectOf(node) }))
+  const covered = new Map<AtendimentoNode, AtendimentoNode>()
+  for (const note of nodes) {
+    if (!isNote(note) || placed.has(note.id)) continue
+    const box = rectOf(note)
+    let most = 0
+    for (const entry of grid) {
+      const area = shared(box, entry.box)
+      if (area <= most) continue
+      most = area
+      covered.set(note, entry.node)
+    }
+  }
+  const kept = nodes.filter((node) => !covered.has(node))
+  for (const [note, anchor] of covered) {
+    note.position = { ...note.position, ...notePosition(note, anchor, kept) }
+    kept.push(note)
+  }
+  return [...covered.keys()].map((note) => note.id)
+}
+
 export function arrangeFlow(flow: AtendimentoFlow, cells: readonly LayoutCell[]): { flow: AtendimentoFlow; moved: string[] } {
   const result = copy(flow)
   const nodes = new Map(result.nodes.map((node) => [node.id, node]))
@@ -108,5 +141,5 @@ export function arrangeFlow(flow: AtendimentoFlow, cells: readonly LayoutCell[])
     node.position = { ...node.position, x, y }
     moved.push(node.id)
   }
-  return { flow: result, moved }
+  return { flow: result, moved: [...moved, ...clearNotes(result.nodes, placed)] }
 }

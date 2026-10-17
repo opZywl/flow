@@ -3,8 +3,9 @@ const assert = require('node:assert/strict')
 
 const { arrangeFlow, ARRANGE_LIMIT } = require('../lib/atendimento/ai/arrange.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
+const { RI_LIMITS } = require('../lib/atendimento/ai/contracts.ts')
 const { LAYOUT, layoutBox } = require('../lib/atendimento/ai/layout.ts')
-const { validateFlow, exportFlow, importFlow, newNode } = require('../lib/atendimento/format.ts')
+const { validateFlow, exportFlow, importFlow, newNode, newFlow, createEdge } = require('../lib/atendimento/format.ts')
 const { START_ID, NOTE_TYPE } = require('../lib/atendimento/catalog.ts')
 
 const NOW = new Date('2026-10-13T12:00:00.000Z')
@@ -114,20 +115,62 @@ function changedIds(before, after) {
   return after.nodes.filter((node, index) => node.position.x !== before.nodes[index].position.x || node.position.y !== before.nodes[index].position.y).map((node) => node.id)
 }
 
-function assertOnlyPositions(result) {
-  assert.equal(exportFlow(BASE), BASE_EXPORT)
-  assert.deepEqual(result.flow.nodes.map((node) => node.id), BASE.nodes.map((node) => node.id))
-  assert.equal(withoutPositions(result.flow), withoutPositions(BASE))
-  assert.deepEqual([...result.moved].sort(), changedIds(BASE, result.flow).sort())
-  assert.deepEqual(validateFlow(result.flow), validateFlow(BASE))
+function assertOnlyPositions(result, source = BASE, sourceExport = BASE_EXPORT) {
+  assert.equal(exportFlow(source), sourceExport)
+  assert.deepEqual(result.flow.nodes.map((node) => node.id), source.nodes.map((node) => node.id))
+  assert.equal(withoutPositions(result.flow), withoutPositions(source))
+  assert.deepEqual([...result.moved].sort(), changedIds(source, result.flow).sort())
+  assert.deepEqual(validateFlow(result.flow), validateFlow(source))
   const text = exportFlow(result.flow)
   assert.equal(exportFlow(importFlow(text)), text)
 }
 
 const cellsOf = (pairs) => pairs.map(([id, col, row]) => ({ id, col, row }))
 
-test('arrange exports a 60 cell limit and the layout contract', () => {
-  assert.equal(ARRANGE_LIMIT, 60)
+const COLUMN = PATH.map((id, row) => ({ id, col: 0, row }))
+const GRID = PATH.map((id, index) => ({ id, col: index % 3, row: Math.floor(index / 3) }))
+
+const shares = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+
+function overlapsOf(flow, id) {
+  const box = rectOf(nodeOf(flow, id))
+  return flow.nodes.filter((node) => node.id !== id && shares(box, rectOf(node))).map((node) => node.id)
+}
+
+function landedUnder(arranged, note) {
+  const box = rectOf(note)
+  return arranged.nodes.filter((node) => node.data.type !== NOTE_TYPE && shares(box, rectOf(node))).map((node) => node.id)
+}
+
+function withNotes(spots) {
+  const flow = JSON.parse(JSON.stringify(BASE))
+  for (const [id, position] of spots) {
+    const found = flow.nodes.find((node) => node.id === id)
+    const note = found ?? newNode(NOTE_TYPE, position, id)
+    note.position = { ...position }
+    if (found) continue
+    note.data.data.text = `Lembrete ${id}.`
+    flow.nodes.push(note)
+  }
+  return importFlow(JSON.parse(JSON.stringify(flow)))
+}
+
+function chain(count) {
+  const flow = newFlow(NOW)
+  let previous = START_ID
+  for (let index = 1; index <= count; index++) {
+    const id = String(index + 1)
+    const node = newNode(index === count ? 'finalizar' : 'envio_pergunta', { x: 120 + index * 420, y: 120 }, id)
+    if (index < count) node.data.data.template = `Mensagem ${index}.`
+    flow.nodes.push(node)
+    flow.edges.push(createEdge(flow.edges, previous, 'output-0', id))
+    previous = id
+  }
+  return importFlow(JSON.parse(JSON.stringify(flow)))
+}
+
+test('arrange exports a cell limit that covers every component the AI accepts and the layout contract', () => {
+  assert.equal(ARRANGE_LIMIT, RI_LIMITS.nodes)
   assert.equal(typeof arrangeFlow, 'function')
   assert.ok(validateFlow(BASE).some((issue) => issue.nodeId === ID.loose))
   assert.equal(PITCH.width, Math.max(...COMPONENTS.map((node) => layoutBox(node).width)) + LAYOUT.columnGap)
@@ -227,7 +270,7 @@ test('unknown ids and broken cells are ignored', () => {
   assertOnlyPositions(result)
 })
 
-test('notes keep their place unless listed', () => {
+test('notes clear of the arranged components keep their place unless listed', () => {
   const unlisted = arrangeFlow(BASE, PATH.map((id, row) => ({ id, col: 0, row })))
   assert.deepEqual(nodeOf(unlisted.flow, ID.note).position, nodeOf(BASE, ID.note).position)
   assert.ok(!unlisted.moved.includes(ID.note))
@@ -259,7 +302,7 @@ test('col and row are rounded and clamped to the limit', () => {
     [ID.inicio, -4, -2],
     [ID.welcome, 1.4, 0.4],
     [ID.menu, 1.6, -0.4],
-    [ID.notice, 75, 3],
+    [ID.notice, ARRANGE_LIMIT + 15, 3],
     [ID.boletos, 0, 999],
     [ID.bye, Infinity, -Infinity],
     [ID.agenda, NaN, 1],
@@ -327,4 +370,100 @@ test('random layouts never overlap boxes and only move positions', () => {
     assertNoOverlap(result.flow, grid)
     assertOnlyPositions(result)
   }
+})
+
+test('a flow with as many components as the AI accepts arranges as one column, one row or one diagonal without folding into an L', () => {
+  const flow = chain(RI_LIMITS.nodes)
+  const before = exportFlow(flow)
+  const ids = flow.nodes.map((node) => node.id)
+  assert.equal(ids.length, RI_LIMITS.nodes + 1)
+  assert.equal(ids[0], START_ID)
+  const step = pitch(flow, ids)
+  const shapes = {
+    coluna: (index) => ({ col: 0, row: index }),
+    linha: (index) => ({ col: index, row: 0 }),
+    diagonal: (index) => ({ col: index, row: index }),
+  }
+  for (const [name, at] of Object.entries(shapes)) {
+    const result = arrangeFlow(flow, ids.map((id, index) => ({ id, ...at(index) })))
+    ids.forEach((id, index) => {
+      const { col, row } = at(index)
+      assert.deepEqual(nodeOf(result.flow, id).position, { x: 120 + col * step.width, y: 120 + row * step.height }, `${name} ${id}`)
+    })
+    assertOnlyPositions(result, flow, before)
+  }
+})
+
+test('an unlisted note where an arranged component lands moves to the right of that component and counts as moved', () => {
+  const spot = { x: ORIGIN.x + 30, y: ORIGIN.y + 4 * PITCH.height + 20 }
+  const source = withNotes([[ID.note, spot]])
+  const before = exportFlow(source)
+  const plain = arrangeFlow(BASE, COLUMN)
+  assert.deepEqual(overlapsOf(source, ID.note), [])
+  assert.deepEqual(landedUnder(plain.flow, nodeOf(source, ID.note)), [ID.boletos])
+  const result = arrangeFlow(source, COLUMN)
+  PATH.forEach((id) => assert.deepEqual(nodeOf(result.flow, id).position, nodeOf(plain.flow, id).position, id))
+  const covered = nodeOf(result.flow, ID.boletos)
+  assert.deepEqual(nodeOf(result.flow, ID.note).position, { x: Math.round(covered.position.x + layoutBox(covered).width + LAYOUT.noteGap), y: Math.round(covered.position.y) })
+  assert.deepEqual(overlapsOf(result.flow, ID.note), [])
+  assert.deepEqual([...result.moved].sort(), [...plain.moved, ID.note].sort())
+  assertOnlyPositions(result, source, before)
+})
+
+test('notes over a dense grid move clear of every component and of each other, and a note away from the grid stays', () => {
+  const plain = arrangeFlow(BASE, GRID)
+  const middle = { x: ORIGIN.x + PITCH.width + 20, y: ORIGIN.y + PITCH.height + 10 }
+  const corner = { x: ORIGIN.x + PITCH.width + 60, y: ORIGIN.y + PITCH.height + 40 }
+  const away = { x: -900, y: -900 }
+  const source = withNotes([[ID.note, middle], ['42', corner], ['43', away]])
+  const before = exportFlow(source)
+  for (const id of [ID.note, '42']) assert.deepEqual(landedUnder(plain.flow, nodeOf(source, id)), [ID.boletos], id)
+  assert.deepEqual(landedUnder(plain.flow, nodeOf(source, '43')), [])
+  const result = arrangeFlow(source, GRID)
+  PATH.forEach((id) => assert.deepEqual(nodeOf(result.flow, id).position, nodeOf(plain.flow, id).position, id))
+  for (const id of [ID.note, '42']) {
+    assert.ok(result.moved.includes(id), id)
+    assert.deepEqual(overlapsOf(result.flow, id), [], id)
+  }
+  assert.deepEqual(nodeOf(result.flow, '43').position, away)
+  assert.ok(!result.moved.includes('43'))
+  assertNoOverlap(result.flow, PATH)
+  assertOnlyPositions(result, source, before)
+})
+
+test('random arrangements never leave a component under an unlisted note, and the notes they miss keep their place', () => {
+  let seed = 11
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    return seed / 2147483648
+  }
+  let landed = 0
+  for (let round = 0; round < 40; round++) {
+    const cells = PATH.map((id) => ({ id, col: Math.floor(random() * 5), row: Math.floor(random() * 5) }))
+    const plain = arrangeFlow(BASE, cells)
+    const boxes = PATH.map((id) => rectOf(nodeOf(plain.flow, id)))
+    const left = Math.min(...boxes.map((box) => box.x)) - LAYOUT.noteWidth
+    const top = Math.min(...boxes.map((box) => box.y)) - LAYOUT.noteHeight
+    const width = Math.max(...boxes.map((box) => box.x + box.width)) - left
+    const height = Math.max(...boxes.map((box) => box.y + box.height)) - top
+    const spots = [ID.note, '42', '43'].map((id) => [id, { x: Math.round(left + random() * width), y: Math.round(top + random() * height) }])
+    const source = withNotes(spots)
+    const before = exportFlow(source)
+    const result = arrangeFlow(source, cells)
+    PATH.forEach((id) => assert.deepEqual(nodeOf(result.flow, id).position, nodeOf(plain.flow, id).position, `${round} ${id}`))
+    for (const [id, spot] of spots) {
+      if (landedUnder(plain.flow, nodeOf(source, id)).length) {
+        landed++
+        assert.ok(result.moved.includes(id), `${round} ${id}`)
+        assert.deepEqual(overlapsOf(result.flow, id), [], `${round} ${id}`)
+      } else {
+        assert.deepEqual(nodeOf(result.flow, id).position, spot, `${round} ${id}`)
+        assert.ok(!result.moved.includes(id), `${round} ${id}`)
+      }
+      assert.deepEqual(landedUnder(result.flow, nodeOf(result.flow, id)), [], `${round} ${id}`)
+    }
+    assertNoOverlap(result.flow, PATH)
+    assertOnlyPositions(result, source, before)
+  }
+  assert.ok(landed > 10, `${landed}`)
 })

@@ -20,6 +20,7 @@ const PICK_CANCELLED = 'Seleção cancelada. Você pode responder por texto.'
 const OUTDATED = 'O fluxo aberto mudou depois deste pedido. Peça de novo para editar a versão atual.'
 const FOCUS_MISSED = 'A edição não mudou o componente que você selecionou. Confira se a mudança ficou no lugar certo antes de aplicar.'
 const EDIT_NOW_LABEL = 'Editar agora com o que já foi decidido'
+const EDIT_NOW = 'Pode editar agora com o que já foi decidido.'
 const QUESTION_WAITING = 'Copiloto, pergunta para responder'
 const COPILOT_WIDTH = 384
 const NARROW = { width: COPILOT_WIDTH + PICK_MIN_WIDTH - 24, height: 1000 }
@@ -260,11 +261,27 @@ const PLACE_LIST = `Selecione ${PLACE_LABEL} no canvas ou na lista e confirme. V
 const DISCARDED = 'Proposta descartada. O fluxo aberto não mudou.'
 const BASE_OUTLETS = NODE_IDS.filter((id) => outputHandles(BASE_FLOW.nodes.find((node) => node.id === id)).length > 0)
 const BASE_END = NODE_IDS.find((id) => !BASE_OUTLETS.includes(id))
+const END_KIND = getComponentLabel(BASE_FLOW.nodes.find((node) => node.id === BASE_END).data.type)
 const PLACED_EDIT = { message: 'Vou colocar o aviso logo depois da mensagem dos pagamentos.', suggestions: [], action: 'edit', plan: NOTICE_PLAN, pick: null, adds: true, after: PAYMENTS, layout: [] }
 const PLACED_QUESTION = { ...PLACED_EDIT, message: 'Pensei em colocar o aviso logo depois da mensagem dos pagamentos. Pode ser nesse ponto?' }
 const INVOICES_PLAN = `Depois do Enviar Mensagem ${INVOICES_TEXT} ID ${INVOICES}, acrescente a mensagem ${NOTICE_TEXT}`
 const EDIT_INVOICES = { message: 'Vou colocar o aviso logo depois da mensagem das notas fiscais.', suggestions: [], action: 'edit', plan: INVOICES_PLAN, pick: null, adds: true, after: INVOICES, layout: [] }
-const CLOSED_EDIT = { message: 'Vou acrescentar a mensagem de aviso no fluxo.', suggestions: [], action: 'edit', plan: PLACE_DRAFT, pick: null, adds: true, after: BASE_END, layout: [] }
+const CLOSED_PLAN = `Logo antes do ${END_KIND}, ID ${BASE_END}, acrescente a mensagem ${NOTICE_TEXT}`
+const CLOSED_EDIT = { message: 'Vou acrescentar a mensagem de aviso no fluxo.', suggestions: [], action: 'edit', plan: CLOSED_PLAN, pick: null, adds: true, after: BASE_END, layout: [] }
+const FAREWELL_PLAN = `Depois do Enviar Mensagem ${FAREWELL_TEXT} ID ${FAREWELL}, acrescente a mensagem ${NOTICE_TEXT} O caminho segue para o encerramento como antes.`
+const EDIT_FAREWELL = { message: 'Vou colocar o aviso logo depois da mensagem de despedida.', suggestions: [], action: 'edit', plan: FAREWELL_PLAN, pick: null, adds: true, after: FAREWELL, layout: [] }
+const TYPED_ANSWER = 'O texto do aviso pode ser esse mesmo'
+const PLACE_ANSWER = 'Prefiro este lugar'
+const ASK_NOTICE = {
+  message: `Pensei na mensagem ${NOTICE_TEXT} Fica assim ou quer outro texto?`,
+  suggestions: ['Pode ser assim', 'Quero outro texto'],
+  action: 'ask',
+  plan: NOTICE_PLAN,
+  pick: null,
+  adds: true,
+  after: PAYMENTS,
+  layout: [],
+}
 const NAMED_REQUESTS = [
   'adicione uma mensagem de aviso depois da mensagem dos pagamentos',
   `adicione uma mensagem de aviso na saída do ID ${PAYMENTS}`,
@@ -317,7 +334,7 @@ const expectedMain = once(() => engineEdit(BASE_FLOW, MAIN_TEXT, MAIN_PLAN))
 const expectedStart = once(() => engineEdit(NOTED_FLOW, START_NOTICE, START_PLAN))
 const expectedBefore = once(() => engineEdit(NOTED_FLOW, BEFORE_NOTICE, BEFORE_PLAN))
 const expectedInvoices = once(() => engineEdit(BASE_FLOW, INVOICES_NOTICE, INVOICES_PLAN))
-const expectedFarewell = once(() => engineEdit(BASE_FLOW, FAREWELL_NOTICE, PLACE_DRAFT))
+const expectedFarewell = once(() => engineEdit(BASE_FLOW, FAREWELL_NOTICE, FAREWELL_PLAN))
 
 function certificate() {
   const length = (size) => {
@@ -483,6 +500,8 @@ const discardButton = (panel) => panel.getByRole('button', { name: 'Descartar', 
 const proposedLine = (panel) => selection(panel).getByText(/^Sugestão do Copiloto: /)
 const proposedText = (kind, snippet, id) => new RegExp(`^Sugestão do Copiloto: ${escape(kind)}\\b.*${escape(snippet)}.* · ID ${escape(id)}\\.$`)
 const editRequest = (plan, kind, snippet, id) => new RegExp(`# Pedido de edição\\n${escape(plan)}\\n\\n${pickedText(kind, snippet, id)}\\n\\n# Entrega`)
+const CARRIED = /^A seleção vai junto: /
+const carriedText = (kind, snippet, id) => new RegExp(`^A seleção vai junto: ${escape(kind)}\\b.*${escape(snippet)}.* · ID ${escape(id)}\\.$`)
 
 async function importFile(page, flow, name) {
   await page.getByLabel('Importar arquivo JSON').setInputFiles({ name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(flow)) })
@@ -1767,13 +1786,14 @@ test('a request that says where the new component goes edits right away without 
   expect(await saved(page)).toEqual(BASE_STATE)
 })
 
-test('when the suggestion of the Copiloto has no output, the selection opens with nothing marked and confirming a component with one output edits right away', async ({ page, ai }) => {
+test('when the suggestion of the Copiloto has no output, the selection opens with nothing marked and confirming a component asks the AI once more, so the edit carries a plan written for the chosen component', async ({ page, ai }) => {
   const result = await expectedFarewell()
   expect(result.changes).toEqual({ added: 1, changed: 1, removed: 0 })
   const final = result.workflow
   const notice = idOf(final, NOTICE_TEXT)
   const chosen = youPicked(MESSAGE_KIND, SNIPPETS[FAREWELL], FAREWELL)
   expect(BASE_END, 'o fluxo do teste tem um componente sem saída').toBeTruthy()
+  expect(CLOSED_PLAN, 'o plano da IA foi escrito para o componente sem saída').toContain(`ID ${BASE_END},`)
   const panel = await start(page)
   ai.say(CLOSED_EDIT)
   await ask(panel, PLACE_REQUEST)
@@ -1795,17 +1815,26 @@ test('when the suggestion of the Copiloto has no output, the selection opens wit
   await nodeAt(page, FAREWELL).click()
   await expect(markOf(page, FAREWELL)).toHaveAttribute('data-pick', 'selected')
   await expect(bannerStatus(page)).toHaveText(chosenStatus(MESSAGE_KIND, SNIPPETS[FAREWELL], FAREWELL))
+  expect(ai.turnCalls()).toHaveLength(1)
+  ai.say(EDIT_FAREWELL)
   ai.builds.push({ steps: [FAREWELL_NOTICE] })
   await bannerButton(page, 'Confirmar').click()
   await expectPickOver(page, panel)
   const cards = await proposal(panel)
   await expect(cards).toHaveText(labels(result.changes))
-  await expect(messages(panel), 'o componente com uma saída vai direto para a edição').toHaveText([you(PLACE_REQUEST), says(PLACE_ASK), chosen])
+  await expect(messages(panel), 'a IA escreve o pedido de novo para o componente escolhido').toHaveText([you(PLACE_REQUEST), says(PLACE_ASK), chosen, says(EDIT_FAREWELL)])
   await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
   await expect(nodeAt(page, FAREWELL).locator('[data-pick-focus]'), 'o componente escolhido fica marcado na prévia').toHaveCount(1)
-  expect(ai.turnCalls()).toHaveLength(1)
-  expect(ai.buildCalls()).toHaveLength(1)
-  expect(lastUser(ai.buildCalls()[0]), 'o pedido de edição leva o plano e o componente escolhido').toMatch(editRequest(PLACE_DRAFT, MESSAGE_KIND, SNIPPETS[FAREWELL], FAREWELL))
+  expect(ai.calls.map((call) => call.kind), 'sem sugestão válida, a seleção volta para a IA antes da edição').toEqual(['turn', 'turn', 'build'])
+  const second = ai.turnCalls()[1]
+  expect(lastUser(second), 'o turno seguinte recebe o componente escolhido').toMatch(picked(MESSAGE_KIND, SNIPPETS[FAREWELL], FAREWELL))
+  expect(historyOf(second)).toContain(PLACE_ASK)
+  const build = JSON.stringify(ai.buildCalls()[0].body)
+  expect(build, 'a edição leva o plano escrito para o componente escolhido').toContain(FAREWELL_PLAN)
+  expect(build, 'o plano escrito para o componente sem saída fica de fora').not.toContain(CLOSED_PLAN)
+  expect(build).not.toContain(PICKED)
+  expect(ai.fallbacks).toEqual([])
+  expect(await saved(page)).toEqual(BASE_STATE)
 
   await applyButton(panel).click()
   await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
@@ -1813,4 +1842,141 @@ test('when the suggestion of the Copiloto has no output, the selection opens wit
   const applied = await stored(page)
   expect(applied.edges.filter((edge) => edge.source === FAREWELL).map((edge) => edge.target), 'o aviso entra logo depois do componente escolhido').toEqual([notice])
   expect(applied.edges.some((edge) => edge.source === notice && edge.target === BASE_END), 'o caminho segue para o encerramento como antes').toBe(true)
+})
+
+test('an answer typed while the place selection only shows the suggestion of the Copiloto goes without a selection, so the AI asks for the place again, and the selection goes along only after the user picks a component', async ({ page, ai }) => {
+  const result = await expectedInvoices()
+  expect(result.changes).toEqual({ added: 1, changed: 1, removed: 0 })
+  const final = result.workflow
+  const notice = idOf(final, NOTICE_TEXT)
+  const candidates = marks(BASE_OUTLETS, 'candidate')
+  const suggested = { ...candidates, [PAYMENTS]: 'selected' }
+  const sent = youPicked(MESSAGE_KIND, SNIPPETS[INVOICES], INVOICES)
+  const panel = await start(page)
+  const box = selection(panel)
+  const other = box.getByRole('button', { name: 'Outro', exact: true })
+  const field = box.getByLabel('Escreva outra resposta', { exact: true })
+  ai.say(PLACED_EDIT)
+  await ask(panel, PLACE_REQUEST)
+
+  await expect(messages(panel)).toHaveText([you(PLACE_REQUEST), says(PLACE_PROPOSED)])
+  await expect(banner(page)).toContainText(`Selecione ${PLACE_LABEL} no canvas.`)
+  await expectMarks(page, NODE_IDS, suggested)
+  await expect(proposedLine(panel)).toHaveText(proposedText(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  await other.click()
+  await expect(field).toBeFocused()
+  await expect(box.getByText(CARRIED), 'a sugestão marcada pelo Copiloto não vai junto com a resposta').toHaveCount(0)
+  await field.press('Escape')
+  await expect(field).toHaveCount(0)
+  await expect(banner(page)).toBeVisible()
+  expect(ai.turnCalls()).toHaveLength(1)
+
+  ai.say(PLACED_EDIT)
+  await ask(panel, TYPED_ANSWER)
+  await expect(messages(panel), 'a resposta vai sozinha e a IA pergunta o lugar de novo').toHaveText([you(PLACE_REQUEST), says(PLACE_PROPOSED), you(TYPED_ANSWER), says(PLACE_PROPOSED)])
+  await expect(messages(panel).filter({ hasText: PICKED }), 'nenhuma seleção que o usuário não fez entra na conversa').toHaveCount(0)
+  await expect(banner(page)).toContainText(`Selecione ${PLACE_LABEL} no canvas.`)
+  await expectMarks(page, NODE_IDS, suggested)
+  await expect(proposedLine(panel)).toHaveText(proposedText(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  await expect(panel.getByRole('heading', { name: /^Edição pronta/ })).toHaveCount(0)
+  await expect(page.getByText(EDIT_DONE)).toHaveCount(0)
+  expect(ai.turnCalls()).toHaveLength(2)
+  const second = ai.turnCalls()[1]
+  expect(lastUser(second), 'a resposta digitada vai sozinha para a IA').toBe(TYPED_ANSWER)
+  expect(historyOf(second)).not.toContain(PICKED)
+  expect(ai.buildCalls(), 'sem o lugar escolhido pelo usuário, nada é montado').toHaveLength(0)
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  await settle(page)
+  await nodeAt(page, INVOICES).click()
+  await expectMarks(page, NODE_IDS, { ...candidates, [INVOICES]: 'selected' })
+  await expect(bannerStatus(page)).toHaveText(chosenStatus(MESSAGE_KIND, SNIPPETS[INVOICES], INVOICES))
+  await other.click()
+  await expect(field).toBeFocused()
+  await expect(box.getByText(CARRIED), 'o componente escolhido pelo usuário vai junto com a resposta').toHaveText(carriedText(MESSAGE_KIND, SNIPPETS[INVOICES], INVOICES))
+  ai.say(EDIT_INVOICES)
+  ai.builds.push({ steps: [INVOICES_NOTICE] })
+  await field.fill(PLACE_ANSWER)
+  await field.press('Enter')
+  await expectPickOver(page, panel)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel)).toHaveText([you(PLACE_REQUEST), says(PLACE_PROPOSED), you(TYPED_ANSWER), says(PLACE_PROPOSED), sent, you(PLACE_ANSWER), says(EDIT_INVOICES)])
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
+  await expect(nodeAt(page, INVOICES).locator('[data-pick-focus]'), 'o componente escolhido fica marcado na prévia').toHaveCount(1)
+  expect(ai.turnCalls()).toHaveLength(3)
+  const third = lastUser(ai.turnCalls()[2])
+  expect(third, 'a resposta leva o componente que o usuário escolheu').toMatch(picked(MESSAGE_KIND, SNIPPETS[INVOICES], INVOICES))
+  expect(third).toContain(PLACE_ANSWER)
+  expect(ai.buildCalls()).toHaveLength(1)
+  const build = JSON.stringify(ai.buildCalls()[0].body)
+  expect(build).toContain(INVOICES_PLAN)
+  expect(build).not.toContain(NOTICE_PLAN)
+  expect(ai.fallbacks).toEqual([])
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: idsOf(final) })
+  const applied = await stored(page)
+  expect(applied.edges.filter((edge) => edge.source === INVOICES).map((edge) => edge.target), 'o aviso entra logo depois do componente escolhido').toEqual([notice])
+  expect(applied.edges.some((edge) => edge.source === PAYMENTS && edge.target === notice), 'a sugestão que o usuário não escolheu fica como estava').toBe(false)
+})
+
+test('Editar agora after a question sends what was decided through the Copiloto, so a new component still asks where it goes before any edit is built', async ({ page, ai }) => {
+  const result = await expectedNotice()
+  expect(result.changes).toEqual({ added: 1, changed: 1, removed: 0 })
+  const final = result.workflow
+  const notice = idOf(final, NOTICE_TEXT)
+  const chosen = youPicked(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS)
+  expect(ASK_NOTICE.plan, 'o plano da pergunta já traz o lugar escolhido pela IA').toContain(`ID ${PAYMENTS},`)
+  const panel = await start(page)
+  ai.say(ASK_NOTICE)
+  await ask(panel, PLACE_REQUEST)
+
+  await expect(messages(panel)).toHaveText([you(PLACE_REQUEST), says(ASK_NOTICE)])
+  await expect(chips(panel)).toHaveText(ASK_NOTICE.suggestions)
+  await expect(banner(page)).toHaveCount(0)
+  await expect(selection(panel)).toHaveCount(0)
+  const editNow = editNowOffered(panel)
+  await expect(editNow).toBeVisible()
+  await expect(editNow).toHaveText('Editar agora')
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
+
+  ai.say(PLACED_EDIT)
+  await editNow.click()
+  await expect(messages(panel), 'Editar agora vira uma resposta para a IA, e a interface pede o lugar').toHaveText([you(PLACE_REQUEST), says(ASK_NOTICE), you(EDIT_NOW), says(PLACE_PROPOSED)])
+  await expect(banner(page)).toContainText(`Selecione ${PLACE_LABEL} no canvas.`)
+  await expectMarks(page, NODE_IDS, { ...marks(BASE_OUTLETS, 'candidate'), [PAYMENTS]: 'selected' })
+  await expect(proposedLine(panel)).toHaveText(proposedText(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  await expect(editNowOffered(panel), 'Editar agora espera a seleção').toHaveCount(0)
+  await expect(panel.getByRole('heading', { name: /^Edição pronta/ })).toHaveCount(0)
+  await expect(page.getByText(EDIT_DONE)).toHaveCount(0)
+  await expect(nodes(page)).toHaveCount(BASE_FLOW.nodes.length)
+  expect(ai.turnCalls(), 'Editar agora passa pelo Copiloto antes de editar').toHaveLength(2)
+  const second = ai.turnCalls()[1]
+  expect(lastUser(second)).toBe(EDIT_NOW)
+  expect(historyOf(second)).toContain(ASK_NOTICE.message)
+  expect(ai.buildCalls(), 'nada é montado com o lugar que só a IA escolheu').toHaveLength(0)
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  ai.builds.push({ steps: [NOTICE_DELTA] })
+  await bannerButton(page, 'Confirmar').click()
+  await expectPickOver(page, panel)
+  const cards = await proposal(panel)
+  await expect(cards).toHaveText(labels(result.changes))
+  await expect(messages(panel), 'Confirmar na sugestão vai direto para a edição').toHaveText([you(PLACE_REQUEST), says(ASK_NOTICE), you(EDIT_NOW), says(PLACE_PROPOSED), chosen])
+  await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
+  await expect(nodeAt(page, PAYMENTS).locator('[data-pick-focus]'), 'o lugar confirmado fica marcado na prévia').toHaveCount(1)
+  expect(ai.calls.map((call) => call.kind)).toEqual(['turn', 'turn', 'build'])
+  expect(lastUser(ai.buildCalls()[0]), 'o pedido de edição leva o plano e o lugar confirmado').toMatch(editRequest(NOTICE_PLAN, MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
+  expect(ai.fallbacks).toEqual([])
+  expect(await saved(page)).toEqual(BASE_STATE)
+
+  await applyButton(panel).click()
+  await expect(panel.getByText(APPLIED, { exact: true })).toBeVisible()
+  await expect.poll(() => saved(page)).toEqual({ name: BASE_FLOW.name, nodes: idsOf(final) })
+  const applied = await stored(page)
+  expect(applied.edges.filter((edge) => edge.source === PAYMENTS).map((edge) => edge.target), 'o aviso entra logo depois do lugar confirmado').toEqual([notice])
 })

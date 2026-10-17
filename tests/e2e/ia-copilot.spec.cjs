@@ -692,7 +692,7 @@ test('crie uma opcao 8: the Copiloto asks what the new option does before editin
   expect(ai.buildCalls()).toHaveLength(1)
 })
 
-test('Editar agora edits right away with what was decided, without another question', async ({ page, ai }) => {
+test('Editar agora after a question sends what was decided through the Copiloto once more and edits without another question', async ({ page, ai }) => {
   const final = (await expectedEdit()).workflow
   const hold = ai.hold()
   ai.say(ASK_EDIT)
@@ -707,17 +707,24 @@ test('Editar agora edits right away with what was decided, without another quest
   const editNow = editNowButton(panel)
   await expect(editNow).toHaveText('Editar agora')
   await expect(editNow).toHaveAttribute('title', EDIT_NOW_LABEL)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls()).toHaveLength(0)
 
+  ai.say(EDIT_TURN)
   await editNow.click()
-  await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT), you(EDIT_NOW)])
+  await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT), you(EDIT_NOW), says(EDIT_TURN)])
   await expect(editNow).toHaveCount(0)
   await expect(panel.getByRole('group', { name: 'Sugestões de resposta' })).toHaveCount(0)
   await hold.reached
   await expect(panel.getByRole('button', { name: 'Parar', exact: true })).toBeVisible()
   await expect(page.getByText(EDIT_BANNER)).toBeVisible()
   await expect(page.locator('.react-flow')).toContainText(BOLETO_TEXT)
-  expect(ai.turnCalls()).toHaveLength(1)
-  expect(ai.buildCalls()).toHaveLength(1)
+  expect(ai.calls.map((call) => call.kind), 'Editar agora passa pelo Copiloto antes de editar').toEqual(['turn', 'turn', 'build'])
+  const second = ai.turnCalls()[1]
+  const answers = second.body.input.filter((entry) => entry.role === 'user')
+  expect(partText(answers.at(-1).content), 'o turno seguinte recebe o Editar agora como resposta').toBe(EDIT_NOW)
+  expect(historyOf(second)).toContain(ASK_EDIT.message)
+  expect(systemOf(second)).toEqual([copilotSystemPrompt(), copilotState(BASE_FLOW)])
   const build = JSON.stringify(ai.buildCalls()[0].body)
   expect(build).toContain(PLAN)
   expect(build).not.toContain(PROMPT)
@@ -728,7 +735,9 @@ test('Editar agora edits right away with what was decided, without another quest
   await panel.getByText(FULL_REQUEST, { exact: true }).click()
   await expect(panel.getByText(PLAN, { exact: true })).toBeVisible()
   await expect(editNow).toHaveCount(0)
-  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.turnCalls()).toHaveLength(2)
+  expect(ai.buildCalls()).toHaveLength(1)
+  expect(ai.fallbacks).toEqual([])
   expect(await saved(page)).toEqual(BASE_STATE)
 })
 

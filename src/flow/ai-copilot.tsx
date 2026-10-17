@@ -294,7 +294,7 @@ export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelec
   const otherId = `${id}-other`
   const [writing, setWriting] = useState(false)
   const [text, setText] = useState("")
-  const selected = pick.candidates.find((candidate) => candidate.id === pick.selected)
+  const carried = pick.picked ? pick.candidates.find((candidate) => candidate.id === pick.selected) : undefined
   const proposed = pick.proposed ? pick.candidates.find((candidate) => candidate.id === pick.proposed) : undefined
   const send = () => {
     const value = text.trim()
@@ -363,7 +363,7 @@ export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelec
               onChange={(event) => setText(event.target.value)}
               onKeyDown={onOtherKeyDown}
               placeholder={PICK_OTHER_PLACEHOLDER}
-              aria-describedby={selected ? `${otherId}-with` : undefined}
+              aria-describedby={carried ? `${otherId}-with` : undefined}
               className={cn(ui.textarea, "max-h-32 min-h-[2.5rem] flex-1 resize-none py-1.5 text-xs leading-5")}
             />
             <button
@@ -377,9 +377,9 @@ export function PickBox({ id, pick, onCanvas, disabled, blocked = false, onSelec
               <SendHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
-          {selected ? (
+          {carried ? (
             <p id={`${otherId}-with`} className="text-[11px] leading-4 text-flow-muted">
-              {pickOtherWith(selected.text)}
+              {pickOtherWith(carried.text)}
             </p>
           ) : null}
         </div>
