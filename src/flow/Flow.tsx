@@ -14,6 +14,7 @@ import { emptyPreview, replyPreview, startPreview, type PreviewState } from "@/l
 import type { AtendimentoFlow } from "@/lib/atendimento/types"
 import { useTheme } from "../ThemeContext"
 import type { CopilotAttention } from "./ai/copilot-store"
+import { useAiSettingsDialog } from "./ai/settings-store"
 import EraDialog from "./era-dialog"
 import WorkflowBuilder, { type PreviewKind, type WorkflowActions } from "./workflow-builder"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
@@ -23,6 +24,9 @@ import { ui } from "./ui"
 
 const AIWorkflowDialog = dynamic(() => import("./ai-workflow-dialog"), { ssr: false })
 const AICopilot = dynamic(() => import("./ai-copilot"), { ssr: false })
+const AiSettingsDialog = dynamic(() => import("./ai-settings-dialog"), { ssr: false })
+
+const ERA_VISIBLE = false
 
 type LivePreviewProps = {
   onLivePreview: (flow: AtendimentoFlow | null, done?: boolean, kind?: PreviewKind, fresh?: boolean, focus?: string | null) => void
@@ -588,8 +592,12 @@ function MoreMenu({ theme, hasImage, capturing, onOpenEra, onChangeBackground, o
           }}
           className={moreContent}
         >
-          <MoreAction icon={ArrowRightLeft} label="Converter para o padrão ERA" onSelect={later(onOpenEra)} />
-          <DropdownMenuPrimitive.Separator className="my-1 border-t border-flow-border" />
+          {ERA_VISIBLE ? (
+            <>
+              <MoreAction icon={ArrowRightLeft} label="Converter para o padrão ERA" onSelect={later(onOpenEra)} />
+              <DropdownMenuPrimitive.Separator className="my-1 border-t border-flow-border" />
+            </>
+          ) : null}
           <DropdownMenuPrimitive.Group aria-labelledby={groupId}>
             <DropdownMenuPrimitive.Label id={groupId} className={cn(ui.sectionTitle, "px-3 pb-1 pt-1.5")}>
               Imagem de fundo
@@ -693,16 +701,18 @@ function FlowHeader({ botOpen, capturing, hasBackground, copilotId, copilotOpen,
           <Bot className="h-4 w-4" aria-hidden />
         </button>
         <div className="hidden items-center gap-2 sm:flex">
-          <button
-            type="button"
-            onClick={onOpenEra}
-            aria-haspopup="dialog"
-            aria-label="Converter para o padrão ERA"
-            title="Converter para o padrão ERA"
-            className={ui.toolButton}
-          >
-            <ArrowRightLeft className="h-4 w-4" aria-hidden />
-          </button>
+          {ERA_VISIBLE ? (
+            <button
+              type="button"
+              onClick={onOpenEra}
+              aria-haspopup="dialog"
+              aria-label="Converter para o padrão ERA"
+              title="Converter para o padrão ERA"
+              className={ui.toolButton}
+            >
+              <ArrowRightLeft className="h-4 w-4" aria-hidden />
+            </button>
+          ) : null}
           <BackgroundMenu hasImage={hasBackground} capturing={capturing} onChange={onChangeBackground} onSave={onSaveImage} onReset={onResetBackground} />
           <button
             type="button"
@@ -1073,6 +1083,11 @@ function FlowLayout() {
   const [copilotLoaded, setCopilotLoaded] = useState(false)
   const [copilotAttention, setCopilotAttention] = useState<CopilotAttention | null>(null)
   const [eraOpen, setEraOpen] = useState(false)
+  const settingsDialog = useAiSettingsDialog()
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  useEffect(() => {
+    if (settingsDialog.open) setSettingsLoaded(true)
+  }, [settingsDialog.open])
   const [backgroundDialog, setBackgroundDialog] = useState(false)
   const [background, setBackground] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
@@ -1258,7 +1273,8 @@ function FlowLayout() {
       </div>
       <YenFlowBot isOpen={botOpen} openRequest={botRequest} offset={copilotOpen && wide ? COPILOT_WIDTH : 0} onClose={closeBot} onStart={runPreview} />
       {aiLoaded && <AIWorkflowDialog open={aiOpen} onOpenChange={changeAiOpen} onWorkflowGenerated={handleGenerated} onBusyChange={setDialogBusy} {...livePreview} />}
-      <EraDialog open={eraOpen} onOpenChange={setEraOpen} />
+      {ERA_VISIBLE ? <EraDialog open={eraOpen} onOpenChange={setEraOpen} /> : null}
+      {settingsLoaded ? <AiSettingsDialog /> : null}
       {showColorPanel && <ColorPanel />}
       <Dialog open={backgroundDialog} onOpenChange={setBackgroundDialog}>
         <DialogContent className={cn(ui.dialog, "max-w-md rounded-xl sm:rounded-xl")}>

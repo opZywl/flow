@@ -4,15 +4,51 @@ const fs = require('node:fs')
 const Module = require('node:module')
 const path = require('node:path')
 const ts = require('typescript')
+const runtime = require('react/jsx-runtime')
 
 const ROOT = path.resolve(__dirname, '..')
+const seen = { hosts: [], contents: [], selects: [], interviews: [], panels: [], forwarded: [] }
+const record = (render) => (type, props, key) => {
+  if (typeof type === 'string') seen.hosts.push({ type, props })
+  return render(type, props, key)
+}
+const passThrough = ({ children }) => children
+const forward = (name) => (...args) => {
+  seen.forwarded.push([name, ...args])
+  return true
+}
 const STUBS = {
-  '@/components/ui/dialog': { Dialog: () => null, DialogContent: () => null, DialogDescription: () => null, DialogHeader: () => null, DialogTitle: () => null },
+  '@/components/ui/dialog': {
+    Dialog: passThrough,
+    DialogContent: (props) => {
+      seen.contents.push(props)
+      return props.children
+    },
+    DialogDescription: passThrough,
+    DialogHeader: passThrough,
+    DialogTitle: passThrough,
+  },
   '@/hooks/use-toast': { toast: () => undefined },
-  './flow-select': { FlowSelect: () => null },
-  './ai-interview': { InterviewPanel: () => null, useInterview: () => ({}) },
+  './flow-select': {
+    FlowSelect: (props) => {
+      seen.selects.push(props)
+      return null
+    },
+  },
+  './ai-interview': {
+    InterviewPanel: (props) => {
+      seen.panels.push(props)
+      return null
+    },
+    useInterview: (options) => {
+      seen.interviews.push(options)
+      const state = { entries: [], suggestions: [], plan: 'Fluxo de envio de boleto.', status: 'error', building: null, failure: null, retryable: true, built: false }
+      return { ...state, busy: false, canBuild: true, hasFlow: false, send: forward('send'), buildNow: forward('buildNow'), retry: forward('retry'), cancel: () => undefined, finish: () => undefined, reset: () => undefined }
+    },
+  },
   './nodes/atendimento-node': { categoryTint: (value) => value, componentIcon: () => () => null, nodeSummary: () => '' },
   'lucide-react': new Proxy({}, { get: () => () => null }),
+  'react/jsx-runtime': { ...runtime, jsx: record(runtime.jsx), jsxs: record(runtime.jsxs) },
 }
 const resolveFilename = Module._resolveFilename
 Module._resolveFilename = function resolveAlias(request, ...rest) {
@@ -22,6 +58,13 @@ Module._resolveFilename = function resolveAlias(request, ...rest) {
 const load = Module._load
 Module._load = function loadStub(request, ...rest) {
   return STUBS[request] ?? load.call(this, request, ...rest)
+}
+require.extensions['.tsx'] = (module, filename) => {
+  const { outputText } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+    fileName: filename,
+  })
+  module._compile(outputText, filename)
 }
 
 const calls = []
@@ -36,6 +79,7 @@ const { evaluateRi, concludeGeneration } = require('../lib/atendimento/ai/review
 const { stampExport } = require('../lib/atendimento/format.ts')
 const { PROVIDERS } = require('../lib/atendimento/ai/providers.ts')
 const { previewFlow } = require('../lib/atendimento/ai/preview.ts')
+const settings = require('../src/flow/ai/settings-store.ts')
 
 globalThis.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -55,32 +99,10 @@ globalThis.fetch = async (input, init = {}) => {
 afterEach(() => {
   provider = null
   calls.length = 0
+  settings.resetAiSettings()
 })
 
-const CLIENT_NAMES = ['readEvents', 'readOutcome', 'readProgress', 'requestGeneration', 'requestModels', 'readModels', 'keyWarning', 'progressText', 'stageText', 'generateFlow', 'loadEngine', 'previewFeed', 'modelChoices', 'pickEffort', 'effortChoices', 'requestTurn']
-
-function loadClient() {
-  const moved = path.join(ROOT, 'src/flow/ai/generation-client.ts')
-  const found = {}
-  if (fs.existsSync(moved)) Object.assign(found, require(moved))
-  const file = path.join(ROOT, 'src/flow/ai-workflow-dialog.tsx')
-  const source = fs.readFileSync(file, 'utf8')
-  const local = CLIENT_NAMES.filter((name) => !found[name] && new RegExp(`function ${name}\\(`).test(source))
-  if (local.length) {
-    const { outputText } = ts.transpileModule(`${source}\nexport { ${local.join(', ')} }\n`, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
-      fileName: file,
-    })
-    const dialog = new Module(file, module)
-    dialog.filename = file
-    dialog.paths = Module._nodeModulePaths(path.dirname(file))
-    dialog._compile(outputText, file)
-    for (const name of local) found[name] = dialog.exports[name]
-  }
-  return found
-}
-
-const client = loadClient()
+const client = require('../src/flow/ai/generation-client.ts')
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
 const BASE = { provider: 'openai', model: 'gpt-6.1-sol', apiKey: KEY, prompt: 'Atendimento da Clínica Exemplo', size: 'auto', image: null }
 const DIALOG_FIELDS = ['provider', 'apiKey', 'model', 'effort', 'mode', 'description', 'image', 'size', 'count', 'name', 'fill']
@@ -901,4 +923,208 @@ test('a chave recusada no turno volta com o código do campo da chave e sem a ch
   assert.match(out.failure.error, PT_TEXT)
   assert.equal(JSON.stringify(out).includes(KEY), false)
   assert.equal(calls.length, 0)
+})
+
+const React = require('react')
+const { renderToStaticMarkup } = require('react-dom/server')
+
+const REQUEST = 'Crie um fluxo de envio de boleto.'
+const KEY_MISSING = 'Informe a chave da API da OpenAI.'
+const MODEL_INVALID = 'Escolha um modelo válido.'
+const refuseKey = () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401, headers: { 'content-type': 'application/json' } })
+const submitEvent = () => ({ preventDefault: () => undefined })
+
+function windowState() {
+  const { open, focus, errors } = settings.readAiSettingsDialog()
+  return { open, focus, errors }
+}
+
+function renderDialog(props = {}, { live = false, state = {}, hooks = null } = {}) {
+  const { default: AIWorkflowDialog } = require('../src/flow/ai-workflow-dialog.tsx')
+  for (const list of Object.values(seen)) list.length = 0
+  const { useState, useSyncExternalStore, useRef, useEffect } = React
+  React.useState = (initial) => {
+    const [value, update] = useState(initial)
+    return [typeof initial === 'string' && Object.hasOwn(state, initial) ? state[initial] : value, update]
+  }
+  if (live) React.useSyncExternalStore = (subscribe, getSnapshot) => getSnapshot()
+  if (hooks) {
+    let index = 0
+    hooks.effects.length = 0
+    React.useRef = (initial) => (hooks.refs[index++] ??= { current: initial })
+    React.useEffect = (effect) => {
+      hooks.effects.push(effect)
+    }
+  }
+  try {
+    const html = renderToStaticMarkup(React.createElement(AIWorkflowDialog, { open: true, onOpenChange: () => undefined, onWorkflowGenerated: () => true, ...props }))
+    const host = (type, match = () => true) => seen.hosts.find((entry) => entry.type === type && match(entry.props))?.props
+    return {
+      html,
+      form: host('form'),
+      settingsButton: host('button', (props) => props['aria-haspopup'] === 'dialog'),
+      content: seen.contents.at(-1),
+      interview: seen.interviews.at(-1),
+      chat: seen.panels.at(-1)?.interview,
+      selects: [...seen.selects],
+    }
+  } finally {
+    React.useState = useState
+    React.useSyncExternalStore = useSyncExternalStore
+    React.useRef = useRef
+    React.useEffect = useEffect
+  }
+}
+
+function runEffects(hooks) {
+  const frames = []
+  globalThis.window = { requestAnimationFrame: (task) => frames.push(task), cancelAnimationFrame: () => undefined }
+  try {
+    const cleanups = hooks.effects.map((effect) => effect()).filter((cleanup) => typeof cleanup === 'function')
+    for (const frame of frames.splice(0)) frame()
+    for (const cleanup of cleanups) cleanup()
+  } finally {
+    delete globalThis.window
+  }
+}
+
+function settingsOpened(timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      stop()
+      reject(new Error('O Configurar IA não abriu.'))
+    }, timeout)
+    const stop = settings.subscribeAiSettingsDialog(() => {
+      if (!settings.readAiSettingsDialog().open) return
+      clearTimeout(timer)
+      stop()
+      resolve(windowState())
+    })
+  })
+}
+
+async function refusals() {
+  provider = refuseKey
+  const turn = await client.requestTurn({ provider: 'openai', model: BASE.model, apiKey: KEY, effort: 'medium', fill: true, history: [{ role: 'user', text: REQUEST }], flow: null }, signal())
+  const generation = await client.generateFlow(BASE, signal(), () => {})
+  assert.equal(turn.failure.code, 'invalid_key')
+  assert.equal(generation.rejection.code, 'invalid_key')
+  let reached = 0
+  provider = () => {
+    reached++
+    return refuseKey()
+  }
+  return {
+    turn: [turn.failure.error, turn.failure.details].filter(Boolean).join(' '),
+    generation: [generation.rejection.failure.title, generation.rejection.failure.details].filter(Boolean).join(' '),
+    reached: () => reached,
+  }
+}
+
+test('o Gerar com IA mostra o resumo da IA com o botão Configurar IA no lugar do provedor, da chave, do modelo e do esforço, nos dois modos', () => {
+  for (const state of [{}, { create: 'chat' }]) {
+    const view = renderDialog({}, { state })
+    assert.match(view.html, /<h3 id="[^"]*-ai-title" class="[^"]*">Modelo de IA<\/h3><div class="[^"]*rounded-xl[^"]*">/)
+    assert.match(view.html, /<span class="[^"]*" title="OpenAI · GPT-6\.1 Sol · Esforço equilibrado">OpenAI · GPT-6\.1 Sol · Esforço equilibrado<\/span>/)
+    assert.match(view.html, />Chave não informada</)
+    assert.match(view.html, /<button type="button" aria-haspopup="dialog" class="[^"]*">Configurar IA<\/button><\/div><\/fieldset>/)
+    assert.doesNotMatch(view.html, /Provedor de IA|Chave da API|Mostrar chave|Ocultar chave|Buscar modelos da API|Chave informada|type="password"|-provider-choice|>Esforço</)
+    assert.doesNotMatch(view.html, /aria-label="(ChatGPT|Claude|Gemini|Grok)"/)
+    assert.doesNotMatch(view.html, /[!—–]/)
+    assert.equal(view.selects.length, 1)
+    assert.match(view.selects[0].id, /-size$/)
+    assert.equal(Boolean(view.chat), Boolean(state.create))
+  }
+
+  settings.updateAiSettings({ keys: { openai: KEY }, models: { openai: 'gpt-6-luna' }, effortChoice: 'high' })
+  const keyed = renderDialog({}, { live: true })
+  assert.match(keyed.html, />OpenAI · GPT-6 Luna · Esforço alto</)
+  assert.doesNotMatch(keyed.html, /Chave não informada/)
+  assert.equal(keyed.html.includes(KEY), false)
+
+  settings.resetAiSettings()
+  renderDialog().settingsButton.onClick()
+  assert.deepEqual(windowState(), { open: true, focus: 'apiKey', errors: {} })
+})
+
+test('pedir sem a chave abre o Configurar IA na chave com o erro, leva só os campos da IA, mantém o pedido e não chama o provedor', () => {
+  let reached = 0
+  provider = () => {
+    reached++
+    return refuseKey()
+  }
+  let prevented = false
+  renderDialog().form.onSubmit({ preventDefault: () => (prevented = true) })
+  assert.equal(prevented, true)
+  assert.deepEqual(windowState(), { open: true, focus: 'apiKey', errors: { apiKey: KEY_MISSING } })
+  settings.closeAiSettings()
+
+  settings.updateAiSettings({ models: { openai: 'modelo inválido/../x' } })
+  renderDialog({}, { live: true, state: { '': REQUEST } }).form.onSubmit(submitEvent())
+  assert.deepEqual(windowState(), { open: true, focus: 'apiKey', errors: { apiKey: KEY_MISSING, model: MODEL_INVALID } })
+  settings.closeAiSettings()
+
+  settings.updateAiSettings({ keys: { openai: KEY } })
+  renderDialog({}, { live: true, state: { '': REQUEST } }).form.onSubmit(submitEvent())
+  assert.deepEqual(windowState(), { open: true, focus: 'model', errors: { model: MODEL_INVALID } })
+  settings.resetAiSettings()
+
+  const { chat } = renderDialog({}, { state: { create: 'chat' } })
+  assert.equal(chat.send(REQUEST), false)
+  assert.deepEqual(windowState(), { open: true, focus: 'apiKey', errors: { apiKey: KEY_MISSING } })
+  settings.closeAiSettings()
+  assert.equal(chat.buildNow(), false)
+  assert.equal(chat.retry(), false)
+  assert.deepEqual(windowState(), { open: true, focus: 'apiKey', errors: { apiKey: KEY_MISSING } })
+  assert.deepEqual(seen.forwarded, [])
+  assert.equal(reached, 0)
+  assert.equal(calls.length, 0)
+})
+
+test('a chave recusada na conversa, na montagem pela conversa e na geração abre o Configurar IA na chave com a mensagem da recusa', async () => {
+  const expected = await refusals()
+  settings.updateAiSettings({ keys: { openai: KEY } })
+
+  const { interview } = renderDialog({}, { live: true, state: { create: 'chat' } })
+  const turn = await interview.turn([{ role: 'user', text: REQUEST }], null, signal())
+  assert.equal(turn.ok, false)
+  assert.equal(turn.failure.code, 'invalid_key')
+  assert.deepEqual(windowState(), { open: true, focus: 'apiKey', errors: { apiKey: expected.turn } })
+  settings.closeAiSettings()
+
+  const run = await interview.run('generate', 'Fluxo de envio de boleto com o menu de segunda via.', signal())
+  assert.equal(run.ok, false)
+  assert.deepEqual(windowState(), { open: true, focus: 'apiKey', errors: { apiKey: expected.generation } })
+  settings.closeAiSettings()
+
+  const { form } = renderDialog({}, { live: true, state: { '': REQUEST } })
+  const shown = settingsOpened()
+  form.onSubmit(submitEvent())
+  assert.equal(windowState().open, false)
+  assert.deepEqual(await shown, { open: true, focus: 'apiKey', errors: { apiKey: expected.generation } })
+  assert.equal(expected.reached(), 3)
+  assert.equal(JSON.stringify(settings.readAiSettingsDialog()).includes(KEY), false)
+  assert.equal(calls.length, 0)
+})
+
+test('a recusa que chega com o Gerar com IA fechado ou recolhido abre o Configurar IA quando o diálogo abrir de novo, uma vez só', async () => {
+  const expected = await refusals()
+  settings.updateAiSettings({ keys: { openai: KEY } })
+  const hooks = { refs: [], effects: [] }
+  const { interview } = renderDialog({ open: false }, { live: true, hooks })
+  const turn = await interview.turn([{ role: 'user', text: REQUEST }], null, signal())
+  assert.equal(turn.ok, false)
+  assert.equal(windowState().open, false)
+
+  const { content } = renderDialog({}, { live: true, hooks })
+  content.onOpenAutoFocus(submitEvent())
+  assert.equal(windowState().open, false)
+  runEffects(hooks)
+  assert.deepEqual(windowState(), { open: true, focus: 'apiKey', errors: { apiKey: expected.turn } })
+  settings.closeAiSettings()
+
+  renderDialog({}, { live: true, hooks })
+  runEffects(hooks)
+  assert.equal(windowState().open, false)
+  assert.equal(expected.reached(), 1)
 })

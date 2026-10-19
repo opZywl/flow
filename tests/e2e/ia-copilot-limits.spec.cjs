@@ -8,6 +8,7 @@ const { flowToRi } = require('../../lib/atendimento/ai/edit.ts')
 const { INTERVIEW_SCHEMA_NAME, copilotSystemPrompt, interviewMessages } = require('../../lib/atendimento/ai/interview.ts')
 
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
+const SETTINGS_KEY = 'flow.ia'
 const HOST = 'api.openai.com'
 const FALLBACK_ERROR = 'A rota de reserva não fazia parte deste teste.'
 const EDIT_BANNER = 'Editando com IA. As mudanças aparecem aqui conforme chegam.'
@@ -378,16 +379,20 @@ async function openCopilot(page) {
   return panel
 }
 
-async function typeKey(panel) {
-  const settings = panel.getByRole('button', { name: 'Configurar IA', exact: true })
-  if ((await settings.getAttribute('aria-expanded')) !== 'true') await settings.click()
-  await panel.getByLabel('Chave da API da OpenAI').fill(KEY)
+async function seedKey(page) {
+  const value = JSON.stringify({ provider: 'openai', keys: { openai: KEY }, models: {}, effortChoice: null, fill: true })
+  await page.addInitScript(([name, saved]) => {
+    try {
+      if (window.sessionStorage.getItem(name) === null) window.sessionStorage.setItem(name, saved)
+    } catch {}
+  }, [SETTINGS_KEY, value])
 }
 
 async function start(page) {
+  await seedKey(page)
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
+  await expect(panel.getByText('Chave não informada', { exact: true })).toHaveCount(0)
   return panel
 }
 

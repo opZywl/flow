@@ -17,19 +17,15 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
-  Cpu,
   Download,
   Eye,
-  EyeOff,
   FileJson,
   FilePlus2,
   FileText,
-  KeyRound,
   Loader2,
   Maximize2,
   MessagesSquare,
   Minimize2,
-  RefreshCw,
   RotateCcw,
   Sparkles,
   Trash2,
@@ -41,7 +37,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from "@/hooks/use-toast"
 import {
   COUNT_LIMITS,
-  EFFORTS,
   LIMITS,
   SIZE_RANGES,
   type Effort,
@@ -67,7 +62,6 @@ import {
   type Received,
   type FlowDiff,
   type JobOutcome,
-  type Listing,
   type IssueGroup,
   type PreviewFeed,
   EFFORT_OPTIONS,
@@ -83,10 +77,7 @@ import {
   messageLines,
   modelName,
   modelVision,
-  modelChoices,
   pickEffort,
-  effortChoices,
-  keyWarning,
   stageText,
   progressText,
   requestField,
@@ -95,13 +86,20 @@ import {
   requestTurn,
   failureField,
   previewFeed,
-  requestModels,
   mergeIssues,
   issueSubject,
   issueLine,
   apiKeyError,
 } from "./ai/generation-client"
-import { useAiSetting } from "./ai/settings-store"
+import {
+  openAiSettings,
+  readAiSettings,
+  subscribeAiSettings,
+  useAiSetting,
+  type AiSettingsErrors,
+  type AiSettingsField,
+} from "./ai/settings-store"
+import { AiSummary } from "./ai-summary"
 import { FlowSelect } from "./flow-select"
 import { categoryTint, componentIcon, nodeSummary } from "./nodes/atendimento-node"
 import { ui } from "./ui"
@@ -160,7 +158,15 @@ interface AIWorkflowDialogProps {
   onBusyChange?: (busy: boolean) => void
 }
 
+interface SettingsRequest {
+  focus: AiSettingsField
+  errors: AiSettingsErrors
+}
+
 const FIELD_ORDER: readonly Field[] = ["provider", "apiKey", "model", "effort", "mode", "description", "image", "size", "count", "name", "fill"]
+const SETTINGS_FIELDS: readonly AiSettingsField[] = ["provider", "apiKey", "model", "effort"]
+const isSettingsField = (field: Field): field is AiSettingsField => SETTINGS_FIELDS.some((entry) => entry === field)
+const LOCAL_FIELDS: readonly Field[] = FIELD_ORDER.filter((field) => !isSettingsField(field))
 const UNSAFE_FILE_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f]/g
 const safeFileName = (fileName: string) => fileName.replace(UNSAFE_FILE_CHARACTERS, "-")
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"]
@@ -184,7 +190,7 @@ const MODE_OPTIONS: ReadonlyArray<{ value: Mode; label: string; hint: string; Ic
   { value: "create", label: "Criar fluxo novo", hint: "A IA monta um fluxo do zero a partir do pedido.", Icon: FilePlus2 },
   { value: "chat", label: "Conversar com a IA", hint: "A IA pergunta o que faltar, monta o fluxo no editor e segue com os ajustes que você pedir.", Icon: MessagesSquare },
 ]
-const CHAT_FIELDS: readonly Field[] = ["provider", "apiKey", "model", "effort", "fill"]
+const CHAT_FIELDS: readonly Field[] = ["fill"]
 const CHAT_INTRO =
   "Conte o que o seu atendimento precisa fazer. A IA pergunta o que faltar, como as opções do menu e as mensagens, e monta o fluxo no editor quando tudo estiver decidido."
 
@@ -198,6 +204,22 @@ const fieldBase = "block disabled:cursor-not-allowed disabled:opacity-60"
 const invalidField =
   "border-flow-danger hover:border-flow-danger focus-visible:border-flow-danger focus-visible:ring-flow-danger/25"
 const warningText = "mt-1 text-[11px] leading-4 text-flow-warning"
+
+function pickErrors<F extends Field>(errors: FieldErrors, fields: readonly F[]): Partial<Record<F, string>> {
+  const picked: Partial<Record<F, string>> = {}
+  for (const field of fields) {
+    const message = errors[field]
+    if (message) picked[field] = message
+  }
+  return picked
+}
+
+function withoutFields(errors: FieldErrors, fields: readonly Field[]): FieldErrors {
+  if (!fields.some((field) => errors[field])) return errors
+  const next = { ...errors }
+  for (const field of fields) delete next[field]
+  return next
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
@@ -362,12 +384,10 @@ export default function AIWorkflowDialog({
   onBusyChange,
 }: AIWorkflowDialogProps) {
   const baseId = useId()
-  const [provider, setProvider] = useAiSetting("provider")
-  const [keys, setKeys] = useAiSetting("keys")
-  const [models, setModels] = useAiSetting("models")
-  const [fetched, setFetched] = useAiSetting("fetched")
-  const [listing, setListing] = useState<Listing | null>(null)
-  const [showKey, setShowKey] = useState(false)
+  const [provider] = useAiSetting("provider")
+  const [keys] = useAiSetting("keys")
+  const [models] = useAiSetting("models")
+  const [fetched] = useAiSetting("fetched")
   const [prompt, setPrompt] = useState("")
   const [image, setImage] = useState<ReferenceImage | null>(null)
   const [imageBusy, setImageBusy] = useState(false)
@@ -375,7 +395,7 @@ export default function AIWorkflowDialog({
   const [size, setSize] = useState<GenerationSize>("auto")
   const [count, setCount] = useState("10")
   const [name, setName] = useState("")
-  const [effortChoice, setEffortChoice] = useAiSetting("effortChoice")
+  const [effortChoice] = useAiSetting("effortChoice")
   const [mode, setMode] = useState<Mode>("create")
   const [fill, setFill] = useAiSetting("fill")
   const [runningKind, setRunningKind] = useState<PreviewKind>("create")
@@ -392,7 +412,7 @@ export default function AIWorkflowDialog({
   const [view, setView] = useState<View>("form")
   const [, setRenderRequest] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
-  const listAbortRef = useRef<AbortController | null>(null)
+  const settingsRequestRef = useRef<SettingsRequest | null>(null)
   const imageTokenRef = useRef(0)
   const afterRenderRef = useRef<Array<() => void>>([])
   const resetOnCloseRef = useRef(false)
@@ -404,6 +424,8 @@ export default function AIWorkflowDialog({
   const regenerateRef = useRef<HTMLButtonElement>(null)
   const importRef = useRef<HTMLButtonElement>(null)
   const detailsRef = useRef<HTMLButtonElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const mainActionRef = useRef<() => HTMLElement | null>(() => null)
   const collapsedRef = useRef(false)
   const liveRef = useRef(false)
   const chatJobRef = useRef(false)
@@ -427,12 +449,8 @@ export default function AIWorkflowDialog({
   const currentModelName = modelName(info, model, listed)
   const vision = modelVision(info, model, listed)
   const imageBlocked = vision === false
-  const warning = keyWarning(info, apiKey)
   const sizeOption = SIZE_OPTIONS.find((entry) => entry.value === size) ?? SIZE_OPTIONS[0]
-  const providerListing = listing?.provider === provider ? listing : null
-  const modelOptions = modelChoices(info, model, listed)
   const effort = pickEffort(effortChoice, provider, model)
-  const effortOptions = effortChoices(provider, model)
   const canWatch = typeof onLivePreview === "function"
   const editAvailable = typeof getCurrentFlow === "function" && typeof onWorkflowEdited === "function"
   const chatting = mode === "chat"
@@ -483,11 +501,23 @@ export default function AIWorkflowDialog({
   useEffect(
     () => () => {
       abortRef.current?.abort()
-      listAbortRef.current?.abort()
       stopPreviewRef.current()
     },
     [],
   )
+
+  useEffect(() => {
+    let last = readAiSettings()
+    return subscribeAiSettings(() => {
+      const next = readAiSettings()
+      const remodeled = next.provider !== last.provider || next.models[next.provider] !== last.models[last.provider]
+      const changed = remodeled || next.keys[next.provider] !== last.keys[last.provider] || next.effortChoice !== last.effortChoice
+      last = next
+      if (!changed) return
+      settingsRequestRef.current = null
+      setFieldErrors((current) => withoutFields(current, remodeled ? [...SETTINGS_FIELDS, "image"] : SETTINGS_FIELDS))
+    })
+  }, [])
 
   useEffect(() => {
     if (open) {
@@ -500,9 +530,20 @@ export default function AIWorkflowDialog({
     if (collapsedRef.current) return
     if (chatJobRef.current) cancelChatRef.current()
     abortRef.current?.abort()
-    listAbortRef.current?.abort()
     stopPreviewRef.current()
   }, [open])
+
+  useEffect(() => {
+    if (!open || collapsed || !settingsRequestRef.current) return
+    const frame = window.requestAnimationFrame(() => {
+      const request = settingsRequestRef.current
+      settingsRequestRef.current = null
+      if (!request) return
+      if (!contentRef.current?.contains(document.activeElement)) mainActionRef.current()?.focus()
+      openAiSettings(request)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, collapsed])
 
   useEffect(() => {
     busyChangeRef.current?.(generating)
@@ -532,45 +573,18 @@ export default function AIWorkflowDialog({
   const focusMainAction = (target: View) =>
     afterRender(() => (target === "result" ? regenerateRef.current : submitRef.current)?.focus())
 
-  const clearFieldError = (...fields: Field[]) =>
-    setFieldErrors((current) => {
-      if (!fields.some((field) => current[field])) return current
-      const next = { ...current }
-      for (const field of fields) delete next[field]
-      return next
-    })
+  const settingsButton = () => document.getElementById(idFor("ai"))?.querySelector<HTMLButtonElement>("button") ?? null
 
-  const changeProvider = (id: ProviderId) => {
-    setProvider(id)
-    setShowKey(false)
-    clearFieldError("provider", "apiKey", "model")
-  }
+  const clearFieldError = (...fields: Field[]) => setFieldErrors((current) => withoutFields(current, fields))
 
-  const changeKey = (event: ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value
-    const changed = value.trim() !== apiKey.trim()
-    setKeys((current) => ({ ...current, [provider]: value }))
-    if (changed) {
-      setFetched((current) => (current[provider] ? { ...current, [provider]: undefined } : current))
-      if (listing?.provider === provider) {
-        listAbortRef.current?.abort()
-        listAbortRef.current = null
-        setListing(null)
-      }
-    }
-    clearFieldError("apiKey")
-  }
-
-  const changeModel = (value: string) => {
-    setModels((current) => ({ ...current, [provider]: value }))
-    clearFieldError("model", "image")
-  }
-
-  const changeEffort = (value: string) => {
-    const next = EFFORTS.find((entry) => entry === value)
-    if (!next) return
-    setEffortChoice(next)
-    clearFieldError("effort")
+  const askSettings = (errors: FieldErrors): boolean => {
+    const settings = pickErrors(errors, SETTINGS_FIELDS)
+    const focus = SETTINGS_FIELDS.find((field) => settings[field])
+    if (!focus) return false
+    const request: SettingsRequest = { focus, errors: settings }
+    if (openRef.current) openAiSettings(request)
+    else settingsRequestRef.current = request
+    return true
   }
 
   const changeMode = (value: Mode) => {
@@ -585,50 +599,6 @@ export default function AIWorkflowDialog({
   }
 
   const keyError = (key: string) => apiKeyError(info, key)
-
-  const clearLoading = (target: Listing["provider"]) =>
-    setListing((current) => (current?.provider === target && current.state === "loading" ? null : current))
-
-  const fetchModels = async () => {
-    const key = apiKey.trim()
-    const invalidKey = keyError(key)
-    if (invalidKey) {
-      setFieldErrors((current) => ({ ...current, apiKey: invalidKey }))
-      focusField("apiKey")
-      return
-    }
-    listAbortRef.current?.abort()
-    const controller = new AbortController()
-    listAbortRef.current = controller
-    const target = provider
-    setListing({ provider: target, state: "loading" })
-    try {
-      const listedModels = await requestModels(target, key, controller.signal)
-      if (controller.signal.aborted) {
-        clearLoading(target)
-        return
-      }
-      if (listedModels.ok) {
-        setFetched((current) => ({ ...current, [target]: { key, models: listedModels.models } }))
-        setListing({ provider: target, state: "done", count: listedModels.models.length })
-      } else {
-        setListing({ provider: target, state: "error", error: listedModels.error, details: listedModels.details })
-      }
-    } catch {
-      if (controller.signal.aborted) {
-        clearLoading(target)
-        return
-      }
-      setListing({
-        provider: target,
-        state: "error",
-        error: "Não foi possível buscar os modelos.",
-        details: "Verifique a conexão e tente novamente.",
-      })
-    } finally {
-      if (listAbortRef.current === controller) listAbortRef.current = null
-    }
-  }
 
   const blockedImageMessage = (attached: boolean) =>
     `O modelo ${currentModelName} não analisa imagens. ${attached ? "Escolha outro modelo ou remova a imagem." : "Escolha outro modelo para enviar uma imagem."}`
@@ -707,7 +677,7 @@ export default function AIWorkflowDialog({
     setImage(null)
     setImageBusy(false)
     clearFieldError("image")
-    focusField(imageBlocked ? "model" : "image")
+    afterRender(() => (imageBlocked ? settingsButton() : document.getElementById(idFor("image")))?.focus())
   }
 
   const onPromptKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -741,6 +711,7 @@ export default function AIWorkflowDialog({
     const field = failureField(rejection.code, rejection.field)
     if (field) {
       const message = [rejection.failure.title, rejection.failure.details].filter(Boolean).join(" ")
+      if (askSettings({ [field]: message })) return
       setFieldErrors((current) => ({ ...current, [field]: message }))
       setView("form")
       focusField(field)
@@ -835,12 +806,16 @@ export default function AIWorkflowDialog({
     if (abortRef.current) return
     const origin: View = showingResult ? "result" : "form"
     const errors = validate()
-    setFieldErrors(errors)
-    const invalid = FIELD_ORDER.find((field) => errors[field])
-    if (invalid) {
+    const local = pickErrors(errors, LOCAL_FIELDS)
+    const asked = askSettings(errors)
+    setFieldErrors(local)
+    const invalid = LOCAL_FIELDS.find((field) => local[field])
+    if (asked || invalid) {
       setFailure(null)
-      setView("form")
-      focusField(invalid)
+      if (invalid) {
+        setView("form")
+        if (!asked) focusField(invalid)
+      }
       return
     }
 
@@ -912,6 +887,9 @@ export default function AIWorkflowDialog({
 
   const chatInput = () => document.getElementById(idFor("chat"))?.querySelector<HTMLTextAreaElement>("textarea") ?? null
 
+  const mainAction = () => (showingResult ? regenerateRef.current : chatting ? chatInput() : submitRef.current)
+  mainActionRef.current = mainAction
+
   const credentialErrors = (): FieldErrors => {
     const errors: FieldErrors = {}
     const invalidKey = keyError(apiKey.trim())
@@ -920,17 +898,10 @@ export default function AIWorkflowDialog({
     return errors
   }
 
-  const checkCredentials = (): boolean => {
-    const errors = credentialErrors()
-    const invalid = FIELD_ORDER.find((field) => errors[field])
-    if (!invalid) return true
-    setFieldErrors((current) => ({ ...current, ...errors }))
-    focusField(invalid)
-    return false
-  }
+  const checkCredentials = (): boolean => !askSettings(credentialErrors())
 
   const markChatField = (field: Field | undefined, message: string) => {
-    if (!field || !CHAT_FIELDS.includes(field)) return
+    if (!field || askSettings({ [field]: message }) || !CHAT_FIELDS.includes(field)) return
     setFieldErrors((current) => ({ ...current, [field]: message }))
   }
 
@@ -940,8 +911,7 @@ export default function AIWorkflowDialog({
     signal: AbortSignal,
   ): Promise<InterviewTurnResult> => {
     const errors = credentialErrors()
-    if (errors.apiKey || errors.model) {
-      checkCredentials()
+    if (askSettings(errors)) {
       return {
         ok: false,
         failure: {
@@ -1170,18 +1140,21 @@ export default function AIWorkflowDialog({
   }
 
   const handleOpenAutoFocus = (event: Event) => {
-    const invalid = FIELD_ORDER.find((field) => fieldErrors[field])
+    const request = settingsRequestRef.current
+    const invalid = LOCAL_FIELDS.find((field) => fieldErrors[field])
     const target = generating
       ? cancelRef.current
       : invalid
         ? document.getElementById(idFor(invalid))
-        : failure
-          ? (showingResult ? regenerateRef : submitRef).current
+        : failure || request
+          ? mainAction()
           : showingResult
             ? importRef.current
-            : chatting && apiKey.trim()
-              ? chatInput()
-              : document.getElementById(idFor(apiKey.trim() ? "description" : "apiKey"))
+            : !apiKey.trim()
+              ? settingsButton()
+              : chatting
+                ? chatInput()
+                : document.getElementById(idFor("description"))
     if (!target) return
     event.preventDefault()
     target.focus()
@@ -1195,7 +1168,6 @@ export default function AIWorkflowDialog({
     }
     setFailure(null)
     setFieldErrors({})
-    setShowKey(false)
     setDragActive(false)
     setNotice("")
     if (!resetOnCloseRef.current) return
@@ -1233,18 +1205,6 @@ export default function AIWorkflowDialog({
     else cancelGeneration()
   }
 
-  const listingStatus = !providerListing
-    ? ""
-    : providerListing.state === "loading"
-      ? "Buscando modelos."
-      : providerListing.state === "done"
-        ? providerListing.count
-          ? `${plural(providerListing.count, "modelo disponível", "modelos disponíveis")} na sua conta.`
-          : "Nenhum modelo compatível encontrado nesta conta."
-        : ""
-  const listingBusy = providerListing?.state === "loading"
-  const modelHint = `ID ${model}.${vision === true ? " Analisa imagens." : vision === false ? " Não analisa imagens." : ""}`
-  const effortHint = EFFORT_OPTIONS[effort].hint
   const liveGenerating = generating && liveRef.current
   const runningEdit = runningKind === "edit"
   const resultTitle = !summary
@@ -1371,6 +1331,7 @@ export default function AIWorkflowDialog({
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent
+          ref={contentRef}
           onKeyDown={handleContentKeyDown}
           onOpenAutoFocus={handleOpenAutoFocus}
           onCloseAutoFocus={handleCloseAutoFocus}
@@ -1566,209 +1527,11 @@ export default function AIWorkflowDialog({
               </section>
             ) : (
               <form id={idFor("form")} noValidate onSubmit={submit} onPaste={onPaste} className="space-y-6">
-                <fieldset disabled={generating} aria-labelledby={idFor("ai-title")} className="min-w-0 space-y-4">
+                <fieldset id={idFor("ai")} disabled={generating} aria-labelledby={idFor("ai-title")} className="min-w-0 space-y-4">
                   <h3 id={idFor("ai-title")} className={ui.sectionTitle}>
                     Modelo de IA
                   </h3>
-
-                  <div>
-                    <p id={idFor("provider-label")} className={ui.label}>
-                      Provedor de IA
-                    </p>
-                    <div
-                      role="radiogroup"
-                      aria-labelledby={idFor("provider-label")}
-                      aria-describedby={fieldErrors.provider ? idFor("provider-error") : undefined}
-                      className={cn("grid grid-cols-2 gap-2", PROVIDERS.length > 4 ? "sm:grid-cols-3" : "sm:grid-cols-4")}
-                    >
-                      {PROVIDERS.map((entry) => {
-                        const checked = entry.id === provider
-                        const hasKey = Boolean(keys[entry.id]?.trim())
-                        return (
-                          <label
-                            key={entry.id}
-                            className={cn(
-                              "flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
-                              checked
-                                ? "border-flow-accent bg-flow-accent/10"
-                                : "border-flow-border bg-flow-surface hover:border-flow-accent/60",
-                            )}
-                          >
-                            <input
-                              id={checked ? idFor("provider") : undefined}
-                              type="radio"
-                              name={idFor("provider-choice")}
-                              value={entry.id}
-                              checked={checked}
-                              onChange={() => changeProvider(entry.id)}
-                              aria-label={entry.name}
-                              aria-describedby={describedBy(idFor(`vendor-${entry.id}`), hasKey && idFor(`key-${entry.id}`))}
-                              className="sr-only"
-                            />
-                            <span
-                              aria-hidden="true"
-                              className={cn(
-                                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition",
-                                checked ? "bg-flow-accent text-white" : "bg-flow-soft text-flow-muted-strong",
-                              )}
-                            >
-                              <Cpu className="h-4 w-4" />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-xs font-semibold text-flow-fg">{entry.name}</span>
-                              <span id={idFor(`vendor-${entry.id}`)} className="block truncate text-[11px] leading-4 text-flow-muted">
-                                {entry.vendor}
-                              </span>
-                            </span>
-                            {hasKey ? (
-                              <>
-                                <KeyRound className="h-3.5 w-3.5 shrink-0 text-flow-success" aria-hidden="true" />
-                                <span id={idFor(`key-${entry.id}`)} className="sr-only">
-                                  Chave informada
-                                </span>
-                              </>
-                            ) : null}
-                          </label>
-                        )
-                      })}
-                    </div>
-                    {fieldErrors.provider ? (
-                      <p id={idFor("provider-error")} className={ui.error}>
-                        {fieldErrors.provider}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <label htmlFor={idFor("apiKey")} className={ui.label}>
-                      Chave da API {info.of}
-                    </label>
-                    <div className="relative">
-                      <input
-                        id={idFor("apiKey")}
-                        type={showKey ? "text" : "password"}
-                        value={apiKey}
-                        onChange={changeKey}
-                        placeholder={info.keyPlaceholder}
-                        maxLength={LIMITS.apiKey}
-                        autoComplete="off"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        data-1p-ignore="true"
-                        data-lpignore="true"
-                        data-bwignore="true"
-                        data-form-type="other"
-                        aria-invalid={fieldErrors.apiKey ? true : undefined}
-                        aria-describedby={describedBy(
-                          idFor("apiKey-hint"),
-                          warning && idFor("apiKey-warning"),
-                          fieldErrors.apiKey && idFor("apiKey-error"),
-                        )}
-                        className={cn(ui.input, "pr-10 font-mono", fieldBase, fieldErrors.apiKey && invalidField)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowKey((current) => !current)}
-                        aria-label={showKey ? "Ocultar chave" : "Mostrar chave"}
-                        aria-controls={idFor("apiKey")}
-                        title={showKey ? "Ocultar chave" : "Mostrar chave"}
-                        className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-soft hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 disabled:pointer-events-none disabled:opacity-40"
-                      >
-                        {showKey ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
-                      </button>
-                    </div>
-                    <p id={idFor("apiKey-hint")} className={ui.hint}>
-                      A chave fica só nesta página, não é salva e serve apenas para chamar a API {info.of}.
-                    </p>
-                    {warning ? (
-                      <p id={idFor("apiKey-warning")} className={warningText}>
-                        {warning}
-                      </p>
-                    ) : null}
-                    {fieldErrors.apiKey ? (
-                      <p id={idFor("apiKey-error")} className={ui.error}>
-                        {fieldErrors.apiKey}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <label htmlFor={idFor("model")} className={ui.label}>
-                      Modelo
-                    </label>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <FlowSelect
-                        key={provider}
-                        id={idFor("model")}
-                        value={model}
-                        onValueChange={changeModel}
-                        placeholder="Selecione um modelo"
-                        options={modelOptions}
-                        aria-invalid={fieldErrors.model ? true : undefined}
-                        aria-describedby={describedBy(
-                          idFor("model-hint"),
-                          listingStatus && idFor("models-status"),
-                          fieldErrors.model && idFor("model-error"),
-                        )}
-                        className={cn("min-w-0 sm:flex-1", fieldErrors.model && invalidField)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void fetchModels()}
-                        disabled={!apiKey.trim() || listingBusy}
-                        aria-describedby={idFor("models-status")}
-                        className={cn(ui.button, "h-9 justify-center")}
-                      >
-                        {listingBusy ? (
-                          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                        )}
-                        Buscar modelos da API
-                      </button>
-                    </div>
-                    <p id={idFor("model-hint")} className={ui.hint}>
-                      {modelHint}
-                      {apiKey.trim() ? "" : " Informe a chave para buscar os modelos liberados na sua conta."}
-                    </p>
-                    <p id={idFor("models-status")} role="status" className={cn(ui.hint, !listingStatus && "sr-only")}>
-                      {listingStatus}
-                    </p>
-                    {providerListing?.state === "error" ? (
-                      <p role="alert" className={ui.error}>
-                        {[providerListing.error, providerListing.details].filter(Boolean).join(" ")}
-                      </p>
-                    ) : null}
-                    {fieldErrors.model ? (
-                      <p id={idFor("model-error")} className={ui.error}>
-                        {fieldErrors.model}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="sm:w-1/2 sm:pr-2">
-                    <label htmlFor={idFor("effort")} className={ui.label}>
-                      Esforço
-                    </label>
-                    <FlowSelect
-                      id={idFor("effort")}
-                      value={effort}
-                      onValueChange={changeEffort}
-                      options={effortOptions}
-                      aria-invalid={fieldErrors.effort ? true : undefined}
-                      aria-describedby={describedBy(idFor("effort-hint"), fieldErrors.effort && idFor("effort-error"))}
-                      className={fieldErrors.effort ? invalidField : undefined}
-                    />
-                    <p id={idFor("effort-hint")} className={ui.hint}>
-                      {effortHint}
-                    </p>
-                    {fieldErrors.effort ? (
-                      <p id={idFor("effort-error")} className={ui.error}>
-                        {fieldErrors.effort}
-                      </p>
-                    ) : null}
-                  </div>
+                  <AiSummary className="rounded-xl border border-flow-border bg-flow-soft px-3 py-2" />
                 </fieldset>
 
                 <fieldset disabled={generating} aria-labelledby={idFor("request-title")} className="min-w-0 space-y-4">

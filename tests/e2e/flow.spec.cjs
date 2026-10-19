@@ -17,8 +17,10 @@ const FILLED = {
 }
 const PHONE = { width: 390, height: 844 }
 const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
-const HEADER_TOOLS = ['Converter para o padrão ERA', 'Imagem de fundo', 'Cores', 'Alternar tema']
-const MORE_ACTIONS = ['Converter para o padrão ERA', 'Trocar imagem', 'Salvar imagem do canvas', 'Restaurar padrão', 'Cores', 'Alternar tema']
+const ERA = 'Converter para o padrão ERA'
+const HEADER_TOOLS = ['Imagem de fundo', 'Cores', 'Alternar tema']
+const MORE_ACTIONS = ['Trocar imagem', 'Salvar imagem do canvas', 'Restaurar padrão', 'Cores', 'Alternar tema']
+const PROVIDER_MODELS = { ChatGPT: [/^GPT-6\.1 Sol/, 'Chave da API da OpenAI'], Claude: [/^Claude Opus 5\.5/, 'Chave da API da Anthropic'], Gemini: [/^Gemini 3\.8 Flash/, 'Chave da API do Google'], Grok: [/^Grok 4\.7/, 'Chave da API da xAI'] }
 
 function sample() {
   const flow = newFlow(new Date('2026-01-15T12:00:00.000Z'))
@@ -491,7 +493,7 @@ test('header search focuses the component in the visible canvas beside the confi
   }).toBeLessThan(8)
 })
 
-test('on a 390 px phone the header fits, keeps the search usable and every secondary tool works from Mais opções', async ({ page }) => {
+test('on a 390 px phone the header fits, keeps the search usable, every secondary tool works from Mais opções and the ERA conversion is not offered', async ({ page }) => {
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.setViewportSize(PHONE)
@@ -506,6 +508,7 @@ test('on a 390 px phone the header fits, keeps the search usable and every secon
   expect((await search.boundingBox()).width, 'largura da busca').toBeGreaterThanOrEqual(140)
   for (const name of ['Gerar com IA', 'Copiloto', 'Abrir prévia', 'Mais opções']) await expect(header.getByRole('button', { name, exact: true }), name).toBeInViewport({ ratio: 1 })
   for (const name of HEADER_TOOLS) await expect(header.getByRole('button', { name, exact: true }), `${name} fica no menu`).toHaveCount(0)
+  await expect(header.getByRole('button', { name: ERA, exact: true }), 'a conversão para o padrão ERA não aparece no cabeçalho').toHaveCount(0)
 
   const more = header.locator('button[aria-label="Mais opções"]')
   const menu = page.getByRole('menu', { name: 'Mais opções' })
@@ -521,12 +524,10 @@ test('on a 390 px phone the header fits, keeps the search usable and every secon
   await expect(menu.getByRole('group', { name: 'Imagem de fundo', exact: true }).getByRole('menuitem')).toHaveCount(3)
   await expect(menu.getByRole('menuitem', { name: 'Restaurar padrão', exact: true })).toHaveAttribute('aria-disabled', 'true')
 
-  await menu.getByRole('menuitem', { name: 'Converter para o padrão ERA', exact: true }).click()
-  await expect(menu).toHaveCount(0)
-  const era = page.getByRole('dialog', { name: 'Converter seu fluxo no padrão ERA' })
-  await expect(era).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: ERA, exact: true }), 'a conversão para o padrão ERA não aparece em Mais opções').toHaveCount(0)
   await page.keyboard.press('Escape')
-  await expect(era).toHaveCount(0)
+  await expect(menu).toHaveCount(0)
+  await expect(more).toHaveAttribute('aria-expanded', 'false')
 
   const fromMenu = async (name) => {
     await more.click()
@@ -577,6 +578,7 @@ test('on a 390 px phone the header fits, keeps the search usable and every secon
   await expect(menu).toHaveCount(0)
   await expect(more).toBeHidden()
   for (const name of HEADER_TOOLS) await expect(header.getByRole('button', { name, exact: true })).toBeVisible()
+  await expect(header.getByRole('button', { name: ERA, exact: true }), 'a conversão para o padrão ERA também some no cabeçalho largo').toHaveCount(0)
   expect(errors).toEqual([])
 })
 
@@ -763,31 +765,63 @@ test('local preview follows the chosen branch even after panning triggers an aut
   await expect(chat.getByText('Conversa finalizada.', { exact: true })).toBeVisible()
 })
 
-test('switching the AI provider keeps the recommended model and never breaks the page', async ({ page }) => {
+test('only ChatGPT shows by default, and with ?ia=todos switching the AI provider in Configurar IA keeps the recommended model and never breaks the page', async ({ page }) => {
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await open(page)
-  await page.getByRole('button', { name: 'Gerar com IA' }).first().click()
-  const dialog = page.getByRole('dialog')
-  const model = dialog.getByRole('combobox', { name: 'Modelo' })
-  const choose = async (name) => {
-    const radio = dialog.getByRole('radio', { name, exact: true })
-    await dialog.locator('label', { has: page.getByRole('radio', { name, exact: true }) }).click()
-    await expect(radio).toBeChecked()
+  const generate = page.getByRole('dialog', { name: 'Gerar fluxo com IA', exact: true })
+  const settings = page.getByRole('dialog', { name: 'Configurar IA', exact: true })
+  const provider = settings.getByRole('combobox', { name: 'Provedor de IA', exact: true })
+  const model = settings.getByRole('combobox', { name: 'Modelo', exact: true })
+  const configure = async () => {
+    await page.getByRole('button', { name: 'Gerar com IA', exact: true }).click()
+    await expect(generate).toBeVisible()
+    await generate.getByRole('button', { name: 'Configurar IA', exact: true }).click()
+    await expect(settings).toBeVisible()
   }
-  await expect(model).toHaveText(/^GPT-6\.1 Sol/)
-  for (const [name, expected] of [['Claude', /^Claude Opus 5\.5/], ['Gemini', /^Gemini 3\.8 Flash/], ['Grok', /^Grok 4\.7/], ['ChatGPT', /^GPT-6\.1 Sol/], ['Claude', /^Claude Opus 5\.5/]]) {
-    await choose(name)
+  const choose = async (name, expected = PROVIDER_MODELS[name][0]) => {
+    await provider.click()
+    await page.getByRole('option', { name, exact: true }).click()
+    await expect(provider).toHaveText(name)
     await expect(model).toHaveText(expected)
+    await expect(settings.getByLabel(PROVIDER_MODELS[name][1], { exact: true })).toBeVisible()
   }
+
+  await open(page)
+  await configure()
+  await expect(provider, 'sem ?ia=todos só o ChatGPT aparece').toHaveCount(0)
+  await expect(settings.getByLabel('Chave da API da OpenAI', { exact: true })).toBeVisible()
+  await expect(model).toHaveText(/^GPT-6\.1 Sol/)
+  await settings.getByRole('button', { name: 'Concluir', exact: true }).click()
+  await expect(settings).toHaveCount(0)
+  await expect(generate.getByText('OpenAI · GPT-6.1 Sol · Esforço equilibrado', { exact: true })).toBeVisible()
+  for (const name of ['ChatGPT', 'Claude', 'Gemini', 'Grok']) await expect(generate.getByRole('radio', { name, exact: true }), `${name} não fica no Gerar com IA`).toHaveCount(0)
+
+  await page.goto('/flow?ia=todos')
+  await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
+  await configure()
+  await expect(provider).toHaveText('ChatGPT')
+  await provider.click()
+  await expect(page.getByRole('option')).toHaveText(['ChatGPT', 'Claude', 'Gemini', 'Grok'])
+  await page.keyboard.press('Escape')
+  await expect(settings).toBeVisible()
+  await expect(model).toHaveText(/^GPT-6\.1 Sol/)
+  for (const name of ['Claude', 'Gemini', 'Grok', 'ChatGPT', 'Claude']) await choose(name)
   await model.click()
   await page.getByRole('option', { name: /^Claude Sonnet 5\.5/ }).click()
   await expect(model).toHaveText(/^Claude Sonnet 5\.5/)
   await choose('Gemini')
-  await expect(model).toHaveText(/^Gemini 3\.8 Flash/)
-  await choose('Claude')
-  await expect(model).toHaveText(/^Claude Sonnet 5\.5/)
-  await expect(dialog).toBeVisible()
+  await choose('Claude', /^Claude Sonnet 5\.5/)
+  await settings.getByRole('button', { name: 'Concluir', exact: true }).click()
+  await expect(settings).toHaveCount(0)
+  await expect(generate.getByText('Anthropic · Claude Sonnet 5.5 · Esforço equilibrado', { exact: true })).toBeVisible()
+  await expect(generate.getByText('Chave não informada', { exact: true })).toBeVisible()
+
+  await page.goto('/flow')
+  await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
+  await configure()
+  await expect(provider, 'sem ?ia=todos o provedor escondido volta para o ChatGPT').toHaveCount(0)
+  await expect(settings.getByLabel('Chave da API da OpenAI', { exact: true })).toBeVisible()
+  await expect(model).toHaveText(/^GPT-6\.1 Sol/)
   expect(errors).toEqual([])
 })
 

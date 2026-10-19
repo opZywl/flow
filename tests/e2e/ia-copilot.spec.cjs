@@ -31,6 +31,12 @@ const OLD_NOTICE = /só tem o Início|use Gerar com IA/
 const REFINE_HINT = 'O próximo pedido ajusta a proposta mostrada no canvas.'
 const FALLBACK_ERROR = 'A rota de reserva não fazia parte deste teste.'
 const SUMMARY = 'OpenAI · GPT-6.1 Sol · Esforço equilibrado'
+const MISSING = 'Chave não informada'
+const SETTINGS_KEY = 'flow.ia'
+const SETTINGS_DESCRIPTION = 'A chave, o modelo e o esforço valem para o Gerar com IA e para o Copiloto.'
+const KEY_LABEL = 'Chave da API da OpenAI'
+const KEY_HINT = 'A chave fica guardada só nesta aba, até você fechar a aba, e serve apenas para chamar a API da OpenAI.'
+const KEY_MISSING = 'Informe a chave da API da OpenAI.'
 const THINKING = 'Pensando no pedido.'
 const FOLLOW_UP = 'Precisa mudar mais alguma coisa no fluxo?'
 const EDIT_NOW = 'Pode editar agora com o que já foi decidido.'
@@ -481,7 +487,23 @@ const library = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('w
 const components = (flow) => flow.nodes.filter((node) => node.data.type !== START_TYPE).length
 const removedList = (flow, ids) => ids.map((id) => `${getComponentLabel(flow.nodes.find((node) => node.id === id).data.type)} · ID ${id}`).join(', ')
 
-async function openEditor(page, flow = BASE_FLOW) {
+const settingsWindow = (page) => page.getByRole('dialog', { name: 'Configurar IA', exact: true })
+const generateDialog = (page) => page.getByRole('dialog', { name: 'Gerar fluxo com IA', exact: true })
+const settingsButton = (scope) => scope.getByRole('button', { name: 'Configurar IA', exact: true })
+const sessionSettings = (page) => page.evaluate((name) => JSON.parse(sessionStorage.getItem(name) || 'null'), SETTINGS_KEY)
+const localText = (page) => page.evaluate(() => Array.from({ length: localStorage.length }, (_, index) => `${localStorage.key(index)}=${localStorage.getItem(localStorage.key(index))}`).join('\n'))
+
+async function seedKey(page, key = KEY) {
+  const value = JSON.stringify({ provider: 'openai', keys: { openai: key }, models: {}, effortChoice: null, fill: true })
+  await page.addInitScript(([name, saved]) => {
+    try {
+      if (window.sessionStorage.getItem(name) === null) window.sessionStorage.setItem(name, saved)
+    } catch {}
+  }, [SETTINGS_KEY, value])
+}
+
+async function openEditor(page, flow = BASE_FLOW, { key = KEY } = {}) {
+  if (key) await seedKey(page, key)
   await page.goto('/flow')
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
   await page.getByLabel('Importar arquivo JSON').setInputFiles({ name: 'base.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(flow)) })
@@ -497,10 +519,26 @@ async function openCopilot(page) {
   return panel
 }
 
-async function typeKey(panel) {
-  const settings = panel.getByRole('button', { name: 'Configurar IA', exact: true })
-  if ((await settings.getAttribute('aria-expanded')) !== 'true') await settings.click()
-  await panel.getByLabel('Chave da API da OpenAI').fill(KEY)
+async function finishSettings(page) {
+  const settings = settingsWindow(page)
+  await settings.getByRole('button', { name: 'Concluir', exact: true }).click()
+  await expect(settings).toHaveCount(0)
+}
+
+async function startsWithoutKey(target) {
+  const errors = []
+  target.on('pageerror', (error) => errors.push(error.message))
+  await target.goto('/flow')
+  await expect(target.getByLabel('Nome do fluxo')).toBeVisible()
+  expect(JSON.stringify(await sessionSettings(target)), 'a chave não passa para outra aba').not.toContain(KEY)
+  const panel = await openCopilot(target)
+  await expect(panel.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(panel.getByText(MISSING, { exact: true })).toBeVisible()
+  await settingsButton(panel).click()
+  const key = settingsWindow(target).getByLabel(KEY_LABEL, { exact: true })
+  await expect(key).toBeFocused()
+  await expect(key).toHaveValue('')
+  expect(errors).toEqual([])
 }
 
 async function ask(panel, text) {
@@ -517,8 +555,8 @@ async function proposal(panel, count = 1) {
   return panel.getByRole('list', { name: 'Mudanças no fluxo aberto' }).nth(count - 1).getByRole('listitem')
 }
 
-test('the Copiloto button opens a side panel next to the canvas, keeps it mounted and Gerar com IA closes it', async ({ page }) => {
-  await openEditor(page)
+test('the Copiloto button opens a side panel next to the canvas, keeps it mounted, sets the AI only in the Configurar IA window and Gerar com IA closes it', async ({ page }) => {
+  await openEditor(page, BASE_FLOW, { key: '' })
   const button = trigger(page)
   await expect(button).toHaveAccessibleName('Copiloto')
   await expect(button).toHaveAttribute('title', 'Copiloto')
@@ -534,11 +572,44 @@ test('the Copiloto button opens a side panel next to the canvas, keeps it mounte
   await expect(button).toHaveAttribute('aria-controls', id)
   await expect(panel.getByRole('heading', { name: 'Copiloto', exact: true })).toBeVisible()
   await expect(panel.getByText('Edita o fluxo aberto', { exact: true })).toBeVisible()
-  await expect(panel.getByRole('button', { name: 'Configurar IA', exact: true })).toHaveAttribute('aria-expanded', 'true')
-  await expect(panel.getByLabel('Chave da API da OpenAI')).toBeFocused()
-  await expect(panel.getByText('A chave fica só nesta página, não é salva e serve apenas para chamar a API da OpenAI. É a mesma usada no Gerar com IA.')).toBeVisible()
-  await expect(panel.getByRole('combobox', { name: 'Modelo' })).toHaveText(/^GPT-6\.1 Sol/)
-  await expect(panel.getByRole('combobox', { name: 'Esforço' })).toHaveText('Equilibrado')
+  await expect(composer(panel)).toBeFocused()
+  await expect(settingsWindow(page)).toHaveCount(0)
+  const settings = settingsButton(panel)
+  await expect(settings).toHaveCount(1)
+  await expect(settings).toHaveAttribute('aria-haspopup', 'dialog')
+  await expect(panel.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(panel.getByText(MISSING, { exact: true })).toBeVisible()
+  await expect(panel.getByLabel(KEY_LABEL)).toHaveCount(0)
+  for (const name of ['Provedor de IA', 'Modelo', 'Esforço']) await expect(panel.getByRole('combobox', { name, exact: true }), `${name} fica só na janela Configurar IA`).toHaveCount(0)
+  const closeBox = await panel.getByRole('button', { name: 'Fechar Copiloto', exact: true }).boundingBox()
+  const settingsBox = await settings.boundingBox()
+  const logBox = await conversation(panel).boundingBox()
+  expect(settingsBox.y, 'Configurar IA fica na linha logo abaixo do cabeçalho').toBeGreaterThanOrEqual(closeBox.y + closeBox.height)
+  expect(settingsBox.y + settingsBox.height, 'e acima da conversa').toBeLessThanOrEqual(logBox.y + 1)
+
+  await settings.click()
+  const config = settingsWindow(page)
+  await expect(config).toBeVisible()
+  await expect(config).toHaveAccessibleDescription(SETTINGS_DESCRIPTION)
+  const key = config.getByLabel(KEY_LABEL, { exact: true })
+  await expect(key).toBeFocused()
+  await expect(key).toHaveValue('')
+  await expect(key).not.toHaveAttribute('aria-invalid')
+  await expect(key).toHaveAttribute('type', 'password')
+  await expect(config.getByText(KEY_HINT, { exact: true })).toBeVisible()
+  await config.getByRole('button', { name: 'Mostrar chave', exact: true }).click()
+  await expect(key).toHaveAttribute('type', 'text')
+  await config.getByRole('button', { name: 'Ocultar chave', exact: true }).click()
+  await expect(key).toHaveAttribute('type', 'password')
+  await expect(config.getByRole('combobox', { name: 'Provedor de IA', exact: true })).toHaveCount(0)
+  await expect(config.getByRole('combobox', { name: 'Modelo', exact: true })).toHaveText(/^GPT-6\.1 Sol/)
+  await expect(config.getByRole('button', { name: 'Buscar modelos da API', exact: true })).toBeDisabled()
+  await expect(config.getByRole('combobox', { name: 'Esforço', exact: true })).toHaveText('Equilibrado')
+  await expect(config.getByRole('button', { name: 'Concluir', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(config).toHaveCount(0)
+  await expect(settings, 'o foco volta para Configurar IA').toBeFocused()
+  await expect(panel.getByText(MISSING, { exact: true })).toBeVisible()
   const log = conversation(panel)
   await expect(log).toHaveAttribute('aria-live', 'polite')
   await expect(log.getByText(INTRO)).toBeVisible()
@@ -618,7 +689,6 @@ test('crie uma opcao 8: the Copiloto asks what the new option does before editin
 
   await openEditor(page, MENU_FLOW)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, OPTION_REQUEST)
   const log = conversation(panel)
   await thinking.reached
@@ -700,7 +770,6 @@ test('Editar agora edits right away with what was decided, without another quest
 
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, PROMPT)
   await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT)])
   await expect(chips(panel)).toHaveText(ASK_EDIT.suggestions)
@@ -737,7 +806,6 @@ test('Parar while the Copiloto thinks keeps the open flow and the late answer ne
   ai.say(ASK_EDIT, late)
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, PROMPT)
   await late.reached
   const log = conversation(panel)
@@ -767,21 +835,29 @@ test('Parar while the Copiloto thinks keeps the open flow and the late answer ne
   expect(ai.buildCalls()).toHaveLength(0)
 })
 
-test('a key refused on the question marks the key field and Tentar de novo repeats the same turn', async ({ page, ai }) => {
+test('a key refused on the question opens Configurar IA on the key with the error and Tentar de novo repeats the same turn', async ({ page, ai }) => {
   ai.turns.push({ status: 401, body: { error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } } })
   ai.say(ASK_EDIT)
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
+  await expect(panel.getByText(MISSING, { exact: true })).toHaveCount(0)
   await ask(panel, PROMPT)
 
+  const config = settingsWindow(page)
+  await expect(config).toBeVisible({ timeout: 15000 })
+  const key = config.getByLabel(KEY_LABEL, { exact: true })
+  await expect(key).toBeFocused()
+  await expect(key).toHaveValue(KEY)
+  await expect(key).toHaveAttribute('aria-invalid', 'true')
+  await expect(config.getByText(`${KEY_REJECTED} ${KEY_DETAILS}`, { exact: true })).toBeVisible()
+  await finishSettings(page)
+
   const alert = panel.getByRole('alert')
-  await expect(alert).toBeVisible({ timeout: 15000 })
+  await expect(alert).toBeVisible()
   await expect(alert).toContainText(KEY_REJECTED)
   await expect(alert).toContainText(KEY_DETAILS)
   await expect(alert).not.toContainText(KEY)
-  await expect(panel.getByRole('button', { name: 'Configurar IA', exact: true })).toHaveAttribute('aria-expanded', 'true')
-  await expect(panel.getByLabel('Chave da API da OpenAI')).toHaveAttribute('aria-invalid', 'true')
+  await expect(panel.getByLabel(KEY_LABEL)).toHaveCount(0)
   await expect(messages(panel)).toHaveText([you(PROMPT)])
   expect(ai.turnCalls()).toHaveLength(1)
   expect(ai.buildCalls()).toHaveLength(0)
@@ -790,8 +866,10 @@ test('a key refused on the question marks the key field and Tentar de novo repea
   await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT)])
   await expect(alert).toHaveCount(0)
   await expect(chips(panel)).toHaveText(ASK_EDIT.suggestions)
+  await expect(config).toHaveCount(0)
   expect(ai.turnCalls()).toHaveLength(2)
   expect(inputOf(ai.turnCalls()[1])).toBe(inputOf(ai.turnCalls()[0]))
+  expect(ai.turnCalls()[1].headers.authorization).toBe(`Bearer ${KEY}`)
   expect(ai.buildCalls()).toHaveLength(0)
 })
 
@@ -813,7 +891,6 @@ test('an edit through the Copiloto shows live on the canvas, lists the changes a
   expect(entry).toEqual({ id: entry.id, ...BASE_STATE })
 
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, PROMPT)
   const log = conversation(panel)
   await expect(log.getByText(PROMPT)).toHaveText(you(PROMPT))
@@ -903,7 +980,6 @@ test('Descartar and Parar leave the open flow exactly as it was', async ({ page,
   ai.say(EDIT_TURN)
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, PROMPT)
   await proposal(panel)
   const nodes = page.locator('.react-flow__node')
@@ -958,7 +1034,6 @@ test('a refinement asks with the proposal on the canvas, sends the proposal as t
   ai.say(EDIT_TURN)
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, PROMPT)
   await proposal(panel)
   const nodes = page.locator('.react-flow__node')
@@ -1022,7 +1097,6 @@ test('closing the panel keeps the edit running off the canvas, then a toast and 
   ai.builds.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, PROMPT)
   await hold.reached
   const nodes = page.locator('.react-flow__node')
@@ -1055,7 +1129,6 @@ test('a question that arrives with the panel closed shows a toast and a badge th
   ai.say(ASK_EDIT, late)
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, PROMPT)
   await late.reached
   await trigger(page).click()
@@ -1078,6 +1151,7 @@ test('a question that arrives with the panel closed shows a toast and a badge th
 })
 
 test('a new flow with only Início: the Copiloto builds the request starting from Início, shows the proposal and Aplicar is one undoable step', async ({ page, ai }) => {
+  await seedKey(page)
   await page.goto('/flow')
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
   const nodes = page.locator('.react-flow__node')
@@ -1098,7 +1172,6 @@ test('a new flow with only Início: the Copiloto builds the request starting fro
   const panel = await openCopilot(page)
   await expect(panel.getByText(OLD_NOTICE)).toHaveCount(0)
   await expect(panel.getByRole('button', { name: 'Abrir Gerar com IA', exact: true })).toHaveCount(0)
-  await typeKey(panel)
   await composer(panel).fill(START_REQUEST)
   await expect(sendButton(panel)).toBeEnabled()
   await composer(panel).press('Enter')
@@ -1155,7 +1228,6 @@ test('a flow with only Início and a note goes through the Copiloto too, and the
   await expect(memo).toContainText(NOTE_TEXT)
   const panel = await openCopilot(page)
   await expect(panel.getByText(OLD_NOTICE)).toHaveCount(0)
-  await typeKey(panel)
   await ask(panel, START_REQUEST)
   const changes = await proposal(panel)
   await expect(changes, 'a nota não conta como componente').toHaveText(START_CHANGES)
@@ -1180,7 +1252,6 @@ test('a flow with only Início and a note goes through the Copiloto too, and the
 test('Preencher todos os campos sends fill true by default and fill false when unchecked', async ({ page, ai }) => {
   await openEditor(page)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   const fill = panel.getByRole('checkbox', { name: 'Preencher todos os campos' })
   await expect(fill).toBeChecked()
   await expect(panel.getByText(FILL_ON, { exact: true })).toBeVisible()
@@ -1218,48 +1289,149 @@ test('Preencher todos os campos sends fill true by default and fill false when u
   expect(await saved(page)).toEqual(BASE_STATE)
 })
 
-test('a key typed in Gerar com IA is reused by the Copiloto and a missing key keeps the request', async ({ page, ai }) => {
-  await openEditor(page)
+test('a request without the key opens Configurar IA on the key and keeps the request, and the key typed there from Gerar com IA is reused by the Copiloto', async ({ page, ai }) => {
+  await openEditor(page, BASE_FLOW, { key: '' })
   let panel = await openCopilot(page)
-  await composer(panel).fill(PROMPT)
-  await panel.getByRole('button', { name: 'Configurar IA', exact: true }).click()
-  await expect(panel.getByRole('button', { name: 'Configurar IA', exact: true })).toHaveAttribute('aria-expanded', 'false')
   await expect(panel.getByText(SUMMARY, { exact: true })).toBeVisible()
-  await expect(panel.getByText('Chave não informada', { exact: true })).toBeVisible()
+  await expect(panel.getByText(MISSING, { exact: true })).toBeVisible()
+  await composer(panel).fill(PROMPT)
   await composer(panel).press('Enter')
-  await expect(panel.getByRole('button', { name: 'Configurar IA', exact: true })).toHaveAttribute('aria-expanded', 'true')
-  const key = panel.getByLabel('Chave da API da OpenAI')
+  const config = settingsWindow(page)
+  await expect(config).toBeVisible()
+  const key = config.getByLabel(KEY_LABEL, { exact: true })
   await expect(key).toBeFocused()
+  await expect(key).toHaveValue('')
   await expect(key).toHaveAttribute('aria-invalid', 'true')
-  await expect(panel.getByText('Informe a chave da API da OpenAI.', { exact: true })).toBeVisible()
-  await expect(composer(panel)).toHaveValue(PROMPT)
+  await expect(config.getByText(KEY_MISSING, { exact: true })).toBeVisible()
+  await page.waitForTimeout(300)
   expect(ai.calls).toEqual([])
+  await page.keyboard.press('Escape')
+  await expect(config).toHaveCount(0)
+  await expect(composer(panel), 'o foco volta para o pedido').toBeFocused()
+  await expect(composer(panel)).toHaveValue(PROMPT)
+  await expect(panel.getByText(MISSING, { exact: true })).toBeVisible()
   await trigger(page).click()
   await expect(panel).toBeHidden()
 
   await page.getByRole('button', { name: 'Gerar com IA', exact: true }).click()
-  const dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Chave da API da OpenAI').fill(KEY)
+  const dialog = generateDialog(page)
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toBeVisible()
+  await expect(dialog.getByLabel(KEY_LABEL)).toHaveCount(0)
+  await settingsButton(dialog).click()
+  await expect(config).toBeVisible()
+  await expect(key).toBeFocused()
+  await expect(key).not.toHaveAttribute('aria-invalid')
+  await expect(config.getByText(KEY_MISSING, { exact: true })).toHaveCount(0)
+  await key.fill(KEY)
+  await finishSettings(page)
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(ai.calls).toEqual([])
 
   panel = await openCopilot(page)
-  const settings = panel.getByRole('button', { name: 'Configurar IA', exact: true })
-  if ((await settings.getAttribute('aria-expanded')) === 'true') await settings.click()
   await expect(panel.getByText(SUMMARY, { exact: true })).toBeVisible()
-  await expect(panel.getByText('Chave não informada', { exact: true })).toHaveCount(0)
-  await settings.click()
-  await expect(panel.getByLabel('Chave da API da OpenAI')).toHaveValue(KEY)
-  await expect(panel.getByText('Informe a chave da API da OpenAI.', { exact: true })).toHaveCount(0)
-  await settings.click()
+  await expect(panel.getByText(MISSING, { exact: true })).toHaveCount(0)
   await expect(composer(panel)).toHaveValue(PROMPT)
   ai.say(EDIT_TURN)
   await composer(panel).press('Enter')
   await proposal(panel)
+  await expect(config).toHaveCount(0)
   expect(ai.turnCalls()).toHaveLength(1)
   expect(ai.buildCalls()).toHaveLength(1)
   expect(ai.turnCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
   expect(ai.buildCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
+})
+
+test('a key typed in Configurar IA from the Copiloto is used by Gerar com IA without typing it again', async ({ page, ai }) => {
+  await openEditor(page, BASE_FLOW, { key: '' })
+  const panel = await openCopilot(page)
+  await expect(panel.getByText(MISSING, { exact: true })).toBeVisible()
+  await settingsButton(panel).click()
+  const config = settingsWindow(page)
+  const key = config.getByLabel(KEY_LABEL, { exact: true })
+  await expect(key).toBeFocused()
+  await expect(key).toHaveValue('')
+  await key.fill(KEY)
+  await finishSettings(page)
+  await expect(panel.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(panel.getByText(MISSING, { exact: true })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Gerar com IA', exact: true }).click()
+  const dialog = generateDialog(page)
+  await expect(dialog).toBeVisible()
+  await expect(panel).toBeHidden()
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toHaveCount(0)
+  await expect(dialog.getByLabel(KEY_LABEL)).toHaveCount(0)
+  const mode = page.getByRole('radio', { name: 'Conversar com a IA', exact: true })
+  await dialog.locator('label', { has: mode }).click()
+  await expect(mode).toBeChecked()
+  const chat = dialog.getByRole('region', { name: 'Conversa com a IA' })
+  await expect(chat).toBeVisible()
+  ai.say(ASK_EDIT)
+  const answer = chat.getByRole('textbox', { name: 'Sua resposta para a IA' })
+  await answer.fill(PROMPT)
+  await answer.press('Enter')
+  await expect(chat.getByRole('log')).toContainText(ASK_EDIT.message, { timeout: 15000 })
+  await expect(config).toHaveCount(0)
+  await expect(dialog.getByText(MISSING, { exact: true })).toHaveCount(0)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.turnCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(historyOf(ai.turnCalls()[0])).toContain(PROMPT)
+  expect(ai.buildCalls()).toHaveLength(0)
+})
+
+test('the key typed in Configurar IA survives a reload in the same tab, never goes to localStorage, and another tab or a new browser context starts without it', async ({ page, ai, browser }) => {
+  await openEditor(page, BASE_FLOW, { key: '' })
+  let panel = await openCopilot(page)
+  await expect(panel.getByText(MISSING, { exact: true })).toBeVisible()
+  await settingsButton(panel).click()
+  const config = settingsWindow(page)
+  const key = config.getByLabel(KEY_LABEL, { exact: true })
+  await key.fill(KEY)
+  await finishSettings(page)
+  await expect(panel.getByText(MISSING, { exact: true })).toHaveCount(0)
+  await expect.poll(() => sessionSettings(page), { message: 'a chave fica na sessionStorage da aba' }).toMatchObject({ provider: 'openai', keys: { openai: KEY } })
+  expect(await localText(page), 'a chave nunca vai para a localStorage').not.toContain(KEY)
+  await expect.poll(() => saved(page)).toEqual(BASE_STATE)
+
+  await page.reload()
+  await expect(page.getByLabel('Nome do fluxo')).toHaveValue(BASE_FLOW.name)
+  await expect(page.locator('.react-flow__node')).toHaveCount(BASE_FLOW.nodes.length)
+  panel = await openCopilot(page)
+  await expect(panel.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(panel.getByText(MISSING, { exact: true }), 'depois de recarregar a aba a chave continua').toHaveCount(0)
+  await settingsButton(panel).click()
+  await expect(key).toHaveValue(KEY)
+  await expect(key).not.toHaveAttribute('aria-invalid')
+  await finishSettings(page)
+  ai.say(EDIT_TURN)
+  await ask(panel, PROMPT)
+  await proposal(panel)
+  await expect(config).toHaveCount(0)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.turnCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(ai.buildCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
+  expect(await localText(page)).not.toContain(KEY)
+
+  const tab = await page.context().newPage()
+  try {
+    await startsWithoutKey(tab)
+  } finally {
+    await tab.close()
+  }
+
+  const other = await browser.newContext()
+  try {
+    await startsWithoutKey(await other.newPage())
+  } finally {
+    await other.close()
+  }
+  expect(await sessionSettings(page)).toMatchObject({ keys: { openai: KEY } })
 })
 
 test('limpe o fluxo: the Copiloto confirms, Pode limpar edits with remove listing every component, Aplicar leaves only Início and the notes and Desfazer brings the flow back', async ({ page, ai }) => {
@@ -1283,7 +1455,6 @@ test('limpe o fluxo: the Copiloto confirms, Pode limpar edits with remove listin
   const shown = (id) => page.locator(`.react-flow__node[data-id="${id}"]`)
   for (const text of CLEAR_NOTES) await expect(canvas).toContainText(text)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, CLEAR_REQUEST)
   await expect(messages(panel)).toHaveText([you(CLEAR_REQUEST), says(ASK_CLEAR)])
   await expect(chips(panel)).toHaveText(ASK_CLEAR.suggestions)
@@ -1384,7 +1555,6 @@ test('remova a opção: the edit sends the menu without the option, remove takes
   await expect(canvas).toContainText(DROPPED_OPTION)
   await expect(canvas).toContainText(EXAMS_TEXT)
   const panel = await openCopilot(page)
-  await typeKey(panel)
   await ask(panel, DROP_REQUEST)
   const changes = await proposal(panel)
   await expect(changes).toHaveText(['0 componentes novos', '1 alterado', `${DROP.branch.length} removidos`])

@@ -11,6 +11,7 @@ const { layoutBox } = require('../../lib/atendimento/ai/layout.ts')
 const { INTERVIEW_SCHEMA_NAME, copilotSystemPrompt } = require('../../lib/atendimento/ai/interview.ts')
 
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
+const SETTINGS_KEY = 'flow.ia'
 const HOST = 'api.openai.com'
 const FALLBACK_ERROR = 'A rota de reserva não fazia parte deste teste.'
 const APPLIED = 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.'
@@ -397,7 +398,17 @@ const overlapping = (page) => page.evaluate(() => {
   return boxes.flatMap((first, index) => boxes.slice(index + 1).filter((second) => first.box.left < second.box.right && second.box.left < first.box.right && first.box.top < second.box.bottom && second.box.top < first.box.bottom).map((second) => `${first.id} e ${second.id}`))
 })
 
+async function seedKey(page) {
+  const value = JSON.stringify({ provider: 'openai', keys: { openai: KEY }, models: {}, effortChoice: null, fill: true })
+  await page.addInitScript(([name, saved]) => {
+    try {
+      if (window.sessionStorage.getItem(name) === null) window.sessionStorage.setItem(name, saved)
+    } catch {}
+  }, [SETTINGS_KEY, value])
+}
+
 async function start(page) {
+  await seedKey(page)
   await page.goto('/flow')
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
   await page.getByLabel('Importar arquivo JSON').setInputFiles({ name: 'base.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(BASE_FLOW)) })
@@ -408,9 +419,7 @@ async function start(page) {
   const panel = copilot(page)
   await expect(panel).toBeVisible()
   await expect(trigger(page)).toHaveAttribute('aria-expanded', 'true')
-  const settings = panel.getByRole('button', { name: 'Configurar IA', exact: true })
-  if ((await settings.getAttribute('aria-expanded')) !== 'true') await settings.click()
-  await panel.getByLabel('Chave da API da OpenAI').fill(KEY)
+  await expect(panel.getByText('Chave não informada', { exact: true })).toHaveCount(0)
   return panel
 }
 

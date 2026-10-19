@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react"
@@ -15,17 +14,12 @@ import {
   CheckCircle2,
   ChevronRight,
   Circle,
-  Cpu,
-  Eye,
-  EyeOff,
   Info,
   Loader2,
   MousePointerClick,
   PenLine,
-  RefreshCw,
   RotateCcw,
   SendHorizontal,
-  SlidersHorizontal,
   Square,
   Trash2,
   WandSparkles,
@@ -34,7 +28,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
-import { EFFORTS, LIMITS, type GenerationIssue } from "@/lib/atendimento/ai/contracts"
+import { LIMITS, type GenerationIssue } from "@/lib/atendimento/ai/contracts"
 import type { InterviewInput } from "@/lib/atendimento/ai/interview"
 import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
 import { START_TYPE, getComponentLabel } from "@/lib/atendimento/catalog"
@@ -43,28 +37,23 @@ import { cn } from "@/lib/utils"
 import {
   EFFORT_OPTIONS,
   FILL_HINTS,
-  apiKeyError,
   changeLabels,
   clock,
-  effortChoices,
   formatNumber,
   generateFlow,
   issueSubject,
-  keyWarning,
   loadEngine,
-  modelChoices,
   modelName,
   pickEffort,
   plural,
-  requestModels,
   requestTurn,
   stageText,
   type Field,
-  type Listing,
 } from "./ai/generation-client"
 import {
   EMPTIED_NOTICE,
   FOCUS_MISSED,
+  SETTINGS_FIELDS,
   STATUS_LABELS,
   createCopilot,
   linkPick,
@@ -79,12 +68,13 @@ import {
   type CopilotOptions,
   type CopilotPick,
   type CopilotProposal,
+  type CopilotStore,
   type CopilotTone,
   type CopilotTurnInput,
   type ProposalStatus,
 } from "./ai/copilot-store"
-import { useAiSetting } from "./ai/settings-store"
-import { FlowSelect } from "./flow-select"
+import { openAiSettings, useAiSetting, type AiSettingsField } from "./ai/settings-store"
+import { AiSummary } from "./ai-summary"
 import type { CanvasPick } from "./pick"
 import { ui } from "./ui"
 
@@ -120,7 +110,6 @@ export const ATTENTION_TOASTS: Readonly<Record<CopilotAttention, Parameters<type
   question: { title: "O Copiloto tem uma pergunta", description: "Abra o Copiloto para responder." },
 }
 
-const PROVIDER_OPTIONS = PROVIDERS.map((entry) => ({ value: entry.id, label: entry.name }))
 const PLACEHOLDER = "O que você quer mudar no fluxo?"
 const REFINE_PLACEHOLDER = "Peça um ajuste nesta proposta"
 const REFINE_HINT = "O próximo pedido ajusta a proposta mostrada no canvas."
@@ -139,11 +128,7 @@ export const ANY_PICK_NOTE = `Você pode escolher qualquer componente com saída
 
 const iconButton =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-strong hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
-const iconButtonActive = "bg-flow-accent/15 text-flow-accent hover:bg-flow-accent/20 hover:text-flow-accent"
-const fieldBase = "block disabled:cursor-not-allowed disabled:opacity-60"
-const invalidField =
-  "border-flow-danger hover:border-flow-danger focus-visible:border-flow-danger focus-visible:ring-flow-danger/25"
-const warningText = "mt-1 text-[11px] leading-4 text-flow-warning"
+const summaryRow = "shrink-0 border-b border-flow-border bg-flow-soft px-4 py-2"
 const summaryClass =
   "flex cursor-pointer select-none list-none items-center gap-1.5 rounded-md py-0.5 text-xs font-semibold text-flow-muted-strong transition hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30 [&::-webkit-details-marker]:hidden"
 const chevron = "h-3.5 w-3.5 shrink-0 text-flow-muted transition-transform group-open:rotate-90"
@@ -227,6 +212,21 @@ export function landing(entries: readonly CopilotEntry[], pending: string | null
   const last = entries[entries.length - 1]
   if (pending === null || last?.id !== pending) return "prompt"
   return last.kind !== "proposal" || proposalApplicable(last.proposal) ? "apply" : "prompt"
+}
+
+const settingsField = (field: Field): field is AiSettingsField => SETTINGS_FIELDS.includes(field)
+
+export function linkSettings(store: CopilotStore): () => void {
+  let seen = store.getState().focus?.seq ?? 0
+  return store.subscribe(() => {
+    const { focus, fieldErrors, visible } = store.getState()
+    if (!visible || !focus || focus.seq === seen) return
+    seen = focus.seq
+    const field = focus.field
+    if (!settingsField(field)) return
+    const message = fieldErrors[field]
+    if (message) openAiSettings({ focus: field, errors: { [field]: message } })
+  })
 }
 
 interface RepliesProps {
@@ -623,15 +623,12 @@ export default function AICopilot({
   const baseId = useId()
   const idFor = (key: string) => `${baseId}-${key}`
   const describedBy = (...ids: Array<string | false | null | undefined>) => ids.filter(Boolean).join(" ") || undefined
-  const [provider, setProvider] = useAiSetting("provider")
-  const [keys, setKeys] = useAiSetting("keys")
-  const [models, setModels] = useAiSetting("models")
-  const [fetched, setFetched] = useAiSetting("fetched")
-  const [effortChoice, setEffortChoice] = useAiSetting("effortChoice")
+  const [provider] = useAiSetting("provider")
+  const [keys] = useAiSetting("keys")
+  const [models] = useAiSetting("models")
+  const [fetched] = useAiSetting("fetched")
+  const [effortChoice] = useAiSetting("effortChoice")
   const [fill, setFill] = useAiSetting("fill")
-  const [listing, setListing] = useState<Listing | null>(null)
-  const [showKey, setShowKey] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [draft, setDraft] = useState("")
   const [clockNow, setClockNow] = useState(() => Date.now())
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
@@ -639,23 +636,15 @@ export default function AICopilot({
   const pickActions = useRef<{ confirm: () => void; cancel: () => void }>({ confirm: () => undefined, cancel: () => undefined })
   const bodyRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const listAbortRef = useRef<AbortController | null>(null)
   const busyRef = useRef(false)
   const focusSeqRef = useRef(0)
   const openRef = useRef(false)
-  const keyRef = useRef("")
   const propsRef = useRef({ getCurrentFlow, onLivePreview, onWorkflowEdited, onAttentionChange })
 
   const info = providerInfo(provider)
   const apiKey = keys[provider] ?? ""
-  const listed = fetched[provider]?.models
   const model = models[provider] || info.presets[0].id
-  const currentModelName = modelName(info, model, listed)
   const effort = pickEffort(effortChoice, provider, model)
-  const effortOptions = effortChoices(provider, model)
-  const modelOptions = modelChoices(info, model, listed)
-  const warning = keyWarning(info, apiKey)
-  const providerListing = listing?.provider === provider ? listing : null
 
   const options: CopilotOptions = {
     settings: { provider, model, apiKey, effort, fill },
@@ -671,13 +660,12 @@ export default function AICopilot({
   useEffect(() => {
     latest.current = options
     propsRef.current = { getCurrentFlow, onLivePreview, onWorkflowEdited, onAttentionChange }
-    keyRef.current = apiKey
     pickActions.current = { confirm: confirmSelection, cancel: () => setFocusTarget(idFor("prompt")) }
   })
 
   const [store] = useState(() => createCopilot(() => latest.current))
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
-  const { entries, thinking, incoming, running, pending, suggestions, plan, fieldErrors, focus } = state
+  const { entries, thinking, incoming, running, pending, suggestions, plan, focus } = state
   const asked = state.pick
   const busy = thinking || running
   const arrival = landing(entries, pending)
@@ -701,20 +689,11 @@ export default function AICopilot({
     })
   }, [store, pick])
 
+  useEffect(() => linkSettings(store), [store])
+
   useEffect(() => {
     propsRef.current.onAttentionChange?.(state.attention)
   }, [state.attention])
-
-  useEffect(
-    () => () => {
-      listAbortRef.current?.abort()
-    },
-    [],
-  )
-
-  useEffect(() => {
-    if (open && !apiKey.trim()) setSettingsOpen(true)
-  }, [open, provider, apiKey])
 
   useEffect(() => {
     store.clearFieldError("provider", "apiKey", "model", "effort")
@@ -756,7 +735,7 @@ export default function AICopilot({
   useEffect(() => {
     const opened = open && !openRef.current
     openRef.current = open
-    if (opened) setFocusTarget(`${baseId}-${keyRef.current.trim() ? "prompt" : "apiKey"}`)
+    if (opened) setFocusTarget(`${baseId}-prompt`)
   }, [open, baseId])
 
   useEffect(() => {
@@ -764,8 +743,6 @@ export default function AICopilot({
     busyRef.current = busy
     if (focus && focus.seq !== focusSeqRef.current) {
       focusSeqRef.current = focus.seq
-      setSettingsOpen(true)
-      if (open && focusLost()) setFocusTarget(`${baseId}-${focus.field}`)
       return
     }
     if (ended && open && focusLost()) setFocusTarget(`${baseId}-${arrival}`)
@@ -776,14 +753,6 @@ export default function AICopilot({
     document.getElementById(focusTarget)?.focus()
     setFocusTarget(null)
   }, [focusTarget])
-
-  const handleFocusRequest = (before: number | undefined) => {
-    const after = store.getState().focus
-    if (!after || after.seq === before) return
-    focusSeqRef.current = after.seq
-    setSettingsOpen(true)
-    setFocusTarget(idFor(after.field))
-  }
 
   const proposalMeta = (proposal: CopilotProposal) => {
     const owner = providerInfo(proposal.provider)
@@ -796,89 +765,7 @@ export default function AICopilot({
       .join(" · ")
   }
 
-  const changeProvider = (value: string) => {
-    const next = PROVIDERS.find((entry) => entry.id === value)
-    if (!next) return
-    setProvider(next.id)
-    setShowKey(false)
-    store.clearFieldError("provider", "apiKey", "model")
-  }
-
-  const changeKey = (event: ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value
-    const changed = value.trim() !== apiKey.trim()
-    setKeys((current) => ({ ...current, [provider]: value }))
-    if (changed) {
-      setFetched((current) => (current[provider] ? { ...current, [provider]: undefined } : current))
-      if (listing?.provider === provider) {
-        listAbortRef.current?.abort()
-        listAbortRef.current = null
-        setListing(null)
-      }
-    }
-    store.clearFieldError("apiKey")
-  }
-
-  const changeModel = (value: string) => {
-    setModels((current) => ({ ...current, [provider]: value }))
-    store.clearFieldError("model")
-  }
-
-  const changeEffort = (value: string) => {
-    const next = EFFORTS.find((entry) => entry === value)
-    if (!next) return
-    setEffortChoice(next)
-    store.clearFieldError("effort")
-  }
-
-  const clearLoading = (target: ProviderId) =>
-    setListing((current) => (current?.provider === target && current.state === "loading" ? null : current))
-
-  const fetchModels = async () => {
-    const key = apiKey.trim()
-    const invalidKey = apiKeyError(info, key)
-    if (invalidKey) {
-      const before = store.getState().focus?.seq
-      store.markField("apiKey", invalidKey)
-      handleFocusRequest(before)
-      return
-    }
-    listAbortRef.current?.abort()
-    const controller = new AbortController()
-    listAbortRef.current = controller
-    const target = provider
-    setListing({ provider: target, state: "loading" })
-    try {
-      const listedModels = await requestModels(target, key, controller.signal)
-      if (controller.signal.aborted) {
-        clearLoading(target)
-        return
-      }
-      if (listedModels.ok) {
-        setFetched((current) => ({ ...current, [target]: { key, models: listedModels.models } }))
-        setListing({ provider: target, state: "done", count: listedModels.models.length })
-      } else {
-        setListing({ provider: target, state: "error", error: listedModels.error, details: listedModels.details })
-      }
-    } catch {
-      if (controller.signal.aborted) {
-        clearLoading(target)
-        return
-      }
-      setListing({
-        provider: target,
-        state: "error",
-        error: "Não foi possível buscar os modelos.",
-        details: "Verifique a conexão e tente novamente.",
-      })
-    } finally {
-      if (listAbortRef.current === controller) listAbortRef.current = null
-    }
-  }
-
   const follow = (started: boolean, before: number | undefined) => {
-    if (started) setSettingsOpen(false)
-    else handleFocusRequest(before)
     if (store.getState().focus?.seq === before) setFocusTarget(idFor("prompt"))
     return started
   }
@@ -942,23 +829,12 @@ export default function AICopilot({
     if ((event.ctrlKey || event.metaKey) && /^[yz]$/i.test(event.key)) event.stopPropagation()
   }
 
-  const listingStatus = !providerListing
-    ? ""
-    : providerListing.state === "loading"
-      ? "Buscando modelos."
-      : providerListing.state === "done"
-        ? providerListing.count
-          ? `${plural(providerListing.count, "modelo disponível", "modelos disponíveis")} na sua conta.`
-          : "Nenhum modelo compatível encontrado nesta conta."
-        : ""
-  const listingBusy = providerListing?.state === "loading"
   const hasPending = Boolean(pending)
   const notice = dialogBusy ? BUSY_NOTICE : ""
   const canAnswer = canReply({ busy, dialogBusy })
   const canSend = canAnswer && draft.trim().length > 0
   const canEditNow = !busy && !asked && Boolean(plan)
   const onCanvas = Boolean(pick) && !dialogBusy && listKey !== pickKey(asked)
-  const summary = `${info.vendor} · ${currentModelName} · Esforço ${EFFORT_OPTIONS[effort].label.toLowerCase()}`
   const elapsed = state.startedAt ? Math.max(0, Math.floor((clockNow - state.startedAt) / 1000)) : 0
   const empty = entries.length === 0 && !busy
 
@@ -1070,182 +946,14 @@ export default function AICopilot({
           <h2 className="text-sm font-semibold leading-5 text-flow-fg">Copiloto</h2>
           <p className="text-[11px] leading-4 text-flow-muted">Edita o fluxo aberto</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setSettingsOpen((current) => !current)}
-            aria-expanded={settingsOpen}
-            aria-controls={idFor("settings")}
-            aria-label="Configurar IA"
-            title="Configurar IA"
-            className={cn(iconButton, settingsOpen && iconButtonActive)}
-          >
-            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-          </button>
-          <button type="button" onClick={close} aria-label="Fechar Copiloto" title="Fechar Copiloto" className={iconButton}>
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
-        </div>
+        <button type="button" onClick={close} aria-label="Fechar Copiloto" title="Fechar Copiloto" className={iconButton}>
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
 
+      <AiSummary className={summaryRow} />
+
       <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-        <div
-          id={idFor("settings")}
-          hidden={!settingsOpen}
-          className="shrink-0 space-y-3 border-b border-flow-border bg-flow-soft px-4 py-3"
-        >
-          <div>
-            <label htmlFor={idFor("provider")} className={ui.label}>
-              Provedor de IA
-            </label>
-            <FlowSelect
-              id={idFor("provider")}
-              value={provider}
-              onValueChange={changeProvider}
-              options={PROVIDER_OPTIONS}
-              aria-invalid={fieldErrors.provider ? true : undefined}
-              aria-describedby={fieldErrors.provider ? idFor("provider-error") : undefined}
-              className={fieldErrors.provider ? invalidField : undefined}
-            />
-            {fieldErrors.provider ? (
-              <p id={idFor("provider-error")} className={ui.error}>
-                {fieldErrors.provider}
-              </p>
-            ) : null}
-          </div>
-
-          <div>
-            <label htmlFor={idFor("apiKey")} className={ui.label}>
-              Chave da API {info.of}
-            </label>
-            <div className="relative">
-              <input
-                id={idFor("apiKey")}
-                type={showKey ? "text" : "password"}
-                value={apiKey}
-                onChange={changeKey}
-                placeholder={info.keyPlaceholder}
-                maxLength={LIMITS.apiKey}
-                autoComplete="off"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                data-1p-ignore="true"
-                data-lpignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                aria-invalid={fieldErrors.apiKey ? true : undefined}
-                aria-describedby={describedBy(idFor("apiKey-hint"), warning && idFor("apiKey-warning"), fieldErrors.apiKey && idFor("apiKey-error"))}
-                className={cn(ui.input, "pr-10 font-mono", fieldBase, fieldErrors.apiKey && invalidField)}
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey((current) => !current)}
-                aria-label={showKey ? "Ocultar chave" : "Mostrar chave"}
-                aria-controls={idFor("apiKey")}
-                title={showKey ? "Ocultar chave" : "Mostrar chave"}
-                className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-flow-muted transition hover:bg-flow-soft hover:text-flow-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
-              >
-                {showKey ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
-              </button>
-            </div>
-            <p id={idFor("apiKey-hint")} className={ui.hint}>
-              A chave fica só nesta página, não é salva e serve apenas para chamar a API {info.of}. É a mesma usada no Gerar com IA.
-            </p>
-            {warning ? (
-              <p id={idFor("apiKey-warning")} className={warningText}>
-                {warning}
-              </p>
-            ) : null}
-            {fieldErrors.apiKey ? (
-              <p id={idFor("apiKey-error")} className={ui.error}>
-                {fieldErrors.apiKey}
-              </p>
-            ) : null}
-          </div>
-
-          <div>
-            <label htmlFor={idFor("model")} className={ui.label}>
-              Modelo
-            </label>
-            <div className="flex items-center gap-2">
-              <FlowSelect
-                key={provider}
-                id={idFor("model")}
-                value={model}
-                onValueChange={changeModel}
-                placeholder="Selecione um modelo"
-                options={modelOptions}
-                aria-invalid={fieldErrors.model ? true : undefined}
-                aria-describedby={describedBy(idFor("model-hint"), listingStatus && idFor("models-status"), fieldErrors.model && idFor("model-error"))}
-                className={cn("min-w-0 flex-1", fieldErrors.model && invalidField)}
-              />
-              <button
-                type="button"
-                onClick={() => void fetchModels()}
-                disabled={!apiKey.trim() || listingBusy}
-                aria-label="Buscar modelos da API"
-                title="Buscar modelos da API"
-                aria-describedby={idFor("models-status")}
-                className={cn(ui.button, "h-9 w-9 justify-center px-0")}
-              >
-                {listingBusy ? (
-                  <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                )}
-              </button>
-            </div>
-            <p id={idFor("model-hint")} className={ui.hint}>
-              ID {model}.{apiKey.trim() ? "" : " Informe a chave para buscar os modelos liberados na sua conta."}
-            </p>
-            <p id={idFor("models-status")} role="status" className={cn(ui.hint, !listingStatus && "sr-only")}>
-              {listingStatus}
-            </p>
-            {providerListing?.state === "error" ? (
-              <p role="alert" className={ui.error}>
-                {[providerListing.error, providerListing.details].filter(Boolean).join(" ")}
-              </p>
-            ) : null}
-            {fieldErrors.model ? (
-              <p id={idFor("model-error")} className={ui.error}>
-                {fieldErrors.model}
-              </p>
-            ) : null}
-          </div>
-
-          <div>
-            <label htmlFor={idFor("effort")} className={ui.label}>
-              Esforço
-            </label>
-            <FlowSelect
-              id={idFor("effort")}
-              value={effort}
-              onValueChange={changeEffort}
-              options={effortOptions}
-              aria-invalid={fieldErrors.effort ? true : undefined}
-              aria-describedby={describedBy(idFor("effort-hint"), fieldErrors.effort && idFor("effort-error"))}
-              className={fieldErrors.effort ? invalidField : undefined}
-            />
-            <p id={idFor("effort-hint")} className={ui.hint}>
-              {EFFORT_OPTIONS[effort].hint}
-            </p>
-            {fieldErrors.effort ? (
-              <p id={idFor("effort-error")} className={ui.error}>
-                {fieldErrors.effort}
-              </p>
-            ) : null}
-          </div>
-        </div>
-
-        {settingsOpen ? null : (
-          <p className="flex shrink-0 items-center gap-2 border-b border-flow-border bg-flow-soft px-4 py-2 text-[11px] leading-4 text-flow-muted">
-            <Cpu className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate">{summary}</span>
-            {apiKey.trim() ? null : <span className="shrink-0 font-semibold text-flow-warning">Chave não informada</span>}
-          </p>
-        )}
-
         <div
           role="log"
           aria-live="polite"

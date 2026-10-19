@@ -6,10 +6,10 @@ const path = require('node:path')
 const ts = require('typescript')
 
 const ROOT = path.resolve(__dirname, '..')
+const COMPILE = { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true }
 const STUBS = {
   'lucide-react': new Proxy({}, { get: () => () => null }),
   '@/hooks/use-toast': { toast: () => undefined },
-  './flow-select': { FlowSelect: () => null },
 }
 const resolveFilename = Module._resolveFilename
 Module._resolveFilename = function resolveAlias(request, ...rest) {
@@ -20,8 +20,13 @@ const load = Module._load
 Module._load = function loadStub(request, ...rest) {
   return STUBS[request] ?? load.call(this, request, ...rest)
 }
+require.extensions['.tsx'] = (module, filename) => {
+  const { outputText } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: COMPILE, fileName: filename })
+  module._compile(outputText, filename)
+}
 
 const copilot = require('../src/flow/ai/copilot-store.ts')
+const aiSettings = require('../src/flow/ai/settings-store.ts')
 const { behaviorSignature, importFlow, newFlow, newNode, outputHandles } = require('../lib/atendimento/format.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
 const { arrangeFlow } = require('../lib/atendimento/ai/arrange.ts')
@@ -33,10 +38,7 @@ const { PROVIDERS } = require('../lib/atendimento/ai/providers.ts')
 
 function loadPanel() {
   const file = path.join(ROOT, 'src/flow/ai-copilot.tsx')
-  const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
-    fileName: file,
-  })
+  const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: COMPILE, fileName: file })
   const panel = new Module(file, module)
   panel.filename = file
   panel.paths = Module._nodeModulePaths(path.dirname(file))
@@ -1205,35 +1207,10 @@ test('texts are in PT-BR without exclamation marks or dashes', () => {
   assert.deepEqual(copilot.credentialErrors({ provider: 'anthropic', model: 'claude-opus-5-5', apiKey: '', effort: 'medium', fill: true }), { apiKey: 'Informe a chave da API da Anthropic.' })
 })
 
-test('the Copiloto keeps ChatGPT, Claude, Gemini and Grok: the picker lists all four, the chosen provider goes in the turn, the edit and the proposal, and the key warning checks every provider', async () => {
+test('the Copiloto keeps ChatGPT, Claude, Gemini and Grok in the code while only ChatGPT shows: the chosen provider goes in the turn, the edit and the proposal, and the key warning checks every provider', async () => {
   assert.deepEqual(PROVIDERS.map((entry) => [entry.id, entry.name]), [['openai', 'ChatGPT'], ['anthropic', 'Claude'], ['google', 'Gemini'], ['xai', 'Grok']])
+  assert.deepEqual(aiSettings.visibleProviders().map((entry) => entry.id), ['openai'])
   assert.deepEqual(copilot.SETTINGS_FIELDS, ['provider', 'apiKey', 'model', 'effort'])
-  const React = require('react')
-  const { renderToStaticMarkup } = require('react-dom/server')
-  const panel = loadPanel()
-  const selects = []
-  const stub = STUBS['./flow-select']
-  const plain = stub.FlowSelect
-  stub.FlowSelect = (props) => {
-    selects.push(props)
-    return null
-  }
-  let html = ''
-  try {
-    html = renderToStaticMarkup(React.createElement(panel.default, { id: 'copiloto', open: true, onClose: () => undefined, getCurrentFlow: () => BLANK, onLivePreview: () => undefined, onWorkflowEdited: () => true }))
-  } finally {
-    stub.FlowSelect = plain
-  }
-  const picker = selects.find((props) => props.id.endsWith('-provider'))
-  assert.deepEqual(picker.options, [
-    { value: 'openai', label: 'ChatGPT' },
-    { value: 'anthropic', label: 'Claude' },
-    { value: 'google', label: 'Gemini' },
-    { value: 'xai', label: 'Grok' },
-  ])
-  assert.equal(picker.value, 'openai')
-  assert.match(html, /<label[^>]*>Provedor de IA<\/label>/)
-  assert.match(html, />OpenAI · GPT-6\.1 Sol · Esforço equilibrado</)
 
   const { store, env } = harness({ outcomes: [received(FIRST, { model: 'claude-opus-5-5' })] })
   env.settings = { ...env.settings, provider: 'anthropic', model: 'claude-opus-5-5', apiKey: 'sk-ant-api03-0123456789abcdef' }
@@ -1278,7 +1255,6 @@ test('the panel renders the empty conversation, the examples, the composer and t
   assert.match(html, /<section id="copiloto" aria-label="Copiloto"/)
   assert.match(html, /<h2[^>]*>Copiloto<\/h2>/)
   assert.match(html, /Edita o fluxo aberto/)
-  assert.match(html, /aria-label="Configurar IA"/)
   assert.match(html, /aria-label="Fechar Copiloto"/)
   assert.match(html, /role="log"/)
   assert.match(html, /aria-live="polite"/)
@@ -1295,9 +1271,7 @@ test('the panel renders the empty conversation, the examples, the composer and t
   assert.match(html, /aria-label="Enviar pedido"/)
   assert.match(html, /Preencher todos os campos/)
   assert.match(html, /Nomes, IDs e URLs saem sempre preenchidos\./)
-  assert.match(html, /OpenAI · GPT-6\.1 Sol · Esforço equilibrado/)
-  assert.match(html, /Chave da API da OpenAI/)
-  assert.match(html, /É a mesma usada no Gerar com IA\./)
+  assert.match(html, />OpenAI · GPT-6\.1 Sol · Esforço equilibrado</)
   assert.doesNotMatch(html, /O fluxo aberto só tem o Início|Abrir Gerar com IA/)
   assert.doesNotMatch(html, /role="status" class="rounded-lg/)
   assert.doesNotMatch(html, /Sugestões de resposta/)
@@ -1341,6 +1315,116 @@ const stripTags = (markup) => {
 
 const markupButtons = (html) =>
   [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/g)].map((match) => ({ attrs: match[1], text: stripTags(match[2]), disabled: / disabled=""/.test(match[1]) }))
+
+const settingsWindow = () => {
+  const { open, focus, errors } = aiSettings.readAiSettingsDialog()
+  return { open, focus, errors }
+}
+
+test('the panel shows the AI summary as a fixed row under the header, with Configurar IA and Chave não informada while the key is missing, and no settings of its own', () => {
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const panel = loadPanel()
+  const html = renderToStaticMarkup(
+    React.createElement(panel.default, { id: 'copiloto', open: true, onClose: () => undefined, getCurrentFlow: () => BASE, onLivePreview: () => undefined, onWorkflowEdited: () => true }),
+  )
+  const header = html.indexOf('aria-label="Fechar Copiloto"')
+  assert.ok(header > 0)
+  const after = html.slice(html.indexOf('</div>', header) + '</div>'.length)
+  const row = /^<(\w+)([^>]*)>(.*?)<\/\1>/.exec(after)
+  assert.ok(row, 'a linha do resumo vem logo depois do cabeçalho')
+  const classes = (/ class="([^"]*)"/.exec(row[2])?.[1] ?? '').split(/\s+/)
+  for (const name of ['shrink-0', 'border-b', 'border-flow-border', 'bg-flow-soft', 'px-4', 'py-2']) assert.ok(classes.includes(name), name)
+  assert.ok(!html.slice(0, html.indexOf(row[0])).includes('overflow-y-auto'), 'o resumo fica fora da área que rola')
+  assert.ok(row[3].includes('>OpenAI · GPT-6.1 Sol · Esforço equilibrado<'))
+  assert.ok(row[3].includes('>Chave não informada<'))
+  const buttons = markupButtons(row[3])
+  assert.deepEqual(buttons.map((button) => button.text), ['Configurar IA'])
+  assert.ok(buttons[0].attrs.includes('aria-haspopup="dialog"'))
+  assert.equal(html.split('Configurar IA').length - 1, 1, 'Configurar IA aparece uma vez só, no resumo')
+  for (const gone of ['Provedor de IA', 'Chave da API', 'Mostrar chave', 'Buscar modelos da API', 'type="password"', 'Modelo</label>', 'Esforço</label>']) {
+    assert.ok(!html.includes(gone), gone)
+  }
+})
+
+test('a focus request of the Copiloto on a settings field opens Configurar IA on that field with its error, once, and waits for the panel to open', () => {
+  const panel = loadPanel()
+  aiSettings.closeAiSettings()
+  const { store } = harness()
+  const unlink = panel.linkSettings(store)
+  try {
+    assert.deepEqual(settingsWindow(), { open: false, focus: null, errors: {} })
+    store.markField('apiKey', 'A chave da API parece incompleta. Confira o valor copiado.')
+    assert.deepEqual(settingsWindow(), { open: true, focus: 'apiKey', errors: { apiKey: 'A chave da API parece incompleta. Confira o valor copiado.' } })
+    const seq = aiSettings.readAiSettingsDialog().seq
+    store.clearFieldError('apiKey')
+    assert.equal(aiSettings.readAiSettingsDialog().seq, seq, 'limpar o erro no Copiloto não abre a janela de novo')
+    aiSettings.closeAiSettings()
+
+    store.markField('description', 'Descreva o atendimento.')
+    assert.deepEqual(settingsWindow(), { open: false, focus: null, errors: {} }, 'um campo que não é da IA não abre a janela')
+
+    store.setVisible(false)
+    store.markField('model', 'O modelo escolhido não existe nesta conta.')
+    assert.equal(settingsWindow().open, false, 'com o painel fechado a janela espera')
+    store.setVisible(true)
+    assert.deepEqual(settingsWindow(), { open: true, focus: 'model', errors: { model: 'O modelo escolhido não existe nesta conta.' } })
+    aiSettings.closeAiSettings()
+    store.setVisible(false)
+    store.setVisible(true)
+    assert.equal(settingsWindow().open, false, 'o mesmo pedido abre a janela uma vez só')
+
+    store.setVisible(false)
+    store.markField('apiKey', 'Informe a chave da API da OpenAI.')
+    store.clearFieldError('apiKey')
+    store.setVisible(true)
+    assert.equal(settingsWindow().open, false, 'um pedido com o erro já resolvido não abre a janela')
+
+    unlink()
+    store.markField('apiKey', 'Informe a chave da API da OpenAI.')
+    assert.equal(settingsWindow().open, false, 'depois de desligado, o Copiloto não abre a janela')
+  } finally {
+    unlink()
+    aiSettings.closeAiSettings()
+  }
+})
+
+test('sending without a key opens Configurar IA on the key and sends nothing, and a key refused by the provider opens it again with the reason', async () => {
+  const panel = loadPanel()
+  aiSettings.closeAiSettings()
+  const { store, env } = harness({ turns: [refused('invalid_key', 'A chave da API foi recusada.', 'Confira a chave da OpenAI e tente novamente.')] })
+  const unlink = panel.linkSettings(store)
+  try {
+    env.settings = { ...env.settings, apiKey: '' }
+    assert.equal(store.send(OPTION_REQUEST), false)
+    assert.deepEqual(settingsWindow(), { open: true, focus: 'apiKey', errors: { apiKey: 'Informe a chave da API da OpenAI.' } })
+    assert.deepEqual(store.getState().entries, [])
+    assert.equal(env.turns.length, 0)
+    const seq = aiSettings.readAiSettingsDialog().seq
+    aiSettings.closeAiSettings()
+    assert.equal(store.send(OPTION_REQUEST), false)
+    assert.equal(aiSettings.readAiSettingsDialog().seq, seq + 1, 'cada envio sem chave abre a janela de novo')
+    assert.deepEqual(settingsWindow(), { open: true, focus: 'apiKey', errors: { apiKey: 'Informe a chave da API da OpenAI.' } })
+    aiSettings.closeAiSettings()
+
+    env.settings = { ...env.settings, apiKey: '', model: 'modelo inválido' }
+    assert.equal(store.send(OPTION_REQUEST), false)
+    assert.deepEqual(settingsWindow(), { open: true, focus: 'apiKey', errors: { apiKey: 'Informe a chave da API da OpenAI.' } }, 'a janela abre no primeiro campo pedido, com o erro dele')
+    aiSettings.closeAiSettings()
+
+    env.settings = { ...env.settings, apiKey: KEY, model: 'gpt-6.1-sol' }
+    store.clearFieldError('apiKey', 'model')
+    assert.equal(store.send(OPTION_REQUEST), true)
+    assert.equal(settingsWindow().open, false, 'com a chave o pedido segue sem abrir a janela')
+    const state = await settled(store)
+    assert.equal(env.turns.length, 1)
+    assert.equal(state.focus.field, 'apiKey')
+    assert.deepEqual(settingsWindow(), { open: true, focus: 'apiKey', errors: { apiKey: 'A chave da API foi recusada. Confira a chave da OpenAI e tente novamente.' } })
+  } finally {
+    unlink()
+    aiSettings.closeAiSettings()
+  }
+})
 
 test('a candidate names the component, a short main text and the ID', () => {
   assert.equal(nodeSubject(FAREWELL), `Enviar Mensagem “Obrigado pelo contato. Até logo.” · ID ${FAREWELL.id}`)

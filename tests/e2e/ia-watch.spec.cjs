@@ -20,6 +20,11 @@ const ENDPOINTS = {
   google: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse',
   xai: 'https://api.x.ai/v1/responses',
 }
+const SETTINGS_KEY = 'flow.ia'
+const SUMMARY = 'OpenAI · GPT-6.1 Sol · Esforço equilibrado'
+const MISSING = 'Chave não informada'
+const KEY_MISSING = 'Informe a chave da API da OpenAI.'
+const KEY_REJECTED = 'A chave da API foi recusada. Confira a chave da OpenAI e tente novamente.'
 const PROMPT = 'Atendimento de clínica com menu para agendar consulta e encerrar.'
 const BANNER = 'Gerando com IA. O fluxo aparece aqui conforme é criado.'
 const DONE_BANNER = 'Fluxo gerado. Importe ou descarte na janela da IA.'
@@ -291,8 +296,20 @@ const test = base.extend({
 
 test.use({ ignoreHTTPSErrors: true })
 
-async function openEditor(page) {
-  await page.goto('/flow')
+const settingsWindow = (page) => page.getByRole('dialog', { name: 'Configurar IA', exact: true })
+
+async function seedKey(page, key) {
+  const value = JSON.stringify({ provider: 'openai', keys: { openai: key }, models: {}, effortChoice: null, fill: true })
+  await page.addInitScript(([name, saved]) => {
+    try {
+      if (window.sessionStorage.getItem(name) === null) window.sessionStorage.setItem(name, saved)
+    } catch {}
+  }, [SETTINGS_KEY, value])
+}
+
+async function openEditor(page, { key = KEYS.openai, all = false } = {}) {
+  if (key) await seedKey(page, key)
+  await page.goto(all ? '/flow?ia=todos' : '/flow')
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
   await page.getByLabel('Importar arquivo JSON').setInputFiles({ name: 'anterior.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(PREVIOUS)) })
   await expect(page.getByLabel('Nome do fluxo')).toHaveValue(PREVIOUS.name)
@@ -301,23 +318,35 @@ async function openEditor(page) {
 
 async function openDialog(page) {
   await page.getByRole('button', { name: 'Gerar com IA', exact: true }).click()
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Gerar fluxo com IA', exact: true })
   await expect(dialog.getByRole('heading', { name: 'Gerar fluxo com IA' })).toBeVisible()
   return dialog
 }
 
-async function fillRequest(dialog, { label = 'Chave da API da OpenAI', key = KEYS.openai, watch = true } = {}) {
-  await dialog.getByLabel(label).fill(key)
+async function fillRequest(dialog, { watch = true } = {}) {
   await dialog.getByLabel('Descrição do atendimento').fill(PROMPT)
   const box = dialog.getByRole('checkbox', { name: 'Acompanhar no canvas' })
   if (watch) await box.check()
   else await box.uncheck()
 }
 
-async function chooseProvider(dialog, name) {
-  const radio = dialog.page().getByRole('radio', { name, exact: true })
-  await dialog.locator('label', { has: radio }).click()
-  await expect(radio).toBeChecked()
+async function openSettings(dialog) {
+  await dialog.getByRole('button', { name: 'Configurar IA', exact: true }).click()
+  const config = settingsWindow(dialog.page())
+  await expect(config).toBeVisible()
+  return config
+}
+
+async function closeSettings(config) {
+  await config.getByRole('button', { name: 'Concluir', exact: true }).click()
+  await expect(config).toHaveCount(0)
+}
+
+async function chooseProvider(config, name) {
+  const provider = config.getByRole('combobox', { name: 'Provedor de IA', exact: true })
+  await provider.click()
+  await config.page().getByRole('option', { name, exact: true }).click()
+  await expect(provider).toHaveText(name)
 }
 
 const saved = (page) => page.evaluate(() => {
@@ -548,30 +577,38 @@ test('without Acompanhar no canvas the dialog stays open and the canvas never ch
   expect(ai.fallbacks).toEqual([])
 })
 
-test('a provider rejection stays on the key field, and when the browser cannot reach the provider the generation falls back to the server route', async ({ page, ai }) => {
+test('a provider rejection opens Configurar IA on the key with the error, and when the browser cannot reach the provider the generation falls back to the server route', async ({ page, ai }) => {
   const reference = await engineResult()
   const final = reference.workflow
   await openEditor(page)
   const dialog = await openDialog(page)
   await fillRequest(dialog)
-  const effort = dialog.getByRole('combobox', { name: 'Esforço' })
+  const config = await openSettings(dialog)
+  const effort = config.getByRole('combobox', { name: 'Esforço', exact: true })
   await effort.click()
   await page.getByRole('option', { name: 'Alto', exact: true }).click()
   await expect(effort).toHaveText('Alto')
+  await closeSettings(config)
+  await expect(dialog.getByText('OpenAI · GPT-6.1 Sol · Esforço alto', { exact: true })).toBeVisible()
 
   const panel = page.getByRole('region', { name: 'Geração com IA' })
-  const key = dialog.getByLabel('Chave da API da OpenAI')
-  const rejected = dialog.getByText('A chave da API foi recusada. Confira a chave da OpenAI e tente novamente.', { exact: true })
+  const key = config.getByLabel('Chave da API da OpenAI', { exact: true })
+  const rejected = config.getByText(KEY_REJECTED, { exact: true })
   for (let attempt = 1; attempt <= 2; attempt++) {
     ai.replies.push({ status: 401, body: { error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } } })
     await dialog.getByRole('button', { name: 'Gerar fluxo' }).click()
     await expect.poll(() => ai.calls.length).toBe(attempt)
-    await expect(rejected).toBeVisible({ timeout: 15000 })
+    await expect(config).toBeVisible({ timeout: 15000 })
+    await expect(rejected).toBeVisible()
     await expect(key).toBeFocused()
+    await expect(key).toHaveValue(KEYS.openai)
     await expect(key).toHaveAttribute('aria-invalid', 'true')
     await page.waitForTimeout(600)
     await expect(rejected).toBeVisible()
     await expect(key).toBeFocused()
+    await closeSettings(config)
+    await expect(dialog.getByRole('button', { name: 'Gerar fluxo' })).toBeEnabled()
+    await expect(dialog.getByLabel('Descrição do atendimento')).toHaveValue(PROMPT)
     await expect(panel).toHaveCount(0)
   }
   expect(ai.fallbacks).toEqual([])
@@ -580,7 +617,7 @@ test('a provider rejection stays on the key field, and when the browser cannot r
   ai.replies.push({ blocked: true })
   ai.rescues.push([progress('preparando'), progress('gerando', { nodes: 2, edges: 1 }), hold, line({ type: 'result', result: reference })])
   await dialog.getByRole('button', { name: 'Gerar fluxo' }).click()
-  await expect(rejected).toHaveCount(0)
+  await expect(config).toHaveCount(0)
   await hold.reached
   await expect(panel).toBeVisible({ timeout: 15000 })
   await expect(panel).toContainText('Gerando o fluxo, rodada 1 de 3: 2 componentes e 1 conexão.', { timeout: 15000 })
@@ -603,18 +640,25 @@ test('a provider rejection stays on the key field, and when the browser cannot r
   expect(ai.fallbacks).toHaveLength(1)
 })
 
-test('the effort selector follows each model and the chosen level reaches the provider request body', async ({ page, ai }) => {
-  await page.goto('/flow')
+test('with ?ia=todos the effort selector in Configurar IA follows each model and the chosen level reaches the provider request body', async ({ page, ai }) => {
+  await page.goto('/flow?ia=todos')
+  await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
   const dialog = await openDialog(page)
   await dialog.getByLabel('Descrição do atendimento').fill(PROMPT)
   await dialog.getByRole('checkbox', { name: 'Acompanhar no canvas' }).uncheck()
-  const model = dialog.getByRole('combobox', { name: 'Modelo' })
-  const effort = dialog.getByRole('combobox', { name: 'Esforço' })
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toBeVisible()
+  const config = settingsWindow(page)
+  const model = config.getByRole('combobox', { name: 'Modelo', exact: true })
+  const effort = config.getByRole('combobox', { name: 'Esforço', exact: true })
   const options = async (labels) => {
     await effort.click()
     await expect(page.getByRole('option')).toHaveText(labels)
   }
-  const generate = async (provider, read, sent, chip) => {
+  const generate = async (provider, read, sent, chip, summary) => {
+    await closeSettings(config)
+    await expect(dialog.getByText(summary, { exact: true })).toBeVisible()
+    await expect(dialog.getByText(MISSING, { exact: true })).toHaveCount(0)
     await dialog.getByRole('button', { name: 'Gerar fluxo' }).click()
     await expect(dialog.getByRole('button', { name: 'Importar para o editor' })).toBeFocused({ timeout: 15000 })
     await expect(summaryOf(dialog).filter({ hasText: /^Esforço / })).toHaveText(chip)
@@ -623,77 +667,85 @@ test('the effort selector follows each model and the chosen level reaches the pr
     expect(call.url).toBe(ENDPOINTS[provider])
     expect(read(call.body)).toBe(sent)
     await dialog.getByRole('button', { name: 'Editar solicitação' }).click()
+    await openSettings(dialog)
     return call
   }
 
+  await openSettings(dialog)
+  await expect(config.getByRole('combobox', { name: 'Provedor de IA', exact: true })).toHaveText('ChatGPT')
   await expect(model).toHaveText('GPT-6.1 Sol (recomendado)')
   await expect(effort).toHaveText('Equilibrado')
-  await expect(dialog.getByText(HINTS.medium, { exact: true })).toBeVisible()
+  await expect(config.getByText(HINTS.medium, { exact: true })).toBeVisible()
   await options(EFFORTS)
   await page.getByRole('option', { name: 'Máximo', exact: true }).click()
   await expect(effort).toHaveText('Máximo')
-  await expect(dialog.getByText(HINTS.max, { exact: true })).toBeVisible()
-  await dialog.getByLabel('Chave da API da OpenAI').fill(KEYS.openai)
-  const openai = await generate('openai', (body) => body.reasoning?.effort, 'max', 'Esforço máximo')
+  await expect(config.getByText(HINTS.max, { exact: true })).toBeVisible()
+  await config.getByLabel('Chave da API da OpenAI', { exact: true }).fill(KEYS.openai)
+  const openai = await generate('openai', (body) => body.reasoning?.effort, 'max', 'Esforço máximo', 'OpenAI · GPT-6.1 Sol · Esforço máximo')
   expect(openai.headers.authorization).toBe(`Bearer ${KEYS.openai}`)
 
-  await chooseProvider(dialog, 'Gemini')
+  await chooseProvider(config, 'Gemini')
   await expect(model).toHaveText('Gemini 3.8 Flash (recomendado)')
   await expect(effort).toHaveText('Alto')
   await options(['Rápido', 'Equilibrado', 'Alto'])
   await page.keyboard.press('Escape')
-  await expect(dialog).toBeVisible()
-  await dialog.getByLabel('Chave da API do Google').fill(KEYS.google)
-  const google = await generate('google', (body) => body.generationConfig?.thinkingConfig?.thinkingLevel, 'high', 'Esforço alto')
+  await expect(config).toBeVisible()
+  await config.getByLabel('Chave da API do Google', { exact: true }).fill(KEYS.google)
+  const google = await generate('google', (body) => body.generationConfig?.thinkingConfig?.thinkingLevel, 'high', 'Esforço alto', 'Google · Gemini 3.8 Flash · Esforço alto')
   expect(google.headers['x-goog-api-key']).toBe(KEYS.google)
 
-  await chooseProvider(dialog, 'Claude')
+  await chooseProvider(config, 'Claude')
   await expect(model).toHaveText('Claude Opus 5.5 (recomendado)')
   await expect(effort).toHaveText('Máximo')
   await options(EFFORTS)
   await page.getByRole('option', { name: 'Rápido', exact: true }).click()
   await expect(effort).toHaveText('Rápido')
-  await dialog.getByLabel('Chave da API da Anthropic').fill(KEYS.anthropic)
-  const anthropic = await generate('anthropic', (body) => body.output_config?.effort, 'low', 'Esforço rápido')
+  await config.getByLabel('Chave da API da Anthropic', { exact: true }).fill(KEYS.anthropic)
+  const anthropic = await generate('anthropic', (body) => body.output_config?.effort, 'low', 'Esforço rápido', 'Anthropic · Claude Opus 5.5 · Esforço rápido')
   expect(anthropic.headers['x-api-key']).toBe(KEYS.anthropic)
   expect(anthropic.headers['anthropic-dangerous-direct-browser-access']).toBe('true')
 
-  await chooseProvider(dialog, 'Grok')
+  await chooseProvider(config, 'Grok')
   await expect(model).toHaveText('Grok 4.7 (recomendado)')
   await expect(effort).toHaveText('Rápido')
   await options(EFFORTS)
   await page.getByRole('option', { name: 'Máximo', exact: true }).click()
   await expect(effort).toHaveText('Máximo')
-  await dialog.getByLabel('Chave da API da xAI').fill(KEYS.xai)
-  const xai = await generate('xai', (body) => body.reasoning?.effort, 'xhigh', 'Esforço máximo')
+  await config.getByLabel('Chave da API da xAI', { exact: true }).fill(KEYS.xai)
+  const xai = await generate('xai', (body) => body.reasoning?.effort, 'xhigh', 'Esforço máximo', 'xAI · Grok 4.7 · Esforço máximo')
   expect(xai.headers.authorization).toBe(`Bearer ${KEYS.xai}`)
+  await closeSettings(config)
 
   expect(ai.calls.map((call) => call.provider)).toEqual(['openai', 'google', 'anthropic', 'xai'])
   expect(ai.fallbacks).toEqual([])
 })
 
-test('GPT-6 Luna is listed among the OpenAI models and is the model sent to the provider', async ({ page, ai }) => {
-  await openEditor(page)
+test('with ?ia=todos GPT-6 Luna is listed among the OpenAI models in Configurar IA, survives a provider switch and is the model sent to the provider', async ({ page, ai }) => {
+  await openEditor(page, { all: true })
   const dialog = await openDialog(page)
-  const model = dialog.getByRole('combobox', { name: 'Modelo' })
+  const config = await openSettings(dialog)
+  const model = config.getByRole('combobox', { name: 'Modelo', exact: true })
   await expect(model).toHaveText('GPT-6.1 Sol (recomendado)')
   await model.click()
   await expect(page.getByRole('option')).toHaveText(['GPT-6.1 Sol (recomendado)', 'GPT-6 Astra (o mais capaz)', 'GPT-6 Luna (o mais rápido)'])
   await expect(page.getByRole('listbox').getByText('Recomendados', { exact: true })).toBeVisible()
   await page.getByRole('option', { name: 'GPT-6 Luna (o mais rápido)', exact: true }).click()
   await expect(model).toHaveText('GPT-6 Luna (o mais rápido)')
-  await expect(dialog.getByText('ID gpt-6-luna. Analisa imagens.')).toBeVisible()
-  const effort = dialog.getByRole('combobox', { name: 'Esforço' })
+  await expect(config.getByText(/^ID gpt-6-luna\./)).toBeVisible()
+  const effort = config.getByRole('combobox', { name: 'Esforço', exact: true })
   await effort.click()
   await expect(page.getByRole('option')).toHaveText(EFFORTS)
   await page.keyboard.press('Escape')
+  await expect(config).toBeVisible()
 
-  await chooseProvider(dialog, 'Claude')
+  await chooseProvider(config, 'Claude')
   await model.click()
   await expect(page.getByRole('option', { name: /Luna/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
-  await chooseProvider(dialog, 'ChatGPT')
+  await chooseProvider(config, 'ChatGPT')
   await expect(model).toHaveText('GPT-6 Luna (o mais rápido)')
+  await closeSettings(config)
+  await expect(dialog.getByText('OpenAI · GPT-6 Luna · Esforço equilibrado', { exact: true })).toBeVisible()
 
   await fillRequest(dialog)
   await dialog.getByRole('button', { name: 'Gerar fluxo' }).click()
@@ -702,6 +754,42 @@ test('GPT-6 Luna is listed among the OpenAI models and is the model sent to the 
   expect(ai.calls).toHaveLength(1)
   expect(ai.calls[0].body.model).toBe('gpt-6-luna')
   expect(ai.calls[0].body.reasoning?.effort).toBe('medium')
+  expect(ai.calls[0].headers.authorization).toBe(`Bearer ${KEYS.openai}`)
+})
+
+test('Gerar fluxo without a key opens Configurar IA on the key with the error, nothing reaches the provider, and the key typed there generates', async ({ page, ai }) => {
+  await openEditor(page, { key: '' })
+  const dialog = await openDialog(page)
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toBeVisible()
+  await expect(dialog.getByLabel('Chave da API da OpenAI')).toHaveCount(0)
+  for (const name of ['Provedor de IA', 'Modelo', 'Esforço']) await expect(dialog.getByRole('combobox', { name, exact: true }), `${name} fica só na janela Configurar IA`).toHaveCount(0)
+  await fillRequest(dialog, { watch: false })
+  await dialog.getByRole('button', { name: 'Gerar fluxo' }).click()
+  const config = settingsWindow(page)
+  await expect(config).toBeVisible()
+  const key = config.getByLabel('Chave da API da OpenAI', { exact: true })
+  await expect(key).toBeFocused()
+  await expect(key).toHaveValue('')
+  await expect(key).toHaveAttribute('aria-invalid', 'true')
+  await expect(config.getByText(KEY_MISSING, { exact: true })).toBeVisible()
+  await page.waitForTimeout(300)
+  expect(ai.calls).toEqual([])
+  expect(ai.fallbacks).toEqual([])
+
+  await key.fill(KEYS.openai)
+  await expect(key).not.toHaveAttribute('aria-invalid')
+  await closeSettings(config)
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toHaveCount(0)
+  await expect(dialog.getByLabel('Descrição do atendimento')).toHaveValue(PROMPT)
+  await dialog.getByRole('button', { name: 'Gerar fluxo' }).click()
+  await expect(dialog.getByRole('button', { name: 'Importar para o editor' })).toBeFocused({ timeout: 15000 })
+  await expect(config).toHaveCount(0)
+  expect(ai.calls).toHaveLength(1)
+  expect(ai.calls[0].headers.authorization).toBe(`Bearer ${KEYS.openai}`)
+  expect(ai.calls[0].body).toMatchObject({ model: 'gpt-6.1-sol', reasoning: { effort: 'medium' } })
+  expect(ai.fallbacks).toEqual([])
 })
 
 test('importing keeps the previous flow in Meus fluxos', async ({ page, ai }) => {

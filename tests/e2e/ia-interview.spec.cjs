@@ -19,6 +19,10 @@ const STARTER = 'Crie um fluxo de envio de boleto.'
 const KEY_MISSING = 'Informe a chave da API da OpenAI.'
 const KEY_REJECTED = 'A chave da API foi recusada.'
 const KEY_DETAILS = 'Confira a chave da OpenAI e tente novamente.'
+const KEY_LABEL = 'Chave da API da OpenAI'
+const SETTINGS_KEY = 'flow.ia'
+const SUMMARY = 'OpenAI · GPT-6.1 Sol · Esforço equilibrado'
+const MISSING = 'Chave não informada'
 
 const REQUEST = 'crie um fluxo de envio de boleto'
 const WELCOME = 'Use a mensagem Olá, você está no financeiro da Boletos Exemplo.'
@@ -327,7 +331,19 @@ const saved = async (page) => {
 }
 const library = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('workflow-library') || '[]').map((entry) => ({ name: entry.flow.name, nodes: entry.flow.nodes.map((node) => node.id) })))
 
-async function openBlank(page) {
+const settingsWindow = (page) => page.getByRole('dialog', { name: 'Configurar IA', exact: true })
+
+async function seedKey(page) {
+  const value = JSON.stringify({ provider: 'openai', keys: { openai: KEY }, models: {}, effortChoice: null, fill: true })
+  await page.addInitScript(([name, saved]) => {
+    try {
+      if (window.sessionStorage.getItem(name) === null) window.sessionStorage.setItem(name, saved)
+    } catch {}
+  }, [SETTINGS_KEY, value])
+}
+
+async function openBlank(page, { key = true } = {}) {
+  if (key) await seedKey(page)
   await page.goto('/flow')
   await expect(page.getByLabel('Nome do fluxo', { exact: true })).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(1)
@@ -342,7 +358,7 @@ async function openBase(page) {
 
 async function openDialog(page) {
   await page.getByRole('button', { name: 'Gerar com IA', exact: true }).click()
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Gerar fluxo com IA', exact: true })
   await expect(dialog.getByRole('heading', { name: 'Gerar fluxo com IA' })).toBeVisible()
   return dialog
 }
@@ -353,9 +369,8 @@ async function chooseMode(dialog, name) {
   await expect(radio).toBeChecked()
 }
 
-async function startChat(page, { key = KEY, watch = false } = {}) {
+async function startChat(page, { watch = false } = {}) {
   const dialog = await openDialog(page)
-  if (key) await dialog.getByLabel('Chave da API da OpenAI').fill(key)
   await chooseMode(dialog, MODE)
   const box = dialog.getByRole('checkbox', { name: 'Acompanhar no canvas' })
   if (watch) await box.check()
@@ -397,9 +412,11 @@ test('crie um fluxo de envio de boleto: the AI asks with suggestions, builds the
   await expect(dialog.getByText('Imagem de referência')).toBeHidden()
   await expect(dialog.getByRole('combobox', { name: 'Tamanho do fluxo' })).toBeHidden()
   await expect(dialog.getByRole('button', { name: 'Gerar fluxo', exact: true })).toHaveCount(0)
-  await expect(dialog.getByLabel('Chave da API da OpenAI')).toBeVisible()
-  await expect(dialog.getByRole('combobox', { name: 'Modelo' })).toBeVisible()
-  await expect(dialog.getByRole('combobox', { name: 'Esforço' })).toBeVisible()
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Configurar IA', exact: true })).toBeVisible()
+  await expect(dialog.getByLabel(KEY_LABEL)).toHaveCount(0)
+  for (const name of ['Provedor de IA', 'Modelo', 'Esforço']) await expect(dialog.getByRole('combobox', { name, exact: true }), `${name} fica só na janela Configurar IA`).toHaveCount(0)
   await expect(dialog.getByRole('checkbox', { name: 'Preencher todos os campos' })).toBeChecked()
   await expect(dialog.getByRole('checkbox', { name: 'Acompanhar no canvas' })).toBeChecked()
   await expect(chat.getByText(INTRO)).toBeVisible()
@@ -699,15 +716,25 @@ test('Encerrar conversa ends the chat, a late answer never shows up and Nova con
   expect(ai.buildCalls()).toHaveLength(0)
 })
 
-test('a key rejected on a turn shows the error in the chat and Tentar de novo sends the same history again', async ({ page, ai }) => {
+test('a key rejected on a turn opens Configurar IA on the key with the error, shows it in the chat and Tentar de novo sends the same history again', async ({ page, ai }) => {
   ai.turns.push({ status: 401, body: { error: { message: 'Incorrect API key provided.', type: 'invalid_request_error', code: 'invalid_api_key' } } })
   ai.say(ASK_MENU)
   await openBlank(page)
   const { chat } = await startChat(page)
   await type(chat, REQUEST)
 
+  const config = settingsWindow(page)
+  await expect(config).toBeVisible({ timeout: 15000 })
+  const key = config.getByLabel(KEY_LABEL, { exact: true })
+  await expect(key).toBeFocused()
+  await expect(key).toHaveValue(KEY)
+  await expect(key).toHaveAttribute('aria-invalid', 'true')
+  await expect(config.getByText(`${KEY_REJECTED} ${KEY_DETAILS}`, { exact: true })).toBeVisible()
+  await config.getByRole('button', { name: 'Concluir', exact: true }).click()
+  await expect(config).toHaveCount(0)
+
   const alert = chat.getByRole('alert')
-  await expect(alert).toBeVisible({ timeout: 15000 })
+  await expect(alert).toBeVisible()
   await expect(alert).toContainText(KEY_REJECTED)
   await expect(alert).toContainText(KEY_DETAILS)
   await expect(alert).not.toContainText(KEY)
@@ -718,26 +745,39 @@ test('a key rejected on a turn shows the error in the chat and Tentar de novo se
   await expect(entries(chat)).toHaveText([user(REQUEST), assistant(ASK_MENU)])
   await expect(alert).toHaveCount(0)
   await expect(chips(chat)).toHaveText(ASK_MENU.suggestions)
+  await expect(config).toHaveCount(0)
   expect(ai.turnCalls()).toHaveLength(2)
   expect(inputOf(ai.turnCalls()[1])).toBe(inputOf(ai.turnCalls()[0]))
+  expect(ai.turnCalls()[1].headers.authorization).toBe(`Bearer ${KEY}`)
 })
 
-test('without a key the first message shows the error on the key field and nothing reaches the provider', async ({ page, ai }) => {
-  await openBlank(page)
-  const { dialog, chat } = await startChat(page, { key: '' })
-  const key = dialog.getByLabel('Chave da API da OpenAI')
-  await expect(key).toHaveValue('')
+test('without a key the first message opens Configurar IA on the key with the error and nothing reaches the provider until the key is typed there', async ({ page, ai }) => {
+  await openBlank(page, { key: false })
+  const { dialog, chat } = await startChat(page)
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toBeVisible()
   await type(chat, REQUEST)
-  await expect(dialog.getByText(KEY_MISSING, { exact: true })).toBeVisible()
+  const config = settingsWindow(page)
+  await expect(config).toBeVisible()
+  const key = config.getByLabel(KEY_LABEL, { exact: true })
+  await expect(key).toBeFocused()
+  await expect(key).toHaveValue('')
   await expect(key).toHaveAttribute('aria-invalid', 'true')
+  await expect(config.getByText(KEY_MISSING, { exact: true })).toBeVisible()
   await page.waitForTimeout(300)
   expect(ai.calls).toEqual([])
 
   ai.say(ASK_MENU)
   await key.fill(KEY)
+  await expect(key).not.toHaveAttribute('aria-invalid')
+  await expect(config.getByText(KEY_MISSING, { exact: true })).toHaveCount(0)
+  await config.getByRole('button', { name: 'Concluir', exact: true }).click()
+  await expect(config).toHaveCount(0)
+  await expect(dialog.getByText(MISSING, { exact: true })).toHaveCount(0)
   await type(chat, REQUEST)
   await expect(log(chat)).toContainText(ASK_MENU.message)
   await expect(chips(chat)).toHaveText(ASK_MENU.suggestions)
+  await expect(config).toHaveCount(0)
   expect(ai.turnCalls()).toHaveLength(1)
   expect(ai.turnCalls()[0].headers.authorization).toBe(`Bearer ${KEY}`)
 })
@@ -755,7 +795,8 @@ test('closing and reopening the dialog keeps the conversation, even while the AI
   let dialog = await openDialog(page)
   chat = dialog.getByRole('region', { name: 'Conversa com a IA' })
   await expect(dialog.getByRole('radio', { name: MODE, exact: true })).toBeChecked()
-  await expect(dialog.getByLabel('Chave da API da OpenAI')).toHaveValue(KEY)
+  await expect(dialog.getByText(SUMMARY, { exact: true })).toBeVisible()
+  await expect(dialog.getByText(MISSING, { exact: true })).toHaveCount(0)
   await expect(entries(chat)).toHaveText([user(REQUEST), assistant(ASK_MENU)])
   await expect(chips(chat)).toHaveText(ASK_MENU.suggestions)
   await expect(dialog.getByRole('button', { name: 'Gerar fluxo', exact: true })).toHaveCount(0)

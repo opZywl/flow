@@ -10,6 +10,7 @@ const { INTERVIEW_SCHEMA_NAME } = require('../../lib/atendimento/ai/interview.ts
 const { PICK_MIN_WIDTH } = require('../../src/flow/canvas-frame.ts')
 
 const KEY = 'sk-test-0123456789abcdefghijklmnop'
+const SETTINGS_KEY = 'flow.ia'
 const HOST = 'api.openai.com'
 const FALLBACK_ERROR = 'A rota de reserva não fazia parte deste teste.'
 const APPLIED = 'Alterações aplicadas no fluxo. Desfazer (Ctrl+Z) volta ao anterior.'
@@ -638,13 +639,17 @@ async function openCopilot(page) {
   return panel
 }
 
-async function typeKey(panel) {
-  const settings = panel.getByRole('button', { name: 'Configurar IA', exact: true })
-  if ((await settings.getAttribute('aria-expanded')) !== 'true') await settings.click()
-  await panel.getByLabel('Chave da API da OpenAI').fill(KEY)
+async function seedKey(page) {
+  const value = JSON.stringify({ provider: 'openai', keys: { openai: KEY }, models: {}, effortChoice: null, fill: true })
+  await page.addInitScript(([name, saved]) => {
+    try {
+      if (window.sessionStorage.getItem(name) === null) window.sessionStorage.setItem(name, saved)
+    } catch {}
+  }, [SETTINGS_KEY, value])
 }
 
 async function start(page, flow = BASE_FLOW, { library = false } = {}) {
+  await seedKey(page)
   await page.goto('/flow')
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
   await importFile(page, flow, 'base.json')
@@ -653,7 +658,7 @@ async function start(page, flow = BASE_FLOW, { library = false } = {}) {
     await expect(componentLibrary(page)).toHaveCount(0)
   }
   const panel = await openCopilot(page)
-  await typeKey(panel)
+  await expect(panel.getByText('Chave não informada', { exact: true })).toHaveCount(0)
   await fitCanvas(page)
   return panel
 }
