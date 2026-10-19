@@ -9,7 +9,8 @@ import {
   type GenerationProgress,
   type GenerationUsage,
 } from "@/lib/atendimento/ai/contracts"
-import type { InterviewMessage, InterviewTurn } from "@/lib/atendimento/ai/interview"
+import type { InterviewMessage, InterviewPlace, InterviewTurn } from "@/lib/atendimento/ai/interview"
+import { PLACE_ASK, PLACE_LABEL, PLACE_PROPOSED } from "@/lib/atendimento/ai/place"
 import { PROVIDERS, type ProviderId } from "@/lib/atendimento/ai/providers"
 import { clip, shorten } from "@/lib/atendimento/ai/text"
 import { NOTE_TYPE, START_TYPE } from "@/lib/atendimento/catalog"
@@ -526,6 +527,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
   let chosen: Choice | null = null
   let parked = ""
   let decided = false
+  let opened: InterviewPlace | null = null
   let shown = false
   let sequence = 0
   let focusSequence = 0
@@ -614,6 +616,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     chosen = null
     parked = ""
     decided = false
+    opened = null
     const failed = state.retry ? state.entries.find((entry) => entry.id === state.retry) : undefined
     const edit = failed?.kind === "error" && !failed.turn && Boolean(failed.prompt)
     return { plan: "", suggestions: [], pick: null, ...(edit ? { retry: null } : {}) }
@@ -729,6 +732,15 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       if (entry.kind === "user" && entry.text.startsWith(PICK_PREFIX)) return entry.text
     }
     return ""
+  }
+
+  const pending = (): boolean => {
+    for (let index = state.entries.length - 1; index >= 0; index--) {
+      const entry = state.entries[index]
+      if (entry.kind === "assistant" || entry.kind === "proposal") return false
+      if (entry.kind === "user" && !entry.text.startsWith(PICK_PREFIX)) return true
+    }
+    return false
   }
 
   const choiceText = (candidate: CopilotPickCandidate) => `${PICK_PREFIX} ${candidate.text}`
@@ -1021,6 +1033,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       return
     }
     const unseen = !state.visible
+    opened = turn.action === "ask" && turn.place && !turn.pick ? turn.place : null
     set({
       entries,
       thinking: false,
@@ -1056,6 +1069,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
     const controller = new AbortController()
     asking = controller
     decided = false
+    opened = null
     const kept = planned ? current(planned) : null
     planned = kept
     if (!kept) {
@@ -1105,8 +1119,20 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       }
       planned = base
       const entries: CopilotEntry[] = [...state.entries, { id: nextId(), kind: "user", text: EDIT_NOW_TEXT }]
-      if (decided) start(jobFor(base, join(state.plan, unanswered()), settings), entries)
-      else think(settings, base, entries)
+      if (!decided && pending()) {
+        think(settings, base, entries)
+        return true
+      }
+      const prompt = join(state.plan, unanswered())
+      const place = decided ? null : opened
+      opened = null
+      const pick = place ? readPick({ label: PLACE_LABEL, candidates: [], any: true, ready: place.after !== undefined, ...(place.after === undefined ? {} : { selected: place.after }) }, base.base) : null
+      if (pick) {
+        set({ entries: [...entries, said(place?.after === undefined ? PLACE_ASK : PLACE_PROPOSED)], pick, plan: prompt, suggestions: [] })
+        return true
+      }
+      decided = true
+      start(jobFor(base, prompt, settings), entries)
       return true
     },
     selectPick(id) {
@@ -1150,6 +1176,7 @@ export function createCopilot(read: () => CopilotOptions): CopilotStore {
       if (!state.pick) return false
       parked = state.plan || parked
       decided = false
+      opened = null
       set({ pick: null, plan: "", entries: [...state.entries, note(PICK_CANCELLED, "muted")] })
       return true
     },

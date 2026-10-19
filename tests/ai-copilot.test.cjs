@@ -25,7 +25,7 @@ const copilot = require('../src/flow/ai/copilot-store.ts')
 const { behaviorSignature, importFlow, newFlow, newNode, outputHandles } = require('../lib/atendimento/format.ts')
 const { assembleFlow, finalizeFlow } = require('../lib/atendimento/ai/assemble.ts')
 const { arrangeFlow } = require('../lib/atendimento/ai/arrange.ts')
-const { PLACE_LABEL, PLACE_PROPOSED, settleTurn } = require('../lib/atendimento/ai/interview.ts')
+const { PLACE_ASK, PLACE_LABEL, PLACE_PROPOSED, settleTurn } = require('../lib/atendimento/ai/interview.ts')
 const { applyEdit, diffFlows, flowToRi } = require('../lib/atendimento/ai/edit.ts')
 const { previewEdit } = require('../lib/atendimento/ai/preview.ts')
 const { documentKey, keyWarning, nodeSubject, nodeText } = require('../src/flow/ai/generation-client.ts')
@@ -455,8 +455,8 @@ test('finish ends the request without editing and clears the suggestions and the
   assert.equal(store.editNow(), false)
 })
 
-test('Editar agora after a question sends its text to the AI with the whole conversation and runs the edit the AI returns', async () => {
-  const { store, env } = harness({ turns: [asked(OPTION_QUESTION, ['Pode ser assim'], OPTION_PLAN), edited(OPTION_PLAN, OPTION_EDIT)], outcomes: [received(FIRST)] })
+test('Editar agora starts the edit with the plan right away, without another turn', async () => {
+  const { store, env } = harness({ turns: [asked(OPTION_QUESTION, ['Pode ser assim'], OPTION_PLAN)], outcomes: [received(FIRST)] })
   assert.equal(store.editNow(), false)
   store.send(OPTION_REQUEST)
   await settled(store)
@@ -466,36 +466,26 @@ test('Editar agora after a question sends its text to the AI with the whole conv
 
   assert.equal(store.editNow(), true)
   let state = store.getState()
-  assert.equal(state.thinking, true)
-  assert.equal(state.running, false)
+  assert.equal(state.running, true)
+  assert.equal(state.thinking, false)
   assert.deepEqual(state.suggestions, [])
-  assert.equal(state.plan, OPTION_PLAN)
   assert.deepEqual(texts(state), [`user:${OPTION_REQUEST}`, `assistant:${OPTION_QUESTION}`, `user:${copilot.EDIT_NOW_TEXT}`])
   assert.equal(store.editNow(), false)
   assert.equal(store.send('outro pedido'), false)
-  assert.equal(env.requests.length, 0)
-  assert.equal(env.turns.length, 2)
-  assert.deepEqual(env.turns[1].history, [
-    { role: 'user', text: OPTION_REQUEST },
-    { role: 'assistant', text: OPTION_QUESTION },
-    { role: 'user', text: copilot.EDIT_NOW_TEXT },
-  ])
-  assert.equal(env.turns[1].flow, BASE)
-  assert.equal(env.turns[1].proposal, false)
 
   state = await settled(store)
-  assert.equal(env.turns.length, 2)
+  assert.equal(env.turns.length, 1)
   assert.equal(env.requests.length, 1)
   assert.equal(env.requests[0].request.prompt, OPTION_PLAN)
   assert.equal(env.requests[0].request.base, BASE)
-  assert.deepEqual(kinds(state), ['user', 'assistant', 'user', 'assistant', 'proposal:pending'])
+  assert.deepEqual(kinds(state), ['user', 'assistant', 'user', 'proposal:pending'])
   assert.equal(proposals(state)[0].proposal.prompt, OPTION_PLAN)
   assert.equal(state.plan, '')
   assert.equal(store.editNow(), false)
 })
 
 test('Editar agora checks the key first and keeps the plan for later', async () => {
-  const { store, env } = harness({ turns: [asked(OPTION_QUESTION, ['Pode ser assim'], OPTION_PLAN), edited(OPTION_PLAN, OPTION_EDIT)], outcomes: [received(FIRST)] })
+  const { store, env } = harness({ turns: [asked(OPTION_QUESTION, ['Pode ser assim'], OPTION_PLAN)], outcomes: [received(FIRST)] })
   store.send(OPTION_REQUEST)
   await settled(store)
   env.settings = { ...env.settings, apiKey: '' }
@@ -505,11 +495,9 @@ test('Editar agora checks the key first and keeps the plan for later', async () 
   assert.equal(state.focus.field, 'apiKey')
   assert.equal(state.plan, OPTION_PLAN)
   assert.equal(state.entries.length, 2)
-  assert.equal(env.turns.length, 1)
   env.settings = { ...env.settings, apiKey: KEY }
   assert.equal(store.editNow(), true)
   await settled(store)
-  assert.equal(env.turns.length, 2)
   assert.equal(env.requests[0].request.prompt, OPTION_PLAN)
 })
 
@@ -1688,7 +1676,7 @@ test('after a ready edit fails or is stopped, Tentar de novo and Editar agora se
 })
 
 test('Cancelar seleção leaves the pick with a muted note, hides Editar agora until the next answer and the answer can come by text', async () => {
-  const { store, env } = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', ['Pode ser assim'], PICK_PLAN), edited(PICK_PLAN, PICK_EDIT)], outcomes: [received(CHANGED)] })
+  const { store, env } = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', ['Pode ser assim'], PICK_PLAN)] })
   store.send(PICK_REQUEST)
   await settled(store)
   store.selectPick(FAREWELL.id)
@@ -1712,10 +1700,6 @@ test('Cancelar seleção leaves the pick with a muted note, hides Editar agora u
   state = await settled(store)
   assert.equal(state.plan, PICK_PLAN)
   assert.equal(store.editNow(), true)
-  await settled(store)
-  assert.equal(env.turns.length, 3)
-  assert.deepEqual(env.turns[2].history.at(-1), { role: 'user', text: copilot.EDIT_NOW_TEXT })
-  assert.equal(env.requests[0].request.prompt, PICK_PLAN)
 })
 
 test('after Cancelar seleção, an edit that comes without a plan still carries the plan of the question and the typed answer', async () => {
@@ -2014,8 +1998,8 @@ test('closing the panel in the middle of a selection leaves the question reminde
   assert.deepEqual(env.notified, [])
 })
 
-test('Editar agora after a selection whose turn was stopped, or after the AI answered the selection with a question, asks the AI with the selection in the conversation and keeps the focus on the chosen component', async () => {
-  const stopped = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), ({ signal }) => waiting(signal), edited(PICK_PLAN, PICK_EDIT)], outcomes: [received(CHANGED)] })
+test('Editar agora after a selection whose turn was stopped sends the plan with the selection, and after the AI answered it sends the new plan', async () => {
+  const stopped = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), ({ signal }) => waiting(signal)], outcomes: [received(CHANGED)] })
   stopped.store.send(PICK_REQUEST)
   await settled(stopped.store)
   stopped.store.selectPick(FAREWELL.id)
@@ -2024,30 +2008,19 @@ test('Editar agora after a selection whose turn was stopped, or after the AI ans
   let state = stopped.store.getState()
   assert.equal(state.plan, PICK_DRAFT)
   assert.equal(stopped.store.editNow(), true)
-  assert.equal(stopped.store.getState().thinking, true)
-  assert.equal(stopped.env.requests.length, 0)
-  assert.deepEqual(stopped.env.turns[2].history, [
-    { role: 'user', text: PICK_REQUEST },
-    { role: 'assistant', text: PICK_QUESTION },
-    { role: 'user', text: choice(FAREWELL) },
-    { role: 'assistant', text: copilot.COPILOT_TEXT.cancelled },
-    { role: 'user', text: copilot.EDIT_NOW_TEXT },
-  ])
   state = await settled(stopped.store)
-  assert.equal(stopped.env.requests[0].request.prompt, PICK_PLAN)
-  assert.deepEqual(kinds(state), ['user', 'assistant', 'user', `note:${copilot.COPILOT_TEXT.cancelled}`, 'user', 'assistant', 'proposal:pending'])
+  assert.equal(stopped.env.requests[0].request.prompt, `${PICK_DRAFT}\n\n${choice(FAREWELL)}`)
+  assert.deepEqual(kinds(state), ['user', 'assistant', 'user', `note:${copilot.COPILOT_TEXT.cancelled}`, 'user', 'proposal:pending'])
   assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
   assert.equal(stopped.env.focus[0], FAREWELL.id)
 
-  const answered = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', ['Pode ser assim'], PICK_PLAN), edited(PICK_PLAN, PICK_EDIT)], outcomes: [received(CHANGED)] })
+  const answered = harness({ turns: [picked([WELCOME.id, FAREWELL.id]), asked('Qual pergunta de CPF você quer?', ['Pode ser assim'], PICK_PLAN)], outcomes: [received(CHANGED)] })
   answered.store.send(PICK_REQUEST)
   await settled(answered.store)
   answered.store.selectPick(FAREWELL.id)
   answered.store.confirmPick()
   await settled(answered.store)
   assert.equal(answered.store.editNow(), true)
-  assert.equal(answered.env.turns.length, 3)
-  assert.deepEqual(answered.env.turns[2].history.at(-1), { role: 'user', text: copilot.EDIT_NOW_TEXT })
   state = await settled(answered.store)
   assert.equal(answered.env.requests[0].request.prompt, PICK_PLAN)
   assert.equal(proposals(state)[0].proposal.focus, FAREWELL.id)
@@ -2297,14 +2270,11 @@ test('Editar agora runs on the flow the question saw: a content change ends with
   assert.deepEqual(state.suggestions, [])
   assert.equal(changed.store.editNow(), false)
 
-  const moved = harness({ turns: [asked(OPTION_QUESTION, ['Pode ser assim'], OPTION_PLAN), edited(OPTION_PLAN, OPTION_EDIT)], outcomes: [received(FIRST)] })
+  const moved = harness({ turns: [asked(OPTION_QUESTION, ['Pode ser assim'], OPTION_PLAN)], outcomes: [received(FIRST)] })
   moved.store.send(OPTION_REQUEST)
   await settled(moved.store)
   moved.env.flow = MOVED
   assert.equal(moved.store.editNow(), true)
-  assert.equal(moved.env.turns.length, 2)
-  assert.equal(moved.env.turns[1].flow, MOVED)
-  assert.equal(moved.store.getState().plan, OPTION_PLAN)
   await settled(moved.store)
   assert.equal(moved.env.requests[0].request.base, MOVED)
   assert.equal(moved.env.requests[0].request.prompt, OPTION_PLAN)
@@ -3790,10 +3760,9 @@ test('the Outro field of the pick box says the selection goes along only once th
   assert.doesNotMatch(stripTags(html), /[!—–]/)
 })
 
-test('Editar agora after a question goes through the AI and the place guard: an edit that adds a component without a place opens the place pick with the suggestion, and nothing is built before Confirmar seleção', async () => {
+test('Editar agora after a question whose plan adds a component without a place opens the place pick with the suggestion right away, without another turn, and nothing is built before Confirmar seleção', async () => {
   const asking = { message: NOW_QUESTION, suggestions: ['Pode ser assim', 'Quero outro texto', 'Pode editar agora'], action: 'ask', plan: NOW_PLAN, adds: true, after: WELCOME.id }
-  const editing = { message: ANY_EDIT, action: 'edit', plan: NOW_PLAN, adds: true, after: WELCOME.id }
-  const { store, env } = harness({ turns: [guarded(asking), guarded(editing)], outcomes: [received(CPF_AFTER)] })
+  const { store, env } = harness({ turns: [guarded(asking)], outcomes: [received(CPF_AFTER)] })
   store.send(ANY_REQUEST)
   let state = await settled(store)
   assert.equal(state.pick, null)
@@ -3802,29 +3771,53 @@ test('Editar agora after a question goes through the AI and the place guard: an 
 
   assert.equal(store.editNow(), true)
   state = store.getState()
-  assert.equal(state.thinking, true)
+  assert.equal(state.thinking, false)
   assert.equal(state.running, false)
-  assert.equal(env.requests.length, 0)
-  assert.equal(env.turns.length, 2)
-  assert.deepEqual(env.turns[1].history.at(-1), { role: 'user', text: copilot.EDIT_NOW_TEXT })
-
-  state = await settled(store)
+  assert.equal(env.turns.length, 1)
   assert.equal(env.requests.length, 0)
   assert.deepEqual(env.previews, [])
   assert.deepEqual(texts(state), [`user:${ANY_REQUEST}`, `assistant:${NOW_QUESTION}`, `user:${copilot.EDIT_NOW_TEXT}`, `assistant:${PLACE_PROPOSED}`])
   assert.equal(state.pick.label, PLACE_LABEL)
   assert.equal(state.pick.any, true)
+  assert.equal(state.pick.ready, true)
   assert.equal(state.pick.proposed, WELCOME.id)
   assert.equal(state.pick.selected, WELCOME.id)
   assert.equal(state.plan, NOW_PLAN)
+  assert.deepEqual(state.suggestions, [])
   assert.equal(store.editNow(), false)
 
   assert.equal(store.confirmPick(), true)
   state = await settled(store)
-  assert.equal(env.turns.length, 2)
+  assert.equal(env.turns.length, 1)
   assert.equal(env.requests.length, 1)
   assert.equal(env.requests[0].request.prompt, `${NOW_PLAN}\n\n${choice(WELCOME)}`)
   assert.equal(proposals(state)[0].proposal.focus, WELCOME.id)
+
+  const unproposed = harness({ turns: [guarded({ ...asking, after: '' }), edited(ANY_PLAN, ANY_EDIT)], outcomes: [received(CPF_AFTER)] })
+  unproposed.store.send(ANY_REQUEST)
+  await settled(unproposed.store)
+  assert.equal(unproposed.store.editNow(), true)
+  state = unproposed.store.getState()
+  assert.equal(unproposed.env.turns.length, 1)
+  assert.equal(state.pick.ready, false)
+  assert.equal(state.pick.selected, null)
+  assert.equal(texts(state).at(-1), `assistant:${PLACE_ASK}`)
+  assert.equal(unproposed.store.selectPick(WELCOME.id), true)
+  assert.equal(unproposed.store.confirmPick(), true)
+  assert.equal(unproposed.store.getState().thinking, true)
+  await settled(unproposed.store)
+  assert.equal(unproposed.env.turns.length, 2)
+  assert.equal(unproposed.env.requests[0].request.prompt, ANY_PLAN)
+
+  const placed = harness({ turns: [guarded({ ...asking, adds: false })], outcomes: [received(CPF_AFTER)] })
+  placed.store.send(ANY_REQUEST)
+  await settled(placed.store)
+  assert.equal(placed.store.editNow(), true)
+  assert.equal(placed.store.getState().running, true)
+  assert.equal(placed.store.getState().pick, null)
+  await settled(placed.store)
+  assert.equal(placed.env.turns.length, 1)
+  assert.equal(placed.env.requests[0].request.prompt, NOW_PLAN)
 })
 
 test('Editar agora starts right away, without another turn, when the plan came from an edit turn, after Parar on the edit or after the key was missing, and a message sent after it takes Editar agora through the AI again', async () => {

@@ -6,6 +6,7 @@ import { importFlow, outputHandles } from "../format"
 import type { AtendimentoFlow } from "../types"
 import { ARRANGE_LIMIT } from "./arrange"
 import type { LayoutCell } from "./arrange"
+import { PLACE_ASK, PLACE_LABEL, PLACE_PROPOSED } from "./place"
 import { DEFAULT_FILL, LIMITS, RI_LIMITS } from "./contracts"
 import type { Effort, GenerateFailure } from "./contracts"
 import { flowToRi } from "./edit"
@@ -40,6 +41,11 @@ export interface InterviewTurn {
   plan: string
   pick?: InterviewPick | null
   layout?: LayoutCell[]
+  place?: InterviewPlace
+}
+
+export interface InterviewPlace {
+  after?: string
 }
 
 export interface InterviewReply extends InterviewTurn {
@@ -83,9 +89,7 @@ export const INTERVIEW_ACTIONS: readonly InterviewAction[] = ["ask", "generate",
 
 const COPILOT_ACTIONS: readonly InterviewAction[] = [...INTERVIEW_ACTIONS, "arrange"]
 
-export const PLACE_LABEL = "o componente que vem antes do componente novo"
-export const PLACE_PROPOSED = "Antes de editar, confirme no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado, e a minha sugestão já está marcada."
-export const PLACE_ASK = "Antes de editar, selecione no canvas onde o componente novo entra. Ele fica logo depois do componente selecionado."
+export { PLACE_ASK, PLACE_LABEL, PLACE_PROPOSED }
 export const ARRANGE_LOST = "Qual formato você quer para o fluxo? Por exemplo: em L, em coluna ou como uma casa."
 
 export const INTERVIEW_SCHEMA_NAME = "turno_conversa"
@@ -1009,7 +1013,12 @@ export function settleTurn(raw: InterviewReply, context: SettleContext): Intervi
   const lost = copilot && action === "ask" && !selection && (wantedPick(raw.pick) || asksSelection(said))
   const suggestions = action === "finish" || (copilot && action !== "ask") ? [] : selection && !selection.any ? pickSuggestions(chips, selection.candidates, context.texts) : cleanSuggestions(chips)
   const message = settleMessage(said, (copilot ? COPILOT_MESSAGES : DEFAULT_MESSAGES)[action], selection, lost)
-  return selection ? { message, suggestions, action, plan, pick: selection } : { message, suggestions, action, plan }
+  if (selection) return { message, suggestions, action, plan, pick: selection }
+  if (copilot && action === "ask" && !lost && plan && raw.adds === true && placeOpen(context, ids, anchors)) {
+    const proposed = idResolver(anchors)(asText(raw.after))
+    return { message, suggestions, action, plan, place: proposed === undefined ? {} : { after: proposed } }
+  }
+  return { message, suggestions, action, plan }
 }
 
 function reject(error: string, field?: GenerateFailure["field"]): { ok: false; failure: GenerateFailure } {

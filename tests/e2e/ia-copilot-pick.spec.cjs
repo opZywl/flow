@@ -1923,7 +1923,7 @@ test('an answer typed while the place selection only shows the suggestion of the
   expect(applied.edges.some((edge) => edge.source === PAYMENTS && edge.target === notice), 'a sugestão que o usuário não escolheu fica como estava').toBe(false)
 })
 
-test('Editar agora after a question sends what was decided through the Copiloto, so a new component still asks where it goes before any edit is built', async ({ page, ai }) => {
+test('Editar agora after a question opens the place pick right away when a new component has no place yet, without another turn, and nothing is built before Confirmar', async ({ page, ai }) => {
   const result = await expectedNotice()
   expect(result.changes).toEqual({ added: 1, changed: 1, removed: 0 })
   const final = result.workflow
@@ -1944,9 +1944,8 @@ test('Editar agora after a question sends what was decided through the Copiloto,
   expect(ai.turnCalls()).toHaveLength(1)
   expect(ai.buildCalls()).toHaveLength(0)
 
-  ai.say(PLACED_EDIT)
   await editNow.click()
-  await expect(messages(panel), 'Editar agora vira uma resposta para a IA, e a interface pede o lugar').toHaveText([you(PLACE_REQUEST), says(ASK_NOTICE), you(EDIT_NOW), says(PLACE_PROPOSED)])
+  await expect(messages(panel), 'Editar agora abre a seleção do lugar sem outra volta da IA').toHaveText([you(PLACE_REQUEST), says(ASK_NOTICE), you(EDIT_NOW), says(PLACE_PROPOSED)])
   await expect(banner(page)).toContainText(`Selecione ${PLACE_LABEL} no canvas.`)
   await expectMarks(page, NODE_IDS, { ...marks(BASE_OUTLETS, 'candidate'), [PAYMENTS]: 'selected' })
   await expect(proposedLine(panel)).toHaveText(proposedText(MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
@@ -1954,10 +1953,7 @@ test('Editar agora after a question sends what was decided through the Copiloto,
   await expect(panel.getByRole('heading', { name: /^Edição pronta/ })).toHaveCount(0)
   await expect(page.getByText(EDIT_DONE)).toHaveCount(0)
   await expect(nodes(page)).toHaveCount(BASE_FLOW.nodes.length)
-  expect(ai.turnCalls(), 'Editar agora passa pelo Copiloto antes de editar').toHaveLength(2)
-  const second = ai.turnCalls()[1]
-  expect(lastUser(second)).toBe(EDIT_NOW)
-  expect(historyOf(second)).toContain(ASK_NOTICE.message)
+  expect(ai.turnCalls(), 'Editar agora abre a seleção sem chamar a IA de novo').toHaveLength(1)
   expect(ai.buildCalls(), 'nada é montado com o lugar que só a IA escolheu').toHaveLength(0)
   expect(await saved(page)).toEqual(BASE_STATE)
 
@@ -1969,7 +1965,7 @@ test('Editar agora after a question sends what was decided through the Copiloto,
   await expect(messages(panel), 'Confirmar na sugestão vai direto para a edição').toHaveText([you(PLACE_REQUEST), says(ASK_NOTICE), you(EDIT_NOW), says(PLACE_PROPOSED), chosen])
   await expect(panel.getByText(FOCUS_MISSED, { exact: true })).toHaveCount(0)
   await expect(nodeAt(page, PAYMENTS).locator('[data-pick-focus]'), 'o lugar confirmado fica marcado na prévia').toHaveCount(1)
-  expect(ai.calls.map((call) => call.kind)).toEqual(['turn', 'turn', 'build'])
+  expect(ai.calls.map((call) => call.kind)).toEqual(['turn', 'build'])
   expect(lastUser(ai.buildCalls()[0]), 'o pedido de edição leva o plano e o lugar confirmado').toMatch(editRequest(NOTICE_PLAN, MESSAGE_KIND, SNIPPETS[PAYMENTS], PAYMENTS))
   expect(ai.fallbacks).toEqual([])
   expect(await saved(page)).toEqual(BASE_STATE)

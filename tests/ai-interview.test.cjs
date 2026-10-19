@@ -1606,7 +1606,15 @@ test('settleTurn: o edit do Copiloto que cria componente sem o lugar dito pelo u
   for (const anchors of [[], [ANCHOR_IDS[0]], [WELCOME, WELCOME]]) assert.deepEqual(settle({}, { ...PLACE_CONTEXT, anchors }), editOf(PLACE_EDIT), JSON.stringify(anchors))
   for (const adds of [false, undefined, null, 'true', 1]) assert.deepEqual(settle({ adds }), editOf(PLACE_EDIT), String(adds))
   for (const scope of [undefined, 'builder']) assert.deepEqual(settle({}, { ...PLACE_CONTEXT, scope }), editOf(PLACE_EDIT), String(scope))
-  assert.deepEqual(settle({ action: 'ask', message: 'Fica assim?', suggestions: ['Pode ser assim', 'Quero outro texto'] }), { message: 'Fica assim?', suggestions: ['Pode ser assim', 'Quero outro texto'], action: 'ask', plan: PLACE_PLAN })
+  const opening = { action: 'ask', message: 'Fica assim?', suggestions: ['Pode ser assim', 'Quero outro texto'] }
+  const opened = { message: 'Fica assim?', suggestions: ['Pode ser assim', 'Quero outro texto'], action: 'ask', plan: PLACE_PLAN }
+  assert.deepEqual(settle(opening), { ...opened, place: { after: WELCOME } }, 'a pergunta leva o ponto em aberto para o Editar agora')
+  for (const after of [...CLOSED_IDS, '99', '']) assert.deepEqual(settle({ ...opening, after }), { ...opened, place: {} }, after)
+  for (const adds of [false, undefined]) assert.deepEqual(settle({ ...opening, adds }), opened, String(adds))
+  assert.deepEqual(settle({ ...opening, plan: '' }), { ...opened, plan: '' })
+  assert.deepEqual(settle(opening, { ...PLACE_CONTEXT, history: [...THANKS, answer('Onde ela entra?'), { role: 'user', text: 'Logo depois das boas-vindas' }] }), opened)
+  assert.deepEqual(settle(opening, { ...PLACE_CONTEXT, anchors: [WELCOME] }), opened)
+  assert.deepEqual(settle(opening, { ...PLACE_CONTEXT, scope: 'builder' }), opened)
   assert.deepEqual(settle({ action: 'finish' }), { message: PLACE_EDIT.message, suggestions: [], action: 'finish', plan: PLACE_PLAN })
   const chosen = [...THANKS, answer(PLACE_PROPOSED), { role: 'user', text: `Selecionei no canvas: Enviar Mensagem “Olá, #NAME. Você está no atendimento da Lucas Lima.” · ID ${WELCOME}` }]
   const worded = [...THANKS, answer('Onde ela entra?'), { role: 'user', text: 'Logo depois das boas-vindas' }]
