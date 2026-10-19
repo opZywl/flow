@@ -6,7 +6,8 @@ module.exports = defineConfig({
   testDir: './tests/e2e',
   testMatch: '**/*.spec.cjs',
   timeout: 60000,
-  workers: 1,
+  fullyParallel: true,
+  workers: process.env.CI ? 2 : 4,
   use: { baseURL: `http://localhost:${PORT}`, viewport: { width: 1440, height: 1000 }, headless: true, screenshot: 'only-on-failure', acceptDownloads: true },
   webServer: { command: `npx next start -p ${PORT}`, url: `http://localhost:${PORT}/flow`, reuseExistingServer: false, timeout: 120000 },
 })
