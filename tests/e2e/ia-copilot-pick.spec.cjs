@@ -540,11 +540,14 @@ async function expectChosen(page, panel, candidates, id, kind) {
   await expect.poll(() => insideCanvas(page, [id]), { message: `o componente ${id} aparece no canvas` }).toBe(true)
 }
 
-async function expectFramed(page, ids) {
+const newestAdded = (base, flow) => flow.nodes.filter((node) => node.data.type !== 'trigger_message' && !base.nodes.some((entry) => entry.id === node.id)).at(-1).id
+
+async function expectFollowed(page, id) {
   await expect(async () => {
     await settle(page)
-    expect(await framing(page, ids)).toEqual({ inside: true, closer: true })
-  }, 'a câmera fica no componente escolhido, com a edição ao lado, em vez de mostrar o fluxo inteiro').toPass({ timeout: 10000 })
+    const zoom = await page.evaluate(() => new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a)
+    expect({ inside: await insideCanvas(page, [id]), zoom: Math.round(zoom * 100) }).toEqual({ inside: true, zoom: 100 })
+  }, 'a câmera acompanha em 100% o componente criado pela edição').toPass({ timeout: 10000 })
 }
 
 function choice(panel, id, snippet) {
@@ -677,7 +680,7 @@ async function proposal(panel, count = 1) {
   return panel.getByRole('list', { name: 'Mudanças no fluxo aberto' }).nth(count - 1).getByRole('listitem')
 }
 
-test('crie a opção Segunda via with two menus: the canvas outlines both menus, Confirmar sends the chosen one, the camera stays on it and the edit lands on that menu', async ({ page, ai }) => {
+test('crie a opção Segunda via with two menus: the canvas outlines both menus, Confirmar sends the chosen one, the camera follows the edit at 100% and the edit lands on that menu', async ({ page, ai }) => {
   const result = await expectedOption()
   expect(result.changes).toEqual({ added: 2, changed: 1, removed: 0 })
   const final = result.workflow
@@ -731,7 +734,7 @@ test('crie a opção Segunda via with two menus: the canvas outlines both menus,
   await expect(page.getByText(EDIT_DONE)).toBeVisible()
   await expect(canvas(page)).toContainText(BOLETO_TEXT)
   await expect(nodes(page)).toHaveCount(final.nodes.length)
-  await expectFramed(page, [FINANCE_MENU, boleto])
+  await expectFollowed(page, newestAdded(BASE_FLOW, final))
   await expect(focusMarks(page)).toHaveCount(1)
   await expect(nodeAt(page, FINANCE_MENU).locator('[data-pick-focus]'), 'o menu escolhido continua marcado na prévia').toHaveCount(1)
   await expect(panel.getByRole('heading', { name: 'Edição pronta', exact: true })).toBeVisible()
@@ -1390,7 +1393,6 @@ test('Esc on the open Imagem de fundo menu closes only the menu and the selectio
 
 test('the component library steps aside while picking and comes back when the selection ends, with the chosen menu still in view', async ({ page, ai }) => {
   const result = await expectedOption()
-  const boleto = idOf(result.workflow, BOLETO_TEXT)
   const panel = await start(page, BASE_FLOW, { library: true })
   await expect(componentLibrary(page)).toBeVisible()
   ai.say(ASK_MENU)
@@ -1417,7 +1419,7 @@ test('the component library steps aside while picking and comes back when the se
   await expect(componentLibrary(page), 'a biblioteca volta depois de Confirmar').toBeVisible()
   await expect.poll(() => insideCanvas(page, [FINANCE_MENU]), { message: 'o menu escolhido continua à vista' }).toBe(true)
   await proposal(panel)
-  await expectFramed(page, [FINANCE_MENU, boleto])
+  await expectFollowed(page, newestAdded(BASE_FLOW, result.workflow))
   expect(ai.turnCalls()).toHaveLength(3)
   expect(lastUser(ai.turnCalls()[2])).toMatch(picked(MENU_KIND, SNIPPETS[FINANCE_MENU], FINANCE_MENU))
   expect(ai.buildCalls()).toHaveLength(1)

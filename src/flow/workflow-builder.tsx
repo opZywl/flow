@@ -211,7 +211,7 @@ export function relaidIds(before: Graph, after: Graph): string[] {
   return after.edges.every((edge) => links.has(linkOf(edge))) ? moved : []
 }
 
-export function followTarget(nodes: readonly AtendimentoNode[], before: readonly AtendimentoNode[] | null, kept: string | null): string | null {
+export function followTarget(nodes: readonly AtendimentoNode[], before: readonly AtendimentoNode[] | null, focus: string | null, kept: string | null): string | null {
   const ids = nodes.filter((node) => node.data.type !== START_TYPE).map((node) => node.id)
   if (!ids.length) return null
   if (!before) return ids[ids.length - 1]
@@ -221,7 +221,8 @@ export function followTarget(nodes: readonly AtendimentoNode[], before: readonly
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const changed = ids.filter((id) => !sameJson(old.get(id)?.data, byId.get(id)?.data))
   if (changed.length) return changed[changed.length - 1]
-  return kept && ids.includes(kept) ? kept : ids[ids.length - 1]
+  if (kept && ids.includes(kept)) return kept
+  return focus && ids.includes(focus) ? focus : ids[ids.length - 1]
 }
 
 export function previewFrame(boxes: ReadonlyMap<string, Box>, target: string | null, overview: boolean, area: Box, zoom: number): Pick<Frame, "bounds" | "view"> | null {
@@ -822,7 +823,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const nodes = getNodes()
     if (!shown || !area || !nodes.length) return
     const { id, overview } = previewFocus.current
-    const followed = id ?? previewLatest.current
+    const followed = previewLatest.current ?? id
     const boxes = new Map(nodes.map((node) => [node.id, boxOf(node)]))
     const anchored = !overview && followed !== null && boxes.has(followed)
     const framed = previewFrame(boxes, followed, overview, area, followZoom.current)
@@ -911,10 +912,11 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     if (!pickRef.current) setFocusMark(target)
     const stable = stabilizePreview(next, current)
     if (stable === current) {
+      if (refocused) previewLatest.current = target
       if (refocused || restarted) scheduleFit()
       return
     }
-    previewLatest.current = followTarget(stable.nodes, current ? current.nodes : kind === "edit" ? flowRef.current.nodes : null, previewLatest.current)
+    previewLatest.current = followTarget(stable.nodes, current ? current.nodes : kind === "edit" ? flowRef.current.nodes : null, target, refocused ? null : previewLatest.current)
     previewRef.current = stable
     setPreview(stable)
   }, [cancelPick, endPreview, scheduleFit, settledView])
@@ -1229,7 +1231,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   }, [clearSelection, ensureApplied, canvasBusy, setDocument])
 
   const followedNode = useCallback(() => {
-    const followed = previewFocus.current.id ?? previewLatest.current
+    const followed = previewLatest.current ?? previewFocus.current.id
     return followed && getNode(followed) ? followed : null
   }, [getNode])
 

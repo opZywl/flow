@@ -495,17 +495,18 @@ test('an arranged preview frames every component at its new position, and follow
   assert.equal(builder.previewFrame(new Map(), null, false, area, 1), null)
 })
 
-test('the followed component is the newest one, then the last changed one, then the one already followed, and never the start', () => {
+test('the followed component is the newest one, then the last changed one, then the one already followed, then the chosen one, and never the start', () => {
   const base = copyOf(FINANCE)
   const ids = base.nodes.filter((entry) => entry.data.type !== 'trigger_message').map((entry) => entry.id)
-  assert.equal(builder.followTarget(base.nodes, null, null), ids[ids.length - 1])
+  assert.equal(builder.followTarget(base.nodes, null, null, null), ids[ids.length - 1])
   const grown = copyOf(base)
   grown.nodes.push(newNode('envio_pergunta', { x: 0, y: 0 }, '40'), newNode('envio_pergunta', { x: 0, y: 0 }, '41'))
-  assert.equal(builder.followTarget(grown.nodes, base.nodes, ids[0]), '41')
+  assert.equal(builder.followTarget(grown.nodes, base.nodes, ids[0], ids[0]), '41')
   const edited = copyOf(base)
   edited.nodes.find((entry) => entry.id === ids[1]).data.html = '<p>novo</p>'
-  assert.equal(builder.followTarget(edited.nodes, base.nodes, ids[0]), ids[1])
-  assert.equal(builder.followTarget(copyOf(base).nodes, base.nodes, ids[0]), ids[0])
-  assert.equal(builder.followTarget(copyOf(base).nodes, base.nodes, 'sumiu'), ids[ids.length - 1])
-  assert.equal(builder.followTarget(base.nodes.filter((entry) => entry.data.type === 'trigger_message'), null, null), null)
+  assert.equal(builder.followTarget(edited.nodes, base.nodes, ids[0], ids[0]), ids[1])
+  assert.equal(builder.followTarget(copyOf(base).nodes, base.nodes, ids[2], ids[0]), ids[0])
+  assert.equal(builder.followTarget(copyOf(base).nodes, base.nodes, ids[2], null), ids[2])
+  assert.equal(builder.followTarget(copyOf(base).nodes, base.nodes, 'sumiu', 'sumiu'), ids[ids.length - 1])
+  assert.equal(builder.followTarget(base.nodes.filter((entry) => entry.data.type === 'trigger_message'), null, null, null), null)
 })
