@@ -8,12 +8,12 @@ import { ARRANGE_LIMIT } from "./arrange"
 import type { LayoutCell } from "./arrange"
 import { PLACE_ASK, PLACE_LABEL, PLACE_PROPOSED } from "./place"
 import { DEFAULT_FILL, LIMITS, RI_LIMITS } from "./contracts"
-import type { Effort, GenerateFailure } from "./contracts"
+import type { Effort, GenerateFailure, GenerationUsage } from "./contracts"
 import { flowToRi } from "./edit"
 import { guideOf } from "./guide"
 import type { ProviderId } from "./providers"
 import type { RiFlow, RiNode } from "./ri"
-import { RETRY_DELAYS_MS, createSetup, describeFailure, isFormatFailure, isTransient, notify, parseGenerationRequest, pause, relax, stopped, unfinished } from "./runner"
+import { RETRY_DELAYS_MS, attemptUsage, countUsage, createSetup, describeFailure, isFormatFailure, isTransient, notify, parseGenerationRequest, pause, relax, stopped, unfinished } from "./runner"
 import type { ModelSetup, StreamWatch, Transport } from "./runner"
 import { foldText, parseJsonText, quote, shorten, sliceObject } from "./text"
 
@@ -79,6 +79,7 @@ export interface InterviewHooks {
   signal: AbortSignal
   fetch?: typeof fetch
   onPartial?: (turn: Partial<InterviewTurn>) => void
+  onUsage?: (usage: GenerationUsage) => void
 }
 
 export type InterviewResult = { ok: true; turn: InterviewTurn } | { ok: false; failure: GenerateFailure }
@@ -1078,6 +1079,7 @@ export function interviewMessages(input: InterviewMessagesInput, systemOptions?:
 interface TurnAttempt {
   turn?: InterviewReply
   error?: unknown
+  usage?: GenerationUsage
 }
 
 interface TurnFormat {
@@ -1108,6 +1110,7 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
   setup.watch.refusal = false
   setup.watch.failed = false
   setup.watch.reached = false
+  let usage: GenerationUsage | undefined
   try {
     const result = streamObject({
       model: setup.model,
@@ -1121,6 +1124,9 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
       abortSignal: signal,
       experimental_repairText: async ({ text }) => repairTurnText(text, format.copilot),
       onError: () => undefined,
+      onFinish: (event) => {
+        usage = countUsage(event.usage, event.providerMetadata)
+      },
     })
     const follow = async () => {
       for await (const value of result.partialObjectStream) {
@@ -1131,12 +1137,13 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
     }
     await follow().catch(() => undefined)
     try {
-      return { turn: await settleObject(result.object, setup.watch, signal) }
+      const turn = await settleObject(result.object, setup.watch, signal)
+      return { turn, usage: usage ?? countUsage(await Promise.resolve(result.usage).catch(() => undefined)) }
     } catch (error) {
-      return { error }
+      return { error, usage: attemptUsage(usage, error) }
     }
   } catch (error) {
-    return { error }
+    return { error, usage }
   }
 }
 
@@ -1146,6 +1153,7 @@ async function converse(setup: ModelSetup, messages: ModelMessage[], hooks: Inte
   let dropped = 0
   for (;;) {
     const attempt = await callTurn(setup, messages, hooks.signal, hooks.onPartial, format)
+    if (attempt.usage) notify(hooks.onUsage, attempt.usage)
     if (attempt.turn) return attempt.turn
     const { error } = attempt
     if (hooks.signal.aborted) throw error

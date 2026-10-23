@@ -1867,3 +1867,33 @@ test('o prompt do Copiloto pede adds e after em toda resposta, com o ponto do co
   const builder = interviewSystemPrompt()
   for (const text of ['adds', 'after', 'arrange', 'layout', 'Ponto do componente novo', 'Organização no canvas', 'zigue-zague', 'telhado', 'Organização pronta no canvas']) assert.ok(!builder.includes(text), text)
 })
+
+test('cada chamada do turno informa os tokens na hora, inclusive o pedido de novo por formato e a falha', async () => {
+  const ONE = { inputTokens: 11, outputTokens: 22, totalTokens: 33 }
+  const spent = []
+  const onUsage = (usage) => spent.push(usage)
+  let result = await interviewTurn(input('openai'), hooks((call, index) => reply.openai(index === 0 ? 'não é JSON' : JSON.stringify(ASK)), { onUsage }))
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(spent, [ONE, ONE])
+
+  spent.length = 0
+  calls.length = 0
+  result = await interviewTurn(input('openai'), hooks(() => reply.openai('não é JSON'), { onUsage }))
+  assert.equal(result.ok, false)
+  assert.deepEqual(spent, calls.map(() => ONE))
+
+  spent.length = 0
+  calls.length = 0
+  const cached = () => sse([
+    { type: 'message_start', message: { id: 'msg_1', model: MODELS.anthropic, usage: { input_tokens: 11, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    ...pieces(JSON.stringify(ASK)).map((part) => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: part } })),
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 22 } },
+    { type: 'message_stop' },
+  ])
+  result = await interviewTurn(input('anthropic'), hooks(cached, { onUsage }))
+  assert.equal(result.ok, true)
+  assert.deepEqual(spent, [{ inputTokens: 161, outputTokens: 22, totalTokens: 183 }])
+})

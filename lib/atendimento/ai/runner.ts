@@ -1,5 +1,5 @@
 import { APICallError, NoObjectGeneratedError, RetryError, streamObject } from "ai"
-import type { LanguageModel, LanguageModelUsage, ModelMessage, SystemModelMessage } from "ai"
+import type { LanguageModel, LanguageModelUsage, ModelMessage, ProviderMetadata, SystemModelMessage } from "ai"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createOpenAI } from "@ai-sdk/openai"
@@ -66,6 +66,7 @@ export interface RunHooks {
   fetch?: typeof fetch
   onProgress?: (progress: GenerationProgress) => void
   onPartial?: (ri: RiFlow) => void
+  onUsage?: (usage: GenerationUsage) => void
 }
 
 export interface ParsedRequest {
@@ -109,7 +110,7 @@ interface Attempt {
   ri?: RiFlow
   error?: unknown
   partial: unknown
-  usage?: LanguageModelUsage
+  usage?: GenerationUsage
 }
 
 interface RiFormat {
@@ -638,11 +639,28 @@ export function relax(setup: ModelSetup, error: unknown): boolean {
   return false
 }
 
-function addUsage(total: GenerationUsage, usage: LanguageModelUsage | undefined) {
-  if (!usage) return
-  total.inputTokens += usage.inputTokens ?? 0
-  total.outputTokens += usage.outputTokens ?? 0
-  total.totalTokens += usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+const tokenCount = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0)
+
+export function countUsage(usage: LanguageModelUsage | undefined, metadata?: ProviderMetadata): GenerationUsage | undefined {
+  if (!usage) return undefined
+  const input = tokenCount(usage.inputTokens)
+  const cache = metadata?.anthropic ? tokenCount(usage.cachedInputTokens) + tokenCount(metadata.anthropic.cacheCreationInputTokens) : 0
+  const inputTokens = input + cache
+  const outputTokens = Math.max(tokenCount(usage.outputTokens), tokenCount(usage.totalTokens) - input)
+  const totalTokens = inputTokens + outputTokens
+  return totalTokens > 0 ? { inputTokens, outputTokens, totalTokens } : undefined
+}
+
+export function attemptUsage(reported: GenerationUsage | undefined, error?: unknown): GenerationUsage | undefined {
+  return reported ?? (NoObjectGeneratedError.isInstance(error) ? countUsage(error.usage) : undefined)
+}
+
+function spend(total: GenerationUsage, spent: GenerationUsage | undefined, hooks: RunHooks) {
+  if (!spent) return
+  total.inputTokens += spent.inputTokens
+  total.outputTokens += spent.outputTokens
+  total.totalTokens += spent.totalTokens
+  notify(hooks.onUsage, spent)
 }
 
 function formatBytes(bytes: number): string {
@@ -723,6 +741,7 @@ async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: Ab
   setup.watch.failed = false
   setup.watch.reached = false
   let partial: unknown
+  let usage: GenerationUsage | undefined
   try {
     const result = streamObject({
       model: setup.model,
@@ -736,6 +755,9 @@ async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: Ab
       abortSignal: signal,
       experimental_repairText: async ({ text }) => format.repair(text),
       onError: () => undefined,
+      onFinish: (event) => {
+        usage = countUsage(event.usage, event.providerMetadata)
+      },
     })
     const follow = async () => {
       for await (const value of result.partialObjectStream) {
@@ -746,13 +768,12 @@ async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: Ab
     await follow().catch(() => undefined)
     try {
       const ri = await settle(result.object, setup.watch, signal)
-      const usage = await Promise.resolve(result.usage).catch(() => undefined)
-      return { ri, partial, usage }
+      return { ri, partial, usage: usage ?? countUsage(await Promise.resolve(result.usage).catch(() => undefined)) }
     } catch (error) {
-      return { error, partial, usage: NoObjectGeneratedError.isInstance(error) ? error.usage : undefined }
+      return { error, partial, usage: attemptUsage(usage, error) }
     }
   } catch (error) {
-    return { error, partial }
+    return { error, partial, usage }
   }
 }
 
@@ -842,7 +863,7 @@ async function generateEdit(input: ResolvedInput, original: AtendimentoFlow, hoo
       relayed = signature
       relay(piece)
     }, EDIT_FORMAT)
-    addUsage(usage, attempt.usage)
+    spend(usage, attempt.usage, hooks)
     if (attempt.ri) {
       const delta = coerceDelta(attempt.ri) ?? { ...attempt.ri, remove: [] }
       progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, nodes: delta.nodes.length, edges: delta.edges.length })
@@ -967,7 +988,7 @@ async function generate(input: ResolvedInput, hooks: RunHooks, abort: Abort): Pr
       const ri = layer ? completePart(partial) : coerceRi(partial)
       if (ri) show(overlayRi(layer, ri))
     }, CREATE_FORMAT)
-    addUsage(usage, attempt.usage)
+    spend(usage, attempt.usage, hooks)
     if (attempt.ri) {
       const ri = attempt.ri
       progress({ stage: "gerando", round, maxRounds: MAX_ROUNDS, nodes: ri.nodes.length, edges: ri.edges.length })

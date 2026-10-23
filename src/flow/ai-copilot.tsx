@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Circle,
+  Coins,
   Info,
   Loader2,
   MousePointerClick,
@@ -74,6 +75,7 @@ import {
   type ProposalStatus,
 } from "./ai/copilot-store"
 import { openAiSettings, useAiSetting, type AiSettingsField } from "./ai/settings-store"
+import { useTokens } from "./ai/token-store"
 import { AiSummary } from "./ai-summary"
 import type { CanvasPick } from "./pick"
 import { ui } from "./ui"
@@ -629,6 +631,7 @@ export default function AICopilot({
   const [fetched] = useAiSetting("fetched")
   const [effortChoice] = useAiSetting("effortChoice")
   const [fill, setFill] = useAiSetting("fill")
+  const spent = useTokens()
   const [draft, setDraft] = useState("")
   const [clockNow, setClockNow] = useState(() => Date.now())
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
@@ -1075,6 +1078,18 @@ export default function AICopilot({
         </div>
         <p id={idFor("keys")} className="sr-only">
           Enter envia e Shift mais Enter quebra a linha.
+        </p>
+        <p
+          title={`Entrada: ${formatNumber(spent.inputTokens)}. Saída: ${formatNumber(spent.outputTokens)}.`}
+          className="flex items-center gap-1.5 px-1 text-[11px] leading-4 text-flow-muted"
+        >
+          <Coins className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>
+            {plural(spent.totalTokens, "token gasto", "tokens gastos")} no total
+            <span className="sr-only">
+              , {formatNumber(spent.inputTokens)} de entrada e {formatNumber(spent.outputTokens)} de saída
+            </span>
+          </span>
         </p>
       </form>
     </section>

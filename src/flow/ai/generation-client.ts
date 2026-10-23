@@ -24,6 +24,7 @@ import { importFlow, isObject } from "@/lib/atendimento/format"
 import type { AtendimentoFlow, AtendimentoNode, FlowIssue } from "@/lib/atendimento/types"
 import type { FlowSelectOption } from "../flow-select"
 import type { InterviewTurnResult } from "../ai-interview"
+import { addTokens } from "./token-store"
 
 export type Field = "provider" | "apiKey" | "model" | "effort" | "mode" | "description" | "image" | "size" | "count" | "name" | "fill"
 export type FieldErrors = Partial<Record<Field, string>>
@@ -391,7 +392,11 @@ export function readOutcome(value: unknown, status: number): Outcome {
   }
 }
 
-export function readEvent(line: string, onProgress: (progress: GenerationProgress) => void): Outcome | null {
+export function readEvent(
+  line: string,
+  onProgress: (progress: GenerationProgress) => void,
+  onUsage?: (usage: GenerationUsage) => void,
+): Outcome | null {
   if (!line.trim()) return null
   let event: unknown
   try {
@@ -401,6 +406,11 @@ export function readEvent(line: string, onProgress: (progress: GenerationProgres
   }
   if (!isObject(event)) return null
   if (event.type === "result") return readOutcome(event.result, 200)
+  if (event.type === "usage") {
+    const usage = readUsage(event.usage)
+    if (usage) onUsage?.(usage)
+    return null
+  }
   if (event.type === "progress") {
     const progress = readProgress(event.progress)
     if (progress) onProgress(progress)
@@ -412,6 +422,7 @@ export async function readEvents(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
   onProgress: (progress: GenerationProgress) => void,
+  onUsage?: (usage: GenerationUsage) => void,
 ): Promise<Outcome> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
@@ -424,9 +435,9 @@ export async function readEvents(
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split("\n")
       buffer = lines.pop() ?? ""
-      for (const line of lines) outcome = readEvent(line, onProgress) ?? outcome
+      for (const line of lines) outcome = readEvent(line, onProgress, onUsage) ?? outcome
     }
-    outcome = readEvent(buffer + decoder.decode(), onProgress) ?? outcome
+    outcome = readEvent(buffer + decoder.decode(), onProgress, onUsage) ?? outcome
   } catch (error) {
     if (signal.aborted) throw error
   } finally {
@@ -448,8 +459,10 @@ export async function requestGeneration(
     signal,
   })
   const type = response.headers.get("content-type") ?? ""
-  if (response.ok && response.body && type.includes("ndjson")) return readEvents(response.body, signal, onProgress)
-  return readOutcome(await response.json().catch(() => null), response.status)
+  if (response.ok && response.body && type.includes("ndjson")) return readEvents(response.body, signal, onProgress, addTokens)
+  const outcome = readOutcome(await response.json().catch(() => null), response.status)
+  if (outcome.ok) addTokens(outcome.received.usage)
+  return outcome
 }
 
 export async function loadEngine(): Promise<Engine | null> {
@@ -496,7 +509,7 @@ export async function generateFlow(
       ...(request.base !== undefined ? { base: request.base } : {}),
       ...(request.reserved?.length ? { reserved: request.reserved } : {}),
     },
-    { transport: "browser", signal, fetch: direct, onProgress, onPartial },
+    { transport: "browser", signal, fetch: direct, onProgress, onPartial, onUsage: addTokens },
   )
   if (!response.success && response.code === "network" && !reached && !signal.aborted) {
     try {
@@ -537,7 +550,7 @@ export async function requestTurn(
       ...(input.scope ? { scope: input.scope } : {}),
       ...(input.proposal ? { proposal: true } : {}),
     },
-    { transport: "browser", signal, ...(onPartial ? { onPartial } : {}) },
+    { transport: "browser", signal, onUsage: addTokens, ...(onPartial ? { onPartial } : {}) },
   )
 }
 

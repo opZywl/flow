@@ -935,3 +935,78 @@ test('no modo edição os ids reservados de uma proposta anterior não voltam em
   const plain = await runGeneration(editInput('openai'), hooks(() => reply.openai(JSON.stringify(FINANCE_EDIT))))
   assert.ok(plain.workflow.nodes.some((node) => Number(node.id) <= Number(top) && !OPEN_FLOW.nodes.some((old) => old.id === node.id)))
 })
+
+test('countUsage soma o cache do Claude e o raciocínio do Gemini e ignora uso ausente', () => {
+  const { countUsage } = require('../lib/atendimento/ai/runner.ts')
+  assert.deepEqual(countUsage({ inputTokens: 11, outputTokens: 22, totalTokens: 33 }), { inputTokens: 11, outputTokens: 22, totalTokens: 33 })
+  assert.deepEqual(countUsage({ inputTokens: 11, outputTokens: 22, totalTokens: 33, cachedInputTokens: 100 }, { anthropic: { cacheCreationInputTokens: 50 } }), { inputTokens: 161, outputTokens: 22, totalTokens: 183 })
+  assert.deepEqual(countUsage({ inputTokens: 11, outputTokens: 22, totalTokens: 40, reasoningTokens: 7, cachedInputTokens: 5 }), { inputTokens: 11, outputTokens: 29, totalTokens: 40 })
+  assert.deepEqual(countUsage({ inputTokens: 11, outputTokens: 22 }), { inputTokens: 11, outputTokens: 22, totalTokens: 33 })
+  assert.equal(countUsage({ promptTokens: NaN, completionTokens: NaN, totalTokens: NaN }), undefined)
+  assert.equal(countUsage({ inputTokens: undefined, outputTokens: undefined, totalTokens: undefined }), undefined)
+  assert.equal(countUsage(undefined), undefined)
+})
+
+test('o total de tokens de cada provedor conta o cache do Claude e o raciocínio do Gemini', async () => {
+  const anthropic = (text) => sse([
+    { type: 'message_start', message: { id: 'msg_1', model: MODELS.anthropic, usage: { input_tokens: 11, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    ...pieces(text).map((part) => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: part } })),
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 22 } },
+    { type: 'message_stop' },
+  ])
+  const google = (text) => sse([
+    ...pieces(text).map((part) => ({ candidates: [{ content: { role: 'model', parts: [{ text: part }] } }] })),
+    { candidates: [{ content: { role: 'model', parts: [{ text: '' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 22, thoughtsTokenCount: 7, totalTokenCount: 40 } },
+  ])
+  const cases = [
+    ['anthropic', anthropic, { inputTokens: 161, outputTokens: 22, totalTokens: 183 }],
+    ['google', google, { inputTokens: 11, outputTokens: 29, totalTokens: 40 }],
+    ['openai', reply.openai, { inputTokens: 11, outputTokens: 22, totalTokens: 33 }],
+    ['xai', reply.xai, { inputTokens: 11, outputTokens: 22, totalTokens: 33 }],
+  ]
+  for (const [provider, respond, expected] of cases) {
+    const spent = []
+    const result = await runGeneration(input(provider), hooks(() => respond(JSON.stringify(RI)), { onUsage: (usage) => spent.push(usage) }))
+    assert.equal(result.success, true, provider)
+    assert.deepEqual(spent, [expected], provider)
+    assert.deepEqual(result.usage, expected, provider)
+  }
+})
+
+test('cada chamada ao modelo informa os tokens na hora, inclusive a rodada de correção, a falha e o cancelamento', async () => {
+  const ONE = { inputTokens: 11, outputTokens: 22, totalTokens: 33 }
+  const spent = []
+  const onUsage = (usage) => spent.push(usage)
+  let result = await runGeneration(input('openai'), hooks((call, index) => reply.openai(index === 0 ? 'não é json' : JSON.stringify(RI)), { onUsage }))
+  assert.equal(result.success, true)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(spent, [ONE, ONE])
+  assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 44, totalTokens: 66 })
+
+  spent.length = 0
+  calls.length = 0
+  result = await runGeneration(input('openai'), hooks(() => reply.openai('não é json'), { onUsage }))
+  assert.equal(result.success, false)
+  assert.ok(calls.length >= 2)
+  assert.deepEqual(spent, calls.map(() => ONE))
+
+  spent.length = 0
+  calls.length = 0
+  const controller = new AbortController()
+  const pending = runGeneration(input('openai'), hooks((call, index) => (index === 0 ? reply.openai('não é json') : hanging('openai', call)), { signal: controller.signal, onUsage }))
+  while (calls.length < 2) await new Promise((resolve) => setTimeout(resolve, 5))
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  controller.abort()
+  result = await pending
+  assert.equal(result.code, 'aborted')
+  assert.deepEqual(spent, [ONE])
+
+  spent.length = 0
+  calls.length = 0
+  result = await runGeneration(editInput('openai'), hooks(() => reply.openai(JSON.stringify(FINANCE_EDIT)), { onUsage }))
+  assert.equal(result.success, true)
+  assert.deepEqual(spent, calls.map(() => ONE))
+  assert.equal(result.usage.totalTokens, 33 * calls.length)
+})

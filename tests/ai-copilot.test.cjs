@@ -2182,7 +2182,8 @@ test('requestTurn hands the partial answers to the interview engine only when th
   await requestTurn(input, signal, engine)
   assert.equal(typeof calls[0].onPartial, 'function')
   assert.deepEqual(seen, [{ message: 'Pensei' }])
-  assert.deepEqual(calls[1], { transport: 'browser', signal })
+  const { addTokens } = require('../src/flow/ai/token-store.ts')
+  assert.deepEqual(calls[1], { transport: 'browser', signal, onUsage: addTokens })
 })
 
 test('linkPick clears the canvas selection when the panel selects a candidate the canvas could not show', async () => {
@@ -2814,7 +2815,8 @@ test('every Copiloto turn goes to the interview with scope copilot and the propo
   assert.equal(calls[0].input.scope, 'copilot')
   assert.equal(calls[0].input.proposal, true)
   assert.equal(calls[0].input.flow, FIRST)
-  assert.deepEqual(calls[0].hooks, { transport: 'browser', signal })
+  const { addTokens } = require('../src/flow/ai/token-store.ts')
+  assert.deepEqual(calls[0].hooks, { transport: 'browser', signal, onUsage: addTokens })
   assert.equal(calls[1].input.scope, 'copilot')
   assert.equal('proposal' in calls[1].input, false)
   assert.equal('scope' in calls[2].input, false)

@@ -1,5 +1,5 @@
 import { LIMITS } from "@/lib/atendimento/ai/contracts"
-import type { FailureCode, GenerateEvent, GenerateFailure, GenerateResponse, GenerationProgress } from "@/lib/atendimento/ai/contracts"
+import type { FailureCode, GenerateEvent, GenerateFailure, GenerateResponse, GenerationProgress, GenerationUsage } from "@/lib/atendimento/ai/contracts"
 import { parseGenerationRequest, runGeneration } from "@/lib/atendimento/ai/runner"
 import type { GenerationInput } from "@/lib/atendimento/ai/runner"
 
@@ -67,8 +67,13 @@ async function readBody(req: Request, limit: number): Promise<string | null> {
   return Buffer.concat(chunks).toString("utf8")
 }
 
-function execute(input: GenerationInput, signal: AbortSignal, onProgress?: (progress: GenerationProgress) => void): Promise<GenerateResponse> {
-  return runGeneration(input, { transport: "server", signal, deadlineMs: DEADLINE_MS, onProgress })
+function execute(
+  input: GenerationInput,
+  signal: AbortSignal,
+  onProgress?: (progress: GenerationProgress) => void,
+  onUsage?: (usage: GenerationUsage) => void,
+): Promise<GenerateResponse> {
+  return runGeneration(input, { transport: "server", signal, deadlineMs: DEADLINE_MS, onProgress, onUsage })
 }
 
 function stream(input: GenerationInput, req: Request): Response {
@@ -91,10 +96,15 @@ function stream(input: GenerationInput, req: Request): Response {
       heartbeat = setInterval(() => {
         if (last) write({ type: "progress", progress: last })
       }, HEARTBEAT_MS)
-      void execute(input, client, (progress) => {
-        last = progress
-        write({ type: "progress", progress })
-      }).then((result) => {
+      void execute(
+        input,
+        client,
+        (progress) => {
+          last = progress
+          write({ type: "progress", progress })
+        },
+        (usage) => write({ type: "usage", usage }),
+      ).then((result) => {
         write({ type: "result", result })
       }).finally(() => {
         clearInterval(heartbeat)

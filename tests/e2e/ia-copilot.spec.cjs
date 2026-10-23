@@ -801,6 +801,44 @@ test('Editar agora edits right away with what was decided, without another quest
   expect(await saved(page)).toEqual(BASE_STATE)
 })
 
+const spentCorner = (panel) => panel.locator('p').filter({ hasText: 'gastos no total' })
+const spentText = (calls) => `${(33 * calls).toLocaleString('pt-BR')} tokens gastos no total, ${(11 * calls).toLocaleString('pt-BR')} de entrada e ${(22 * calls).toLocaleString('pt-BR')} de saída`
+
+test('the Copiloto corner adds up the tokens of every call to the AI as each one ends and keeps the total after a reload', async ({ page, ai }) => {
+  const hold = ai.hold()
+  ai.say(ASK_EDIT)
+  ai.builds.push({ steps: [TEXT.slice(0, AFTER_NODES), hold, TEXT.slice(AFTER_NODES)] })
+
+  await openEditor(page)
+  const panel = await openCopilot(page)
+  const corner = spentCorner(panel)
+  await expect(corner).toHaveText(spentText(0))
+  await expect(corner).toHaveAttribute('title', 'Entrada: 0. Saída: 0.')
+  const box = await corner.boundingBox()
+  const area = await panel.boundingBox()
+  expect(box.x - area.x).toBeLessThan(24)
+  expect(area.y + area.height - (box.y + box.height)).toBeLessThan(24)
+
+  await ask(panel, PROMPT)
+  await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT)])
+  await expect(corner).toHaveText(spentText(1))
+
+  await editNowButton(panel).click()
+  await hold.reached
+  await expect(corner).toHaveText(spentText(1))
+  hold.open()
+  await proposal(panel)
+  expect(ai.turnCalls()).toHaveLength(1)
+  expect(ai.buildCalls().length).toBeGreaterThanOrEqual(1)
+  await expect(corner).toHaveText(spentText(ai.calls.length))
+  await expect(corner).toHaveAttribute('title', `Entrada: ${11 * ai.calls.length}. Saída: ${22 * ai.calls.length}.`)
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('flow.ia.tokens')))).toEqual({ inputTokens: 11 * ai.calls.length, outputTokens: 22 * ai.calls.length, totalTokens: 33 * ai.calls.length })
+
+  await page.reload()
+  await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
+  await expect(spentCorner(await openCopilot(page))).toHaveText(spentText(ai.calls.length))
+})
+
 test('Parar while the Copiloto thinks keeps the open flow and the late answer never shows up', async ({ page, ai }) => {
   const late = ai.hold()
   ai.say(ASK_EDIT, late)

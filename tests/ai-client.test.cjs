@@ -915,6 +915,63 @@ test('o turno roda no navegador com o provedor simulado e envia chave, modelo, e
   assert.ok(body.includes('Não há fluxo aberto no editor'))
 })
 
+test('o total de tokens soma cada chamada da geração direta, da rota de reserva e da conversa, sem contar duas vezes', async () => {
+  const tokens = require('../src/flow/ai/token-store.ts')
+  const total = () => tokens.readTokens().totalTokens
+  let before = total()
+  model('não é json', TICKETS)
+  let seen = watchProvider()
+  let out = await client.generateFlow({ ...BASE, effort: 'high' }, signal(), () => {})
+  assert.equal(out.ok, true)
+  assert.ok(seen.length >= 2)
+  assert.equal(out.received.usage.totalTokens, 33 * seen.length)
+  assert.equal(total() - before, 33 * seen.length)
+
+  before = total()
+  model(TICKETS)
+  seen = watchProvider()
+  out = await client.requestGeneration(BASE, signal(), () => {})
+  assert.equal(out.ok, true)
+  assert.equal(calls.length, 1)
+  assert.equal(out.received.usage.totalTokens, 33 * seen.length)
+  assert.equal(total() - before, 33 * seen.length)
+
+  before = total()
+  let direct = 0
+  provider = () => {
+    if (direct++ === 0) throw new TypeError('Failed to fetch')
+    return openaiReply(JSON.stringify(TICKETS))
+  }
+  out = await client.generateFlow(BASE, signal(), () => {})
+  assert.equal(out.ok, true)
+  assert.equal(total() - before, out.received.usage.totalTokens)
+  assert.equal(total() - before, 33 * (direct - 1))
+
+  before = total()
+  model(TURN)
+  const turn = await client.requestTurn(TURN_INPUT, signal())
+  assert.equal(turn.ok, true)
+  assert.equal(total() - before, 33)
+
+  before = total()
+  provider = () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401, headers: { 'content-type': 'application/json' } })
+  assert.equal((await client.requestTurn(TURN_INPUT, signal())).ok, false)
+  assert.equal(total() - before, 0)
+
+  const start = tokens.readTokens()
+  const text = ndjson([
+    { type: 'usage', usage: { inputTokens: 5, outputTokens: 6, totalTokens: 11 } },
+    { type: 'usage', usage: { inputTokens: -1, outputTokens: 'x' } },
+    { type: 'usage', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } },
+    { type: 'result', result: { ...SUCCESS, usage: { inputTokens: 6, outputTokens: 7, totalTokens: 13 } } },
+  ])
+  serve(stream(bytesOf(text, 7)), { status: 200, headers: { 'content-type': 'application/x-ndjson' } })
+  out = await client.requestGeneration(BASE, signal(), () => {})
+  assert.equal(out.ok, true)
+  assert.deepEqual(out.received.usage, { inputTokens: 6, outputTokens: 7, totalTokens: 13 })
+  assert.deepEqual(tokens.readTokens(), { inputTokens: start.inputTokens + 6, outputTokens: start.outputTokens + 7, totalTokens: start.totalTokens + 13 })
+})
+
 test('a chave recusada no turno volta com o código do campo da chave e sem a chave no texto', async () => {
   provider = () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401, headers: { 'content-type': 'application/json' } })
   const out = await client.requestTurn(TURN_INPUT, signal())

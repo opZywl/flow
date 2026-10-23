@@ -149,6 +149,7 @@ export interface GenerationProgress {
 
 export type GenerateEvent =
   | { type: "progress"; progress: GenerationProgress }
+  | { type: "usage"; usage: GenerationUsage }
   | { type: "result"; result: GenerateResponse }
 
 export interface ModelsRequest {

@@ -663,6 +663,27 @@ test('Montar o fluxo agora builds right away with the current plan, even when th
   expect(ai.turnCalls()).toHaveLength(3)
 })
 
+test('the tokens of every call in Gerar com IA, the turns and the build, are already in the Copiloto corner when it opens', async ({ page, ai }) => {
+  ai.say(ASK_MENU)
+  ai.say(ASK_WELCOME)
+  ai.builds.push({ steps: [BOLETO_TEXT] })
+  ai.say(ASK_MORE)
+
+  await openBlank(page)
+  const { chat } = await startChat(page)
+  await type(chat, 'Quero um fluxo de envio de boleto.')
+  await expect(entries(chat)).toHaveText([user('Quero um fluxo de envio de boleto.'), assistant(ASK_MENU)])
+  await chat.getByRole('button', { name: 'Montar o fluxo agora' }).click()
+  await expect(entries(chat).last()).toHaveText(assistant(ASK_MORE), { timeout: 15000 })
+  expect(ai.turnCalls()).toHaveLength(3)
+  expect(ai.buildCalls()).toHaveLength(1)
+  await closeDialog(page)
+
+  await page.locator('[data-copilot-trigger]').click()
+  const panel = page.getByRole('region', { name: 'Copiloto', exact: true })
+  await expect(panel.locator('p').filter({ hasText: 'gastos no total' })).toHaveText('132 tokens gastos no total, 44 de entrada e 88 de saída')
+})
+
 test('Encerrar conversa ends the chat, a late answer never shows up and Nova conversa starts over with an empty history', async ({ page, ai }) => {
   ai.say(ASK_MENU)
   await openBlank(page)
