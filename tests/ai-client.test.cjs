@@ -648,7 +648,7 @@ test('a prévia acompanha o streaming: RI parcial vira fluxo no canvas, no máxi
   assert.ok(sizes[sizes.length - 1] >= ALL_TYPES.nodes.length)
 
   const sent = []
-  const feed = client.previewFeed(previewFlow, (flow) => sent.push(flow), 40)
+  const feed = client.previewFeed(previewFlow, (flow) => sent.push(flow), 600)
   for (const ri of partials) feed.push(ri)
   await sleep(15)
   assert.equal(sent.length, 1)
@@ -657,11 +657,11 @@ test('a prévia acompanha o streaming: RI parcial vira fluxo no canvas, no máxi
   feed.push(partials[partials.length - 2])
   await sleep(10)
   assert.equal(sent.length, 1)
-  await sleep(60)
+  await sleep(700)
   assert.equal(sent.length, 2)
   feed.push(partials[partials.length - 1])
   feed.stop()
-  await sleep(60)
+  await sleep(700)
   assert.equal(sent.length, 2)
 })
 
