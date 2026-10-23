@@ -873,6 +873,16 @@ test('a key refused on the question opens Configurar IA on the key with the erro
   expect(ai.buildCalls()).toHaveLength(0)
 })
 
+async function steadyView(page) {
+  let last = ''
+  await expect.poll(async () => {
+    const now = await page.evaluate(() => getComputedStyle(document.querySelector('.react-flow__viewport')).transform)
+    const steady = now === last
+    last = now
+    return steady
+  }, { intervals: [200] }).toBe(true)
+}
+
 test('an edit through the Copiloto shows live on the canvas, lists the changes and Aplicar is one undoable step in the same Meus fluxos entry', async ({ page, ai }) => {
   const result = await expectedEdit()
   const final = result.workflow
@@ -908,6 +918,20 @@ test('an edit through the Copiloto shows live on the canvas, lists the changes a
   await expect.poll(() => nodes.count()).toBeGreaterThan(BASE_FLOW.nodes.length)
   await expect(page.getByRole('button', { name: 'Salvar', exact: true })).toBeDisabled()
   expect(await saved(page)).toEqual(BASE_STATE)
+
+  const zoom = page.locator('[data-canvas-overlay]').filter({ hasText: EDIT_BANNER }).getByRole('group', { name: 'Zoom da prévia' })
+  const level = async () => Number((await zoom.textContent()).match(/(\d+)%/)[1])
+  await expect(zoom).toBeVisible()
+  await steadyView(page)
+  const fitted = await level()
+  await panel.getByRole('button', { name: 'Parar', exact: true }).focus()
+  await page.keyboard.press('Control+Equal')
+  await expect.poll(level).toBeGreaterThan(fitted)
+  await steadyView(page)
+  const closer = await level()
+  await page.keyboard.press('Control+Minus')
+  await expect.poll(level).toBeLessThan(closer)
+  await expect(panel.getByRole('button', { name: 'Parar', exact: true })).toBeFocused()
 
   hold.open()
   const chipsOfChanges = await proposal(panel)

@@ -854,6 +854,48 @@ test('design system selects open, list the options and keep the choice in the pa
   await expect(dialog).toBeVisible()
 })
 
+const canvasZoom = (page) => page.evaluate(() => new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a)
+
+async function steadyZoom(page) {
+  let last = -1
+  await expect.poll(async () => {
+    const now = await canvasZoom(page)
+    const steady = now === last
+    last = now
+    return steady
+  }, { intervals: [200] }).toBe(true)
+  return last
+}
+
+test('Ctrl + and Ctrl - zoom the canvas from the canvas and from a text field, and leave it alone while a dialog is open', async ({ page }) => {
+  await open(page)
+  await page.locator('.react-flow__pane').click({ position: { x: 40, y: 40 } })
+  const start = await steadyZoom(page)
+  await page.keyboard.press('Control+Equal')
+  await expect.poll(() => canvasZoom(page)).toBeGreaterThan(start)
+  const larger = await steadyZoom(page)
+
+  const name = page.getByLabel('Nome do fluxo')
+  await name.focus()
+  await page.keyboard.press('Control+Minus')
+  await expect.poll(() => canvasZoom(page)).toBeLessThan(larger)
+  await expect(name).toBeFocused()
+  await expect(name).toHaveValue(/\S/)
+  const smaller = await steadyZoom(page)
+
+  await page.getByRole('button', { name: 'Gerar com IA', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Gerar fluxo com IA' })
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('Control+Equal')
+  await page.keyboard.press('Control+Minus')
+  await page.waitForTimeout(400)
+  expect(await canvasZoom(page)).toBe(smaller)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await page.keyboard.press('Control+Equal')
+  await expect.poll(() => canvasZoom(page)).toBeGreaterThan(smaller)
+})
+
 test('clearing empties the canvas with undo, and a new flow keeps the current one in saved flows', async ({ page }) => {
   const nodeIds = () => page.evaluate(() => JSON.parse(localStorage.getItem('workflow')).nodes.map(node => node.id))
   const library = () => page.evaluate(() => JSON.parse(localStorage.getItem('workflow-library') || '[]').map(entry => [entry.flow.name, entry.flow.nodes.length]))

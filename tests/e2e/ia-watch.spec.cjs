@@ -430,6 +430,87 @@ test('watching on the canvas: the collapsed panel follows the stream, the read-o
   await expect.poll(() => saved(page)).toEqual({ name: final.name, nodes: final.nodes.map((node) => node.id) })
 })
 
+async function steadyView(page) {
+  let last = ''
+  await expect.poll(async () => {
+    const now = await page.evaluate(() => getComputedStyle(document.querySelector('.react-flow__viewport')).transform)
+    const steady = now === last
+    last = now
+    return steady
+  }, { intervals: [200] }).toBe(true)
+}
+
+const allInside = (page) => page.evaluate(() => {
+  const area = document.querySelector('.react-flow').getBoundingClientRect()
+  return [...document.querySelectorAll('.react-flow__node')].every((node) => {
+    const box = node.getBoundingClientRect()
+    return box.left >= area.left && box.top >= area.top && box.right <= area.right && box.bottom <= area.bottom
+  })
+})
+
+test('the creation preview has its own zoom: the chosen level holds while the flow grows and Ajustar a prévia à tela frames it again', async ({ page, ai }) => {
+  const early = ai.hold()
+  const hold = ai.hold()
+  ai.replies.push({ steps: [TEXT.slice(0, FIRST), early, TEXT.slice(FIRST, THIRD), hold, TEXT.slice(THIRD)] })
+  await openEditor(page)
+  const dialog = await openDialog(page)
+  await fillRequest(dialog)
+  await dialog.getByRole('button', { name: 'Gerar fluxo' }).click()
+
+  const nodes = page.locator('.react-flow__node')
+  const zoom = page.locator('[data-canvas-overlay]').filter({ hasText: BANNER }).getByRole('group', { name: 'Zoom da prévia' })
+  const level = async () => Number((await zoom.textContent()).match(/(\d+)%/)[1])
+  await early.reached
+  await expect(nodes).toHaveCount(EARLY.nodes.length, { timeout: 15000 })
+  await expect(zoom).toBeVisible()
+  await expect(zoom).toContainText(/\d+%/)
+  await steadyView(page)
+  const fitted = await level()
+
+  await zoom.getByRole('button', { name: 'Aumentar zoom da prévia', exact: true }).click()
+  await expect.poll(level).toBeGreaterThan(fitted)
+  await steadyView(page)
+  const closer = await level()
+  await zoom.getByRole('button', { name: 'Diminuir zoom da prévia', exact: true }).click()
+  await expect.poll(level).toBeLessThan(closer)
+  await steadyView(page)
+  const reduced = await level()
+  await page.keyboard.press('Control+Equal')
+  await expect.poll(level).toBeGreaterThan(reduced)
+  await steadyView(page)
+  const enlarged = await level()
+  await page.keyboard.press('Control+Minus')
+  await expect.poll(level).toBeLessThan(enlarged)
+  await steadyView(page)
+  const chosen = await level()
+
+  early.open()
+  await hold.reached
+  await expect(nodes).toHaveCount(CHECKPOINT.nodes.length, { timeout: 15000 })
+  await steadyView(page)
+  expect(await level()).toBe(chosen)
+
+  await zoom.getByRole('button', { name: 'Ajustar a prévia à tela', exact: true }).click()
+  await steadyView(page)
+  expect(await allInside(page)).toBe(true)
+  for (const name of ['Diminuir zoom', 'Aumentar zoom', 'Ajustar à tela']) await expect(page.getByRole('button', { name, exact: true })).toBeEnabled()
+
+  const framed = await level()
+  await page.locator('.react-flow__minimap').hover()
+  await page.mouse.wheel(0, -400)
+  await expect.poll(level).not.toBe(framed)
+  await steadyView(page)
+  const viaMap = await level()
+
+  hold.open()
+  await expect(dialog.getByRole('button', { name: 'Importar para o editor' })).toBeFocused({ timeout: 15000 })
+  await expect(page.getByText(DONE_BANNER)).toBeVisible()
+  const doneZoom = page.locator('[data-canvas-overlay]').filter({ hasText: DONE_BANNER }).locator('[aria-label="Zoom da prévia"]')
+  await expect(doneZoom).toHaveCount(1)
+  await steadyView(page)
+  expect(Number((await doneZoom.textContent()).match(/(\d+)%/)[1])).toBe(viaMap)
+})
+
 test('cancelling from the panel aborts the provider stream and leaves the open flow untouched', async ({ page, ai }) => {
   const hold = ai.hold()
   ai.replies.push({ steps: [TEXT.slice(0, THIRD), hold, TEXT.slice(THIRD)] })

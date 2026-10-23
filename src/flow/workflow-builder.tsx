@@ -1,7 +1,7 @@
 "use client"
 
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
-import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, getNodesBounds, useReactFlow, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type Viewport, type XYPosition } from "reactflow"
+import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, getNodesBounds, useReactFlow, useStore, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type ReactFlowState, type Viewport, type XYPosition } from "reactflow"
 import "reactflow/dist/style.css"
 import { Check, ChevronLeft, ChevronRight, Download, Eraser, FilePlus2, Info, Loader2, MapIcon, Maximize, MousePointerClick, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
@@ -140,6 +140,7 @@ const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u0
 const formatPoint = (point?: XYPosition | null) => (point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "(--, --)")
 const isTextField = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
 const isTypingTarget = (target: EventTarget | null) => isTextField(target) || (target instanceof HTMLElement && (target.getAttribute("role") === "combobox" || Boolean(target.closest('[role="listbox"]'))))
+const zoomStep = (event: KeyboardEvent) => (event.key === "+" || event.key === "=" || event.code === "NumpadAdd" ? 1 : event.key === "-" || event.key === "_" || event.code === "NumpadSubtract" ? -1 : 0)
 const minimapColor = (node: Node<AtendimentoData>) => (node.data.type === NOTE_TYPE ? noteColor(node.data.data.color) : getComponentColor(node.data.type))
 const minimapClass = (node: Node<AtendimentoData>) => (node.data.type === START_TYPE ? "fill-flow-success" : "")
 const overlaps = (first: Box, second: Box, gap: number) =>
@@ -318,18 +319,55 @@ const PREVIEW_TEXT: Record<PreviewKind, { live: string; done: string }> = {
   edit: { live: "Editando com IA. As mudanças aparecem aqui conforme chegam.", done: "Edição pronta. Aplique ou descarte no Copiloto." },
 }
 
-function PreviewBanner({ bannerRef, nodes, edges, done, kind }: { bannerRef?: (element: HTMLElement | null) => void; nodes: number; edges: number; done: boolean; kind: PreviewKind }) {
+const zoomOf = (state: ReactFlowState) => state.transform[2]
+
+function PreviewZoom({ onZoomIn, onZoomOut, onFit }: { onZoomIn: () => void; onZoomOut: () => void; onFit: () => void }) {
+  const zoom = useStore(zoomOf)
+  const store = useStoreApi()
+  const [said, setSaid] = useState("")
+  const timer = useRef(0)
+
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+
+  const run = (action: () => void, wait: number) => () => {
+    action()
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setSaid(`Zoom em ${Math.round(zoomOf(store.getState()) * 100)}%`), wait)
+  }
+
   return (
-    <div ref={bannerRef} data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 items-center gap-2.5 border-flow-accent/40 px-3 py-2")}>
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-flow-accent/15 text-flow-accent">
-        {done ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden />}
-      </span>
-      <p role="status" className="min-w-0 text-xs font-semibold leading-5 text-flow-fg">{done ? PREVIEW_TEXT[kind].done : PREVIEW_TEXT[kind].live}</p>
-      <span className="h-4 w-px shrink-0 bg-flow-border" aria-hidden />
-      <span className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[11px] font-medium text-flow-muted">
-        <span><span className="text-flow-muted-strong">{nodes}</span> {nodes === 1 ? "componente" : "componentes"}</span>
-        <span><span className="text-flow-muted-strong">{edges}</span> {edges === 1 ? "conexão" : "conexões"}</span>
-      </span>
+    <>
+      <div role="group" aria-label="Zoom da prévia" className="nokey flex shrink-0 items-center gap-1">
+        <ToolButton label="Diminuir zoom da prévia" title="Diminuir zoom da prévia (Ctrl -)" icon={ZoomOut} onClick={run(onZoomOut, ZOOM_DURATION + 50)} className="pointer-events-auto h-7 w-7" />
+        <span className="min-w-[2.75rem] text-center text-[11px] font-semibold tabular-nums text-flow-muted-strong">
+          <span className="sr-only">Zoom </span>
+          {Math.round(zoom * 100)}%
+        </span>
+        <ToolButton label="Aumentar zoom da prévia" title="Aumentar zoom da prévia (Ctrl +)" icon={ZoomIn} onClick={run(onZoomIn, ZOOM_DURATION + 50)} className="pointer-events-auto h-7 w-7" />
+        <ToolButton label="Ajustar a prévia à tela" icon={Maximize} onClick={run(onFit, FIT_DURATION + 50)} className="pointer-events-auto h-7 w-7" />
+      </div>
+      <span role="status" className="sr-only">{said}</span>
+    </>
+  )
+}
+
+function PreviewBanner({ bannerRef, nodes, edges, done, kind, onZoomIn, onZoomOut, onFit }: { bannerRef?: (element: HTMLElement | null) => void; nodes: number; edges: number; done: boolean; kind: PreviewKind; onZoomIn: () => void; onZoomOut: () => void; onFit: () => void }) {
+  return (
+    <div ref={bannerRef} data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 flex-wrap items-center gap-x-2.5 gap-y-2 border-flow-accent/40 px-3 py-2")}>
+      <div className="flex min-w-0 grow basis-60 items-center gap-2.5">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-flow-accent/15 text-flow-accent">
+          {done ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden />}
+        </span>
+        <p role="status" className="min-w-0 text-xs font-semibold leading-5 text-flow-fg">{done ? PREVIEW_TEXT[kind].done : PREVIEW_TEXT[kind].live}</p>
+      </div>
+      <div className="ml-auto flex shrink-0 items-center gap-2.5">
+        <span className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[11px] font-medium text-flow-muted">
+          <span><span className="text-flow-muted-strong">{nodes}</span> {nodes === 1 ? "componente" : "componentes"}</span>
+          <span><span className="text-flow-muted-strong">{edges}</span> {edges === 1 ? "conexão" : "conexões"}</span>
+        </span>
+        <span className="h-4 w-px shrink-0 bg-flow-border" aria-hidden />
+        <PreviewZoom onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFit={onFit} />
+      </div>
     </div>
   )
 }
@@ -537,6 +575,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const previewView = useRef<Viewport | null>(null)
   const previewFollow = useRef(true)
   const previewFitted = useRef(false)
+  const previewFinished = useRef(false)
   const previewCooldown = useRef(0)
   const lastFit = useRef(0)
   const fitTimer = useRef<number | undefined>(undefined)
@@ -662,6 +701,10 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     bannerRef.current = element
   }, [])
 
+  const rescueFocus = useCallback(() => {
+    if (bannerRef.current?.contains(document.activeElement)) canvas.current?.focus({ preventScroll: true })
+  }, [])
+
   const cancelPick = useCallback(() => {
     const session = leavePick()
     if (session) safely(() => session.onCancel())
@@ -733,6 +776,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     cancelFit()
     const view = previewView.current
     previewView.current = null
+    previewFinished.current = false
+    rescueFocus()
     setPreview(null)
     setPreviewDone(false)
     setPreviewSizes({})
@@ -740,7 +785,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     releaseView()
     if (view) void setViewport(view)
     return view
-  }, [cancelFit, releaseView, setViewport])
+  }, [cancelFit, releaseView, rescueFocus, setViewport])
 
   const freeArea = useCallback((): Box | null => {
     const { domNode, width: storedWidth, height: storedHeight } = store.getState()
@@ -809,6 +854,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     setPreviewDone(done)
     setPreviewKind(kind)
     const current = previewRef.current
+    const restarted = current !== null && previewFinished.current && !done
+    previewFinished.current = done
     const target = previewFocusOf(focus, current ? previewFocus.current.id : null, next.nodes)
     const relaid = kind === "edit" && relaidIds(current ?? flowRef.current, next).length > 0
     let refocused = false
@@ -837,10 +884,15 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
         lastFit.current = 0
       }
     }
+    if (restarted) {
+      previewFollow.current = true
+      previewFitted.current = false
+      lastFit.current = 0
+    }
     if (!pickRef.current) setFocusMark(target)
     const stable = stabilizePreview(next, current)
     if (stable === current) {
-      if (refocused) scheduleFit()
+      if (refocused || restarted) scheduleFit()
       return
     }
     previewRef.current = stable
@@ -1250,6 +1302,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     if (!roomForPick(surface?.parentElement?.clientWidth ?? width, surface?.clientHeight ?? height)) return []
     pickSequence.current += 1
     const key = pickSequence.current
+    rescueFocus()
     writePick({
       key,
       ...opened,
@@ -1274,7 +1327,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       })
     })
     return [...order]
-  }, [clearSelection, dirty, fitPick, store, toggleLibrary, writePick])
+  }, [clearSelection, dirty, fitPick, rescueFocus, store, toggleLibrary, writePick])
 
   const selectPick = useCallback((id: string | null) => {
     const session = pickRef.current
@@ -1435,6 +1488,14 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       if (key === "s") {
         event.preventDefault()
         current.save()
+        return
+      }
+      const zoom = zoomStep(event)
+      if (zoom) {
+        if (event.altKey || (event.target instanceof Element && event.target.closest(LAYER_SELECTOR))) return
+        event.preventDefault()
+        if (zoom > 0) current.zoomIn()
+        else current.zoomOut()
         return
       }
       if (isTypingTarget(event.target)) return
@@ -1702,6 +1763,23 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     if (ready) syncViewport()
   }, [cancelFit, ready, syncViewport])
 
+  useEffect(() => {
+    const surface = canvas.current
+    if (!surface) return
+    const holdOnMinimap = (event: Event) => {
+      if (!previewRef.current || !(event.target instanceof Element) || !event.target.closest(".react-flow__minimap")) return
+      previewFollow.current = false
+      cancelFit()
+      releaseView()
+    }
+    surface.addEventListener("wheel", holdOnMinimap, { capture: true, passive: true })
+    surface.addEventListener("pointerdown", holdOnMinimap, true)
+    return () => {
+      surface.removeEventListener("wheel", holdOnMinimap, true)
+      surface.removeEventListener("pointerdown", holdOnMinimap, true)
+    }
+  }, [cancelFit, releaseView])
+
   const dragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     const types = Array.from(event.dataTransfer.types)
     if (!types.includes("application/reactflow") && !types.includes("Files")) return
@@ -1961,8 +2039,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       <div className={cn("flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2", ui.panel)}>
         <ToolButton label="Componentes" title={showLibrary ? "Ocultar componentes" : "Mostrar componentes"} icon={showLibrary ? PanelLeftClose : PanelLeftOpen} pressed={showLibrary} disabled={picking} onClick={() => showComponents(!libraryShown.current)} />
         <span className={ui.divider} aria-hidden />
-        <ToolButton label="Diminuir zoom" icon={ZoomOut} onClick={zoomOutView} />
-        <ToolButton label="Aumentar zoom" icon={ZoomIn} onClick={zoomInView} />
+        <ToolButton label="Diminuir zoom" title="Diminuir zoom (Ctrl -)" icon={ZoomOut} onClick={zoomOutView} />
+        <ToolButton label="Aumentar zoom" title="Aumentar zoom (Ctrl +)" icon={ZoomIn} onClick={zoomInView} />
         <ToolButton label="Ajustar à tela" icon={Maximize} onClick={fitCanvas} />
         <ToolButton label="Minimapa" title={showMinimap ? "Ocultar minimapa" : "Mostrar minimapa"} icon={MapIcon} pressed={showMinimap} onClick={() => setShowMinimap((visible) => !visible)} />
         <span className={ui.divider} aria-hidden />
@@ -2105,7 +2183,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
               </EdgeActionsContext.Provider>
             </AtendimentoEdgesContext.Provider>
           </InvalidNodesContext.Provider>
-          {!showLibrary && !picking && (
+          {!showLibrary && !locked && (
             <button
               type="button"
               aria-label="Mostrar componentes"
@@ -2118,7 +2196,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             </button>
           )}
           {showIssues && !locked && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
-          {preview && !pick && <PreviewBanner bannerRef={setBanner} nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} />}
+          {preview && !pick && <PreviewBanner bannerRef={setBanner} nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} onZoomIn={zoomInView} onZoomOut={zoomOutView} onFit={fitCanvas} />}
           {pick && <PickBanner bannerRef={setBanner} hintId={pickHintId} label={pick.label} selection={pickedText} steps={pickSteps} any={pick.any} onStep={stepPick} onCancel={cancelPick} onConfirm={confirmPick} />}
           <CanvasStatus container={canvas} count={display.nodes.length} start={startNode?.position} />
         </div>
