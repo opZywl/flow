@@ -3,12 +3,14 @@
 import { useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react"
 import { useStore, type ReactFlowState } from "reactflow"
 import { AlertTriangle, ChevronRight, Copy, Plus, Trash2, X } from "lucide-react"
+import { API_CHECK_TYPES } from "@/lib/atendimento/api-check"
 import { API_TYPES, MENU_TYPE, NOTE_TYPE, START_TYPE, expectedFieldTypes, getComponentColor, getComponentLabel, getDefinition, mirrorKeys, newTimeRule, weekDayOptions } from "@/lib/atendimento/catalog"
 import { pairPattern, placeIssues, technicalKeys, type FieldProblem, type ProblemSpot } from "@/lib/atendimento/field-issues"
 import { isObject, nextOptionDigit, optionIndices } from "@/lib/atendimento/format"
 import { cleanNumberText, numberMessage, numberRule, parseNumber, type NumberRule } from "@/lib/atendimento/numbers"
 import type { AtendimentoNode, ComponentDefinition, FieldSeverity, FieldSpec, FlowIssue, ItemFieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
+import { ApiValidation } from "./api-validation"
 import { FlowSelect } from "./flow-select"
 import { categoryTint, componentIcon, noteColor } from "./nodes/atendimento-node"
 import { ui } from "./ui"
@@ -31,7 +33,7 @@ const technicalLabels: Record<string, string> = {
   curl: "cURL de referência",
   parsed_body: "Parâmetros do corpo",
   parameterExplanations: "Descrição dos parâmetros",
-  isApiValidated: "API validada na plataforma",
+  isApiValidated: "API validada",
   validated_signature: "Assinatura da validação",
   title: "Título",
   buttons: "Botões",
@@ -1137,6 +1139,10 @@ export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, 
     next = { ...next, availableNodes: menus.map((menu) => ({ id: menu.id, value: menu.id, name: menu.title })), targetNodeName: menus.find((menu) => menu.id === target)?.title ?? "" }
     write(next, { complete: true })
   }
+  const locateField = (key: string) => {
+    const index = fields.findIndex((spec) => spec.key === key)
+    if (index >= 0) focusSoon(`${uid}-field-${index}`)
+  }
   const edgeOf = (index: number): Edge => {
     const first = index === 0
     const last = index === fields.length - 1
@@ -1437,15 +1443,7 @@ export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, 
         {fields.length > 0 && <div className="space-y-4">{fields.map(renderField)}</div>}
         {placement.loose.length > 0 && <div><Problems items={placement.loose} /></div>}
 
-        {isApi && (
-          <div className="flex gap-2.5 rounded-lg border border-flow-border bg-flow-soft px-3 py-2.5">
-            <span aria-hidden className={cn("mt-1 h-2 w-2 shrink-0 rounded-full", payload.isApiValidated === true ? "bg-flow-success" : "bg-flow-muted")} />
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-flow-fg">{payload.isApiValidated === true ? "API validada" : "API não validada"}</p>
-              <p className={cn(ui.hint, "mt-0.5")}>Alterar URL, método, corpo ou cabeçalhos regenera o cURL e exige nova validação.</p>
-            </div>
-          </div>
-        )}
+        {API_CHECK_TYPES.has(type) && <ApiValidation nodeId={node.id} type={type} data={payload} onPatch={(patch) => write({ ...payload, ...patch })} onLocate={locateField} />}
 
         {technical.length > 0 && (
           <details className={collapsible}>

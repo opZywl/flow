@@ -625,12 +625,12 @@ const RULES = [
   ['solicitar_dados', { channel: 'RG' }, [['warning', 'Tipo de dado desconhecido: use CPF/CNPJ, CPF, CNPJ ou Outro.']]],
   ['solicitar_dados', { channel: 'CPF/CNPJ', tentativas: '5' }, []],
   ['solicitar_dados', { tentativas: '9' }, [['warning', 'A quantidade de tentativas deve ser de 1 a 5.']]],
-  ['solicitar_dados', { isApiValidated: false }, [['warning', 'API não validada: valide na plataforma depois de importar.']]],
+  ['solicitar_dados', { isApiValidated: false }, [['warning', 'API não validada: use Validar API no componente ou valide na plataforma.']]],
   ['solicitar_dados', data => { delete data.method; delete data.tentativas; delete data.isApiValidated }, []],
   ['protocolo', { opt: 'URL' }, [['error', 'Informe a URL da API de protocolo.']]],
   ['protocolo', { opt: 'URL', url_api: 'javascript:alert(1)' }, [['error', INVALID_URL]]],
   ['protocolo', { opt: 'URL', url_api: API_URL }, []],
-  ['consulta_api', { isApiValidated: false }, [['warning', 'API não validada: valide na plataforma depois de importar.']]],
+  ['consulta_api', { isApiValidated: false }, [['warning', 'API não validada: use Validar API no componente ou valide na plataforma.']]],
   ['consulta_api', { url_api: 'consulta' }, [['error', INVALID_URL]]],
   ['waitForAnswer', data => { delete data.customFields; delete data.logToActivity; delete data.autoSaveContact }, []],
   ['envio_arquivo', { url: 'ftp://arquivo' }, [['warning', INVALID_URL]]],
@@ -1675,7 +1675,7 @@ test('required list item fields use the validator severity when left empty', () 
 const COMPONENT_ISSUES = [
   /^Componente sem conexões; ele não será executado\.$/, /^Componente desconectado do início\.$/, /^Conecte a saída “.*”\.$/, /^A saída .* (não existe neste componente|tem mais de um destino)\.$/,
   /^O componente (recebe mais de uma conexão|não pode se conectar a ele mesmo)/, /^Este componente (não pode receber conexões|é gravado pela plataforma com type)/, /^Notas não podem ser conectadas\.$/,
-  /^Tipo preservado do arquivo/, /^O ID deste componente deve ser/, /^API não validada: valide na plataforma depois de importar\.$/,
+  /^Tipo preservado do arquivo/, /^O ID deste componente deve ser/, /^API não validada: use Validar API no componente ou valide na plataforma\.$/,
   /^Coloque um Enviar Mensagem com a pergunta logo antes do Aguardando Mensagem\.$/,
 ]
 const issueFields = (type, patch) => validateFlow(single(type, patched(type, patch))).filter(issue => issue.nodeId === '2').map(issue => [issue.message, issue.fields])
@@ -1709,7 +1709,7 @@ test('issues name every field involved, list items by position, and connection p
   assert.deepEqual(issueFields('protocolo', { opt: 'URL' }), [['Informe a URL da API de protocolo.', ['url_api']]])
   assert.deepEqual(issueFields('envio_arquivo', { url: 'arquivo.pdf' }), [[INVALID_URL, ['url']]])
   assert.deepEqual(issueFields('consulta_api', { url_api: 7 }), [['Campo url_api: esperado texto, recebido número.', ['url_api']], ['Informe a URL da API.', ['url_api']]])
-  assert.deepEqual(issueFields('consulta_api', { isApiValidated: false }), [['API não validada: valide na plataforma depois de importar.', undefined]])
+  assert.deepEqual(issueFields('consulta_api', { isApiValidated: false }), [['API não validada: use Validar API no componente ou valide na plataforma.', undefined]])
   assert.deepEqual(issueFields('envio_arquivo', { voice_note: true }), [['Mensagem de voz exige um arquivo de áudio.', ['mime_type', 'voice_note']]])
   assert.deepEqual(issueFields('apptCustomerIntake', { askName: false, askEmail: false, askNotes: false }), [['Selecione ao menos um dado para pedir ao cliente.', ['askName', 'askEmail', 'askNotes']]])
   assert.deepEqual(issueFields('crmLeadUpdate', { setStatus: '', addTags: '', setValue: '' }), [['Defina ao menos uma alteração: status, tags ou valor.', ['setStatus', 'addTags', 'setValue']]])

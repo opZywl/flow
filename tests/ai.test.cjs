@@ -29,7 +29,7 @@ const NOW = new Date('2026-10-11T12:00:00.000Z')
 const NODE_KEYS = ['id', 'type', 'position', 'data', 'measured', 'selected', 'dragging']
 const START_KEYS = ['id', 'type', 'position', 'data', 'deletable', 'measured', 'selected', 'dragging']
 const EDGE_KEYS = ['type', 'source', 'sourceHandle', 'target', 'id']
-const API_WARNING = 'API não validada: valide na plataforma depois de importar.'
+const API_WARNING = 'API não validada: use Validar API no componente ou valide na plataforma.'
 const TERMINALS = ['departamentos', 'flow', 'transferir', 'backToAgent', 'OpenAI', 'voltar', 'finalizar']
 const AI_DIR = path.join(__dirname, '..', 'lib', 'atendimento', 'ai')
 
@@ -931,7 +931,7 @@ test('review scopes: errors and fixable warnings go to the AI, platform data sta
   assert.ok(fixable.has('Selecione o menu de destino.'))
   for (const message of ['Informe o nome da tabulação.', 'Informe o nome da tag.', 'Informe o nome do agente.', 'Informe o nome do departamento.', 'Informe o nome do fluxo de destino.', 'Informe o nome do template.']) assert.ok(fixable.has(message), message)
   for (const message of ['Informe o nome do departamento.', 'Informe o nome da tag.', 'Informe o nome da lista.', 'Informe o nome do agente de IA.']) assert.equal(platformScope(message), 'ia', message)
-  assert.equal(platformScope('API não validada: valide na plataforma depois de importar.'), 'plataforma')
+  assert.equal(platformScope('API não validada: use Validar API no componente ou valide na plataforma.'), 'plataforma')
   assert.equal(platformScope('Informe o nome do evento.'), 'ia')
   assert.equal(platformScope('Informe a variável de saída.'), 'ia')
 })

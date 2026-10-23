@@ -162,7 +162,7 @@ test('menus, transfers and captured answers guide the model to complete paths', 
 
 const CONFIRM_ID = 'Confira: ID do departamento provisório, troque pelo valor cadastrado na plataforma.'
 const CONFIRM_URL = 'Confira: URL da API provisória, troque pelo valor cadastrado na plataforma.'
-const API_WARNING = 'API não validada: valide na plataforma depois de importar.'
+const API_WARNING = 'API não validada: use Validar API no componente ou valide na plataforma.'
 const NAME_FIELDS = {
   departamentos: 'name',
   tags: 'tags',

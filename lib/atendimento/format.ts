@@ -600,7 +600,7 @@ function checkApi({ data, report }: Rules) {
 
 function checkValidatedApi(rules: Rules) {
   checkApi(rules)
-  if (rules.data.isApiValidated === false && nonempty(rules.data.url_api)) rules.report("API não validada: valide na plataforma depois de importar.", "warning")
+  if (rules.data.isApiValidated === false && nonempty(rules.data.url_api)) rules.report("API não validada: use Validar API no componente ou valide na plataforma.", "warning")
 }
 
 const CHECKS = new Map<string, Check>([
