@@ -448,7 +448,17 @@ const allInside = (page) => page.evaluate(() => {
   })
 })
 
-test('the creation preview has its own zoom: the chosen level holds while the flow grows and Ajustar a prévia à tela frames it again', async ({ page, ai }) => {
+const newestOf = (flow) => flow.nodes.filter((node) => node.data.type !== START_TYPE).at(-1).id
+
+const insideCanvas = (page, id) => page.evaluate((nodeId) => {
+  const area = document.querySelector('.react-flow').getBoundingClientRect()
+  const node = document.querySelector(`.react-flow__node[data-id="${nodeId}"]`)
+  if (!node) return false
+  const box = node.getBoundingClientRect()
+  return box.left >= area.left && box.top >= area.top && box.right <= area.right && box.bottom <= area.bottom
+}, id)
+
+test('the creation preview follows the newest component at 100%, keeps following at the zoom the user picks and Acompanhar o componente goes back to 100%', async ({ page, ai }) => {
   const early = ai.hold()
   const hold = ai.hold()
   ai.replies.push({ steps: [TEXT.slice(0, FIRST), early, TEXT.slice(FIRST, THIRD), hold, TEXT.slice(THIRD)] })
@@ -466,6 +476,8 @@ test('the creation preview has its own zoom: the chosen level holds while the fl
   await expect(zoom).toContainText(/\d+%/)
   await steadyView(page)
   const fitted = await level()
+  expect(fitted).toBe(100)
+  expect(await insideCanvas(page, newestOf(EARLY))).toBe(true)
 
   await zoom.getByRole('button', { name: 'Aumentar zoom da prévia', exact: true }).click()
   await expect.poll(level).toBeGreaterThan(fitted)
@@ -489,8 +501,14 @@ test('the creation preview has its own zoom: the chosen level holds while the fl
   await expect(nodes).toHaveCount(CHECKPOINT.nodes.length, { timeout: 15000 })
   await steadyView(page)
   expect(await level()).toBe(chosen)
+  await expect.poll(() => insideCanvas(page, newestOf(CHECKPOINT))).toBe(true)
 
-  await zoom.getByRole('button', { name: 'Ajustar a prévia à tela', exact: true }).click()
+  await zoom.getByRole('button', { name: 'Acompanhar o componente', exact: true }).click()
+  await expect.poll(level).toBe(100)
+  await steadyView(page)
+  expect(await insideCanvas(page, newestOf(CHECKPOINT))).toBe(true)
+
+  await page.getByRole('button', { name: 'Ajustar à tela', exact: true }).click()
   await steadyView(page)
   expect(await allInside(page)).toBe(true)
   for (const name of ['Diminuir zoom', 'Aumentar zoom', 'Ajustar à tela']) await expect(page.getByRole('button', { name, exact: true })).toBeEnabled()

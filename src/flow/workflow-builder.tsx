@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react"
 import ReactFlow, { Background, BackgroundVariant, MiniMap, ReactFlowProvider, getNodesBounds, useReactFlow, useStore, useStoreApi, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type ReactFlowState, type Viewport, type XYPosition } from "reactflow"
 import "reactflow/dist/style.css"
-import { Check, ChevronLeft, ChevronRight, Download, Eraser, FilePlus2, Info, Loader2, MapIcon, Maximize, MousePointerClick, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Download, Eraser, FilePlus2, Info, Loader2, LocateFixed, MapIcon, Maximize, MousePointerClick, PanelLeftClose, PanelLeftOpen, Play, Redo2, Save, Settings2, TriangleAlert, Undo2, Upload, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -18,7 +18,7 @@ import NodeConfigPanel from "./node-config-panel"
 import SavedFlows from "./saved-flows"
 import CustomEdge, { EdgeActionsContext } from "./custom-edge"
 import { AtendimentoEdgesContext, AtendimentoNode as AtendimentoNodeView, InvalidNodesContext, NodeActionsContext, NodeFocusContext, NodePickContext, nodeSummary, noteColor, pickSubject, type NodePick } from "./nodes/atendimento-node"
-import { betterFrame, centerView, editedIds, fitBox, frameAround, overlapsCorner, previewFocusOf, roomForPick, shownIn, stepCandidate, unite, zoomScale, type Box, type Corner, type Frame, type ZoomLimits } from "./canvas-frame"
+import { betterFrame, centerView, fitBox, frameAround, overlapsCorner, previewFocusOf, roomForPick, shownIn, stepCandidate, unite, zoomScale, type Box, type Corner, type Frame, type ZoomLimits } from "./canvas-frame"
 import type { PickHandlers, PickRequest } from "./pick"
 import { ui } from "./ui"
 
@@ -108,7 +108,7 @@ const MIN_ZOOM = 0.05
 const MAX_ZOOM = 2
 const PICK_MIN_ZOOM = 0.4
 const PICK_STEP_ZOOM = 0.75
-const FOCUS_MIN_ZOOM = 0.5
+const ZOOM_STEP = 1.2
 const FIT_INTERVAL = 1000
 const FIT_DURATION = 450
 const FIT_PADDING = 0.15
@@ -211,13 +211,22 @@ export function relaidIds(before: Graph, after: Graph): string[] {
   return after.edges.every((edge) => links.has(linkOf(edge))) ? moved : []
 }
 
-export function previewFrame(boxes: ReadonlyMap<string, Box>, focus: string | null, overview: boolean, edited: () => ReadonlySet<string>, area: Box): Pick<Frame, "bounds" | "view"> | null {
-  const anchor = focus && !overview ? boxes.get(focus) : undefined
-  if (anchor) {
-    const near = [...edited()].flatMap((id) => (id === focus ? [] : boxes.get(id) ?? []))
-    const { bounds, view } = frameAround(anchor, near, area, FIT_LIMITS, FOCUS_MIN_ZOOM)
-    return { bounds, view }
-  }
+export function followTarget(nodes: readonly AtendimentoNode[], before: readonly AtendimentoNode[] | null, kept: string | null): string | null {
+  const ids = nodes.filter((node) => node.data.type !== START_TYPE).map((node) => node.id)
+  if (!ids.length) return null
+  if (!before) return ids[ids.length - 1]
+  const old = new Map(before.map((node) => [node.id, node]))
+  const added = ids.filter((id) => !old.has(id))
+  if (added.length) return added[added.length - 1]
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const changed = ids.filter((id) => !sameJson(old.get(id)?.data, byId.get(id)?.data))
+  if (changed.length) return changed[changed.length - 1]
+  return kept && ids.includes(kept) ? kept : ids[ids.length - 1]
+}
+
+export function previewFrame(boxes: ReadonlyMap<string, Box>, target: string | null, overview: boolean, area: Box, zoom: number): Pick<Frame, "bounds" | "view"> | null {
+  const anchor = target && !overview ? boxes.get(target) : undefined
+  if (anchor) return { bounds: anchor, view: centerView(anchor, area, zoom) }
   const all = [...boxes.values()]
   if (!all.length) return null
   const bounds = all.reduce(unite)
@@ -321,7 +330,7 @@ const PREVIEW_TEXT: Record<PreviewKind, { live: string; done: string }> = {
 
 const zoomOf = (state: ReactFlowState) => state.transform[2]
 
-function PreviewZoom({ onZoomIn, onZoomOut, onFit }: { onZoomIn: () => void; onZoomOut: () => void; onFit: () => void }) {
+function PreviewZoom({ onZoomIn, onZoomOut, onFollow }: { onZoomIn: () => void; onZoomOut: () => void; onFollow: () => void }) {
   const zoom = useStore(zoomOf)
   const store = useStoreApi()
   const [said, setSaid] = useState("")
@@ -344,14 +353,14 @@ function PreviewZoom({ onZoomIn, onZoomOut, onFit }: { onZoomIn: () => void; onZ
           {Math.round(zoom * 100)}%
         </span>
         <ToolButton label="Aumentar zoom da prévia" title="Aumentar zoom da prévia (Ctrl +)" icon={ZoomIn} onClick={run(onZoomIn, ZOOM_DURATION + 50)} className="pointer-events-auto h-7 w-7" />
-        <ToolButton label="Ajustar a prévia à tela" icon={Maximize} onClick={run(onFit, FIT_DURATION + 50)} className="pointer-events-auto h-7 w-7" />
+        <ToolButton label="Acompanhar o componente" title="Acompanhar o componente em 100%" icon={LocateFixed} onClick={run(onFollow, FIT_DURATION + 50)} className="pointer-events-auto h-7 w-7" />
       </div>
       <span role="status" className="sr-only">{said}</span>
     </>
   )
 }
 
-function PreviewBanner({ bannerRef, nodes, edges, done, kind, onZoomIn, onZoomOut, onFit }: { bannerRef?: (element: HTMLElement | null) => void; nodes: number; edges: number; done: boolean; kind: PreviewKind; onZoomIn: () => void; onZoomOut: () => void; onFit: () => void }) {
+function PreviewBanner({ bannerRef, nodes, edges, done, kind, onZoomIn, onZoomOut, onFollow }: { bannerRef?: (element: HTMLElement | null) => void; nodes: number; edges: number; done: boolean; kind: PreviewKind; onZoomIn: () => void; onZoomOut: () => void; onFollow: () => void }) {
   return (
     <div ref={bannerRef} data-canvas-overlay="" className={cn(ui.overlay, "pointer-events-none absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%_-_1.5rem)] -translate-x-1/2 flex-wrap items-center gap-x-2.5 gap-y-2 border-flow-accent/40 px-3 py-2")}>
       <div className="flex min-w-0 grow basis-60 items-center gap-2.5">
@@ -366,7 +375,7 @@ function PreviewBanner({ bannerRef, nodes, edges, done, kind, onZoomIn, onZoomOu
           <span><span className="text-flow-muted-strong">{edges}</span> {edges === 1 ? "conexão" : "conexões"}</span>
         </span>
         <span className="h-4 w-px shrink-0 bg-flow-border" aria-hidden />
-        <PreviewZoom onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFit={onFit} />
+        <PreviewZoom onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFollow={onFollow} />
       </div>
     </div>
   )
@@ -574,6 +583,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
   const previewRef = useRef<AtendimentoFlow | null>(null)
   const previewView = useRef<Viewport | null>(null)
   const previewFollow = useRef(true)
+  const followZoom = useRef(1)
+  const previewLatest = useRef<string | null>(null)
   const previewFitted = useRef(false)
   const previewFinished = useRef(false)
   const previewCooldown = useRef(0)
@@ -777,6 +788,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const view = previewView.current
     previewView.current = null
     previewFinished.current = false
+    previewLatest.current = null
+    followZoom.current = 1
     rescueFocus()
     setPreview(null)
     setPreviewDone(false)
@@ -809,11 +822,14 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     const nodes = getNodes()
     if (!shown || !area || !nodes.length) return
     const { id, overview } = previewFocus.current
-    const framed = previewFrame(new Map(nodes.map((node) => [node.id, boxOf(node)])), id, overview, () => editedIds(flowRef.current, shown), area)
+    const followed = id ?? previewLatest.current
+    const boxes = new Map(nodes.map((node) => [node.id, boxOf(node)]))
+    const anchored = !overview && followed !== null && boxes.has(followed)
+    const framed = previewFrame(boxes, followed, overview, area, followZoom.current)
     if (!framed) return
     const { bounds, view: target } = framed
     const current = settledView()
-    if (!force && previewFitted.current && shownIn(bounds, current, area, FIT_MARGIN)) return
+    if (!force && previewFitted.current && shownIn(bounds, current, area, FIT_MARGIN) && (!anchored || Math.abs(target.zoom - current.zoom) < 0.005)) return
     previewFitted.current = true
     lastFit.current = performance.now()
     if (Math.abs(target.zoom - current.zoom) < 0.005 && Math.abs(target.x - current.x) < 2 && Math.abs(target.y - current.y) < 2) return
@@ -864,6 +880,8 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       if (kind === "create") cancelPick()
       previewView.current = settledView()
       previewFollow.current = true
+      followZoom.current = 1
+      previewLatest.current = null
       previewFitted.current = false
       lastFit.current = 0
       previewFocus.current = { id: target, overview: relaid }
@@ -886,6 +904,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     }
     if (restarted) {
       previewFollow.current = true
+      followZoom.current = 1
       previewFitted.current = false
       lastFit.current = 0
     }
@@ -895,6 +914,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
       if (refocused || restarted) scheduleFit()
       return
     }
+    previewLatest.current = followTarget(stable.nodes, current ? current.nodes : kind === "edit" ? flowRef.current.nodes : null, previewLatest.current)
     previewRef.current = stable
     setPreview(stable)
   }, [cancelPick, endPreview, scheduleFit, settledView])
@@ -1208,32 +1228,68 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     clearSelection()
   }, [clearSelection, ensureApplied, canvasBusy, setDocument])
 
+  const followedNode = useCallback(() => {
+    const followed = previewFocus.current.id ?? previewLatest.current
+    return followed && getNode(followed) ? followed : null
+  }, [getNode])
+
+  const zoomPreview = useCallback((factor: number) => {
+    if (!previewRef.current || !previewFollow.current || pickRef.current || !followedNode()) return false
+    followZoom.current = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, settledView().zoom * factor))
+    previewFocus.current = { ...previewFocus.current, overview: false }
+    cancelFit()
+    fitPreview(true)
+    return true
+  }, [cancelFit, fitPreview, followedNode, settledView])
+
   const zoomInView = useCallback(() => {
-    previewFollow.current = false
+    if (zoomPreview(ZOOM_STEP)) return
+    if (previewRef.current) {
+      previewFollow.current = false
+      cancelFit()
+    }
     holdView(ZOOM_DURATION)
     void zoomIn({ duration: ZOOM_DURATION })
     syncViewport(ZOOM_DURATION + 50)
-  }, [holdView, syncViewport, zoomIn])
+  }, [cancelFit, holdView, syncViewport, zoomIn, zoomPreview])
 
   const zoomOutView = useCallback(() => {
-    previewFollow.current = false
+    if (zoomPreview(1 / ZOOM_STEP)) return
+    if (previewRef.current) {
+      previewFollow.current = false
+      cancelFit()
+    }
     holdView(ZOOM_DURATION)
     void zoomOut({ duration: ZOOM_DURATION })
     syncViewport(ZOOM_DURATION + 50)
-  }, [holdView, syncViewport, zoomOut])
+  }, [cancelFit, holdView, syncViewport, zoomOut, zoomPreview])
+
+  const followPreview = useCallback(() => {
+    if (!previewRef.current) return
+    previewFollow.current = true
+    followZoom.current = 1
+    previewFocus.current = { ...previewFocus.current, overview: false }
+    previewFitted.current = false
+    cancelFit()
+    fitPreview(true)
+  }, [cancelFit, fitPreview])
 
   const fitCanvas = useCallback(() => {
     if (previewRef.current) {
-      previewFollow.current = true
-      previewFocus.current = { ...previewFocus.current, overview: true }
+      previewFollow.current = false
       cancelFit()
-      fitPreview(true)
+      const area = freeArea()
+      const nodes = getNodes()
+      if (!area || !nodes.length) return
+      const view = fitBox(nodes.map((node) => boxOf(node)).reduce(unite), area, FIT_LIMITS)
+      holdView(FIT_DURATION, view)
+      void setViewport(view, { duration: FIT_DURATION })
       return
     }
     holdView(PAN_DURATION)
     void fitView({ padding: 0.2, duration: PAN_DURATION })
     syncViewport(PAN_DURATION + 50)
-  }, [cancelFit, fitPreview, fitView, holdView, syncViewport])
+  }, [cancelFit, fitView, freeArea, getNodes, holdView, setViewport, syncViewport])
 
   const openFile = useCallback(() => {
     if (!canvasBusy()) fileInput.current?.click()
@@ -1755,30 +1811,50 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
     moveOrigin.current = null
     if (previewRef.current) {
       if (origin && (origin.x !== viewport.x || origin.y !== viewport.y || origin.zoom !== viewport.zoom)) {
-        previewFollow.current = false
-        cancelFit()
+        if (Math.abs(origin.zoom - viewport.zoom) > 0.001 && previewFollow.current && !pickRef.current && followedNode()) {
+          followZoom.current = viewport.zoom
+          previewFocus.current = { ...previewFocus.current, overview: false }
+          scheduleFit()
+        } else {
+          previewFollow.current = false
+          cancelFit()
+        }
       }
       return
     }
     if (ready) syncViewport()
-  }, [cancelFit, ready, syncViewport])
+  }, [cancelFit, followedNode, ready, scheduleFit, syncViewport])
 
   useEffect(() => {
     const surface = canvas.current
     if (!surface) return
-    const holdOnMinimap = (event: Event) => {
+    const onMinimap = (event: Event) => {
       if (!previewRef.current || !(event.target instanceof Element) || !event.target.closest(".react-flow__minimap")) return
+      releaseView()
+      if (event.type === "wheel" && previewFollow.current) {
+        requestAnimationFrame(() => {
+          if (!previewRef.current) return
+          if (followedNode() && !pickRef.current) {
+            followZoom.current = store.getState().transform[2]
+            previewFocus.current = { ...previewFocus.current, overview: false }
+            scheduleFit()
+            return
+          }
+          previewFollow.current = false
+          cancelFit()
+        })
+        return
+      }
       previewFollow.current = false
       cancelFit()
-      releaseView()
     }
-    surface.addEventListener("wheel", holdOnMinimap, { capture: true, passive: true })
-    surface.addEventListener("pointerdown", holdOnMinimap, true)
+    surface.addEventListener("wheel", onMinimap, { capture: true, passive: true })
+    surface.addEventListener("pointerdown", onMinimap, true)
     return () => {
-      surface.removeEventListener("wheel", holdOnMinimap, true)
-      surface.removeEventListener("pointerdown", holdOnMinimap, true)
+      surface.removeEventListener("wheel", onMinimap, true)
+      surface.removeEventListener("pointerdown", onMinimap, true)
     }
-  }, [cancelFit, releaseView])
+  }, [cancelFit, followedNode, releaseView, scheduleFit, store])
 
   const dragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     const types = Array.from(event.dataTransfer.types)
@@ -2196,7 +2272,7 @@ function WorkflowBuilderInner({ onActionsReady, onOpenBot }: WorkflowBuilderProp
             </button>
           )}
           {showIssues && !locked && <IssuesPanel id={issuesId} issues={issues} nodes={nodesById} onClose={() => setShowIssues(false)} onSelect={selectIssue} />}
-          {preview && !pick && <PreviewBanner bannerRef={setBanner} nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} onZoomIn={zoomInView} onZoomOut={zoomOutView} onFit={fitCanvas} />}
+          {preview && !pick && <PreviewBanner bannerRef={setBanner} nodes={preview.nodes.filter((node) => node.data.type !== START_TYPE).length} edges={preview.edges.length} done={previewDone} kind={previewKind} onZoomIn={zoomInView} onZoomOut={zoomOutView} onFollow={followPreview} />}
           {pick && <PickBanner bannerRef={setBanner} hintId={pickHintId} label={pick.label} selection={pickedText} steps={pickSteps} any={pick.any} onStep={stepPick} onCancel={cancelPick} onConfirm={confirmPick} />}
           <CanvasStatus container={canvas} count={display.nodes.length} start={startNode?.position} />
         </div>
