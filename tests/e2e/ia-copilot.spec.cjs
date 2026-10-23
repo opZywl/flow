@@ -832,11 +832,68 @@ test('the Copiloto corner adds up the tokens of every call to the AI as each one
   expect(ai.buildCalls().length).toBeGreaterThanOrEqual(1)
   await expect(corner).toHaveText(spentText(ai.calls.length))
   await expect(corner).toHaveAttribute('title', `Entrada: ${11 * ai.calls.length}. Saída: ${22 * ai.calls.length}.`)
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('flow.ia.tokens')))).toEqual({ inputTokens: 11 * ai.calls.length, outputTokens: 22 * ai.calls.length, totalTokens: 33 * ai.calls.length })
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('flow.ia.tokens')))).toEqual({ inputTokens: 11 * ai.calls.length, outputTokens: 22 * ai.calls.length, totalTokens: 33 * ai.calls.length })
 
   await page.reload()
   await expect(page.getByLabel('Nome do fluxo')).toBeVisible()
   await expect(spentCorner(await openCopilot(page))).toHaveText(spentText(ai.calls.length))
+})
+
+const tokensSaved = (target) => target.evaluate(() => new Promise((resolve) => {
+  const request = indexedDB.open('flow.ia', 1)
+  request.onupgradeneeded = () => request.transaction.abort()
+  request.onerror = () => resolve(null)
+  request.onsuccess = () => {
+    const read = request.result.transaction('tokens', 'readonly').objectStore('tokens').get('total')
+    read.onsuccess = () => {
+      resolve(read.result ?? null)
+      request.result.close()
+    }
+    read.onerror = () => resolve(null)
+  }
+}))
+
+test('two tabs whose Copiloto answers end at the same moment both reach the total, in each corner and in the saved total', async ({ page, server }) => {
+  const context = page.context()
+  const errors = []
+  const value = JSON.stringify({ provider: 'openai', keys: { openai: KEY }, models: {}, effortChoice: null, fill: true })
+  await context.addInitScript(([name, saved]) => {
+    try {
+      if (window.sessionStorage.getItem(name) === null) window.sessionStorage.setItem(name, saved)
+    } catch {}
+  }, [SETTINGS_KEY, value])
+  const gates = []
+  await context.route((url) => url.hostname === HOST, async (route) => {
+    const gate = {}
+    gate.reached = new Promise((resolve) => {
+      gate.arrive = resolve
+    })
+    gate.opened = new Promise((resolve) => {
+      gate.open = resolve
+    })
+    gates.push(gate)
+    const id = crypto.randomUUID()
+    server.sessions.set(id, script([gate, JSON.stringify(ASK_EDIT)]))
+    return route.continue({ url: `${server.url}/${id}` })
+  })
+  const second = await context.newPage()
+  second.on('pageerror', (error) => errors.push(error.message))
+  const panels = []
+  for (const tab of [page, second]) {
+    await tab.goto('/flow')
+    await expect(tab.getByLabel('Nome do fluxo')).toBeVisible()
+    panels.push(await openCopilot(tab))
+  }
+  for (const panel of panels) await expect(spentCorner(panel)).toHaveText(spentText(0))
+  for (const panel of panels) await ask(panel, PROMPT)
+  await expect.poll(() => gates.length).toBe(2)
+  await Promise.all(gates.map((gate) => gate.reached))
+  for (const gate of gates) gate.open()
+  for (const panel of panels) await expect(messages(panel)).toHaveText([you(PROMPT), says(ASK_EDIT)])
+  for (const panel of panels) await expect(spentCorner(panel)).toHaveText(spentText(2))
+  await expect.poll(() => tokensSaved(page)).toEqual({ inputTokens: 22, outputTokens: 44, totalTokens: 66 })
+  await second.close()
+  expect(errors).toEqual([])
 })
 
 test('Parar while the Copiloto thinks keeps the open flow and the late answer never shows up', async ({ page, ai }) => {

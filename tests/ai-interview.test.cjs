@@ -1897,3 +1897,51 @@ test('cada chamada do turno informa os tokens na hora, inclusive o pedido de nov
   assert.equal(result.ok, true)
   assert.deepEqual(spent, [{ inputTokens: 161, outputTokens: 22, totalTokens: 183 }])
 })
+
+test('o cache do Claude conta também no turno que falha no formato, e a queda depois do cabeçalho conta a entrada informada', async () => {
+  const CACHED = { inputTokens: 161, outputTokens: 22, totalTokens: 183 }
+  const claude = (text, usage = { input_tokens: 11, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 }) => [
+    { type: 'message_start', message: { id: 'msg_1', model: MODELS.anthropic, usage } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    ...pieces(text).map((part) => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: part } })),
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 22 } },
+    { type: 'message_stop' },
+  ]
+  const spent = []
+  const onUsage = (usage) => spent.push(usage)
+  let result = await interviewTurn(input('anthropic'), hooks((call, index) => sse(claude(index === 0 ? 'não é JSON' : JSON.stringify(ASK))), { onUsage }))
+  assert.equal(result.ok, true)
+  assert.deepEqual(spent, [CACHED, CACHED])
+
+  spent.length = 0
+  calls.length = 0
+  const dropped = () => new Response(new ReadableStream({
+    start(controller) {
+      const events = claude(JSON.stringify(ASK), { input_tokens: 16000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1 }).slice(0, 3)
+      controller.enqueue(new TextEncoder().encode(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')))
+      setTimeout(() => controller.error(new TypeError('terminated', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) })), 5)
+    },
+  }), { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  result = await interviewTurn(input('anthropic'), hooks((call, index) => (index === 0 ? dropped() : sse(claude(JSON.stringify(ASK)))), { onUsage }))
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(spent, [{ inputTokens: 16000, outputTokens: 1, totalTokens: 16001 }, CACHED])
+})
+
+test('o uso do turno que terminou chega antes de o novo pedido acabar', async () => {
+  const ONE = { inputTokens: 11, outputTokens: 22, totalTokens: 33 }
+  const spent = []
+  const controller = new AbortController()
+  const stalled = (call) => new Response(new ReadableStream({
+    start(stream) {
+      call.init.signal.addEventListener('abort', () => stream.error(new DOMException('Aborted', 'AbortError')), { once: true })
+    },
+  }), { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  const pending = interviewTurn(input('openai'), hooks((call, index) => (index === 0 ? reply.openai('não é JSON') : stalled(call)), { signal: controller.signal, onUsage: (usage) => spent.push(usage) }))
+  while (calls.length < 2) await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.deepEqual(spent, [ONE])
+  controller.abort()
+  assert.equal((await pending).failure.code, 'aborted')
+  assert.deepEqual(spent, [ONE])
+})

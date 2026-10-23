@@ -79,11 +79,22 @@ export type RequestCheck = { ok: true; request: ParsedRequest } | { ok: false; f
 type ResolvedInput = ParsedRequest["input"]
 type ProviderOptions = NonNullable<SystemModelMessage["providerOptions"]>
 
+export interface WireUsage {
+  kind: "anthropic" | "google" | "responses"
+  usage: Record<string, unknown>
+}
+
 export interface StreamWatch {
   events: boolean
   refusal: boolean
   failed: boolean
   reached: boolean
+  wire?: WireUsage | null
+}
+
+export interface FinishedResult {
+  usage: PromiseLike<LanguageModelUsage>
+  providerMetadata: PromiseLike<ProviderMetadata | undefined>
 }
 
 export interface ModelSetup {
@@ -150,6 +161,7 @@ const TEXT_ONLY: Partial<Record<ProviderId, RegExp>> = { openai: /^(o1-mini|o1-p
 const REFUSAL_EVENT = /"type"\s*:\s*"(?:response\.refusal\.|refusal")/
 const FAILED_EVENT = /"type"\s*:\s*"response\.failed"/
 const WATCH_TAIL = 48
+const WIRE_HINT = /"usage|"error"|response\.failed/
 const NO_CREDITS = /insufficient_quota/i
 const PERMISSION_MESSAGE = /permission_error|does not have permission/i
 const KEY_MESSAGE = /api[ _-]?key|x-api-key|unauthori[sz]ed|authenticat|API_KEY_INVALID|invalid[ _-]?key|incorrect[ _-]?key/i
@@ -368,21 +380,55 @@ async function withoutQuotaRetry(response: Response): Promise<Response> {
   return new Response(text, { status, statusText: response.statusText, headers: response.headers })
 }
 
+const present = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== null && entry !== undefined))
+
+function readWire(watch: StreamWatch, line: string): void {
+  if (watch.wire === null || !line.startsWith("data:") || !WIRE_HINT.test(line)) return
+  let event: unknown
+  try {
+    event = JSON.parse(line.slice(5))
+  } catch {
+    return
+  }
+  if (!isRecord(event)) return
+  if (event.type === "error" || event.type === "response.failed" || (event.type === undefined && isRecord(event.error))) {
+    watch.wire = null
+  } else if (event.type === "message_start" && isRecord(event.message) && isRecord(event.message.usage)) {
+    watch.wire = { kind: "anthropic", usage: present(event.message.usage) }
+  } else if (event.type === "message_delta" && isRecord(event.usage)) {
+    watch.wire = { kind: "anthropic", usage: { ...watch.wire?.usage, ...present(event.usage) } }
+  } else if (isRecord(event.usageMetadata)) {
+    watch.wire = { kind: "google", usage: present(event.usageMetadata) }
+  } else if (typeof event.type === "string" && event.type.startsWith("response.") && isRecord(event.response) && isRecord(event.response.usage)) {
+    watch.wire = { kind: "responses", usage: present(event.response.usage) }
+  }
+}
+
 function observe(watch: StreamWatch, base: typeof fetch, browser: boolean): typeof fetch {
   return async (input, init) => {
     const response = await base(input, browser ? browserInit(init) : init)
     watch.reached = true
     if (response.status === 429) return withoutQuotaRetry(response)
-    if (!watch.events || !response.ok || !response.body) return response
+    if (!response.ok || !response.body) return response
     const decoder = new TextDecoder()
     let tail = ""
+    let line = ""
     const body = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
-        const text = tail + decoder.decode(chunk, { stream: true })
-        if (REFUSAL_EVENT.test(text)) watch.refusal = true
-        if (FAILED_EVENT.test(text)) watch.failed = true
-        tail = text.slice(-WATCH_TAIL)
+        const text = decoder.decode(chunk, { stream: true })
+        if (watch.events) {
+          const recent = tail + text
+          if (REFUSAL_EVENT.test(recent)) watch.refusal = true
+          if (FAILED_EVENT.test(recent)) watch.failed = true
+          tail = recent.slice(-WATCH_TAIL)
+        }
+        const lines = (line + text).split("\n")
+        line = lines.pop() ?? ""
+        for (const entry of lines) readWire(watch, entry)
         controller.enqueue(chunk)
+      },
+      flush() {
+        readWire(watch, line + decoder.decode())
       },
     }))
     return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers })
@@ -651,8 +697,31 @@ export function countUsage(usage: LanguageModelUsage | undefined, metadata?: Pro
   return totalTokens > 0 ? { inputTokens, outputTokens, totalTokens } : undefined
 }
 
-export function attemptUsage(reported: GenerationUsage | undefined, error?: unknown): GenerationUsage | undefined {
-  return reported ?? (NoObjectGeneratedError.isInstance(error) ? countUsage(error.usage) : undefined)
+function wireUsage(watch: StreamWatch): GenerationUsage | undefined {
+  const wire = watch.wire
+  if (!wire) return undefined
+  const { usage } = wire
+  if (wire.kind === "anthropic") {
+    return countUsage(
+      { inputTokens: tokenCount(usage.input_tokens), outputTokens: tokenCount(usage.output_tokens), totalTokens: undefined, cachedInputTokens: tokenCount(usage.cache_read_input_tokens) },
+      { anthropic: { cacheCreationInputTokens: tokenCount(usage.cache_creation_input_tokens) } },
+    )
+  }
+  if (wire.kind === "google") {
+    return countUsage({ inputTokens: tokenCount(usage.promptTokenCount), outputTokens: tokenCount(usage.candidatesTokenCount) + tokenCount(usage.thoughtsTokenCount), totalTokens: tokenCount(usage.totalTokenCount) })
+  }
+  const input = tokenCount(usage.input_tokens)
+  const cached = isRecord(usage.input_tokens_details) ? tokenCount(usage.input_tokens_details.cached_tokens) : 0
+  return countUsage({ inputTokens: cached <= input ? input : input + cached, outputTokens: tokenCount(usage.output_tokens), totalTokens: tokenCount(usage.total_tokens) })
+}
+
+async function finishedUsage(result: FinishedResult): Promise<GenerationUsage | undefined> {
+  const settled = await Promise.race([Promise.all([result.usage, result.providerMetadata]), new Promise<undefined>((resolve) => setTimeout(resolve, 0))]).catch(() => undefined)
+  return settled ? countUsage(settled[0], settled[1]) : undefined
+}
+
+export async function attemptUsage(reported: GenerationUsage | undefined, watch: StreamWatch, result?: FinishedResult): Promise<GenerationUsage | undefined> {
+  return reported ?? (result ? await finishedUsage(result) : undefined) ?? wireUsage(watch)
 }
 
 function spend(total: GenerationUsage, spent: GenerationUsage | undefined, hooks: RunHooks) {
@@ -740,6 +809,7 @@ async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: Ab
   setup.watch.refusal = false
   setup.watch.failed = false
   setup.watch.reached = false
+  setup.watch.wire = undefined
   let partial: unknown
   let usage: GenerationUsage | undefined
   try {
@@ -768,12 +838,12 @@ async function callModel(setup: ModelSetup, messages: ModelMessage[], signal: Ab
     await follow().catch(() => undefined)
     try {
       const ri = await settle(result.object, setup.watch, signal)
-      return { ri, partial, usage: usage ?? countUsage(await Promise.resolve(result.usage).catch(() => undefined)) }
+      return { ri, partial, usage: await attemptUsage(usage, setup.watch, result) }
     } catch (error) {
-      return { error, partial, usage: attemptUsage(usage, error) }
+      return { error, partial, usage: await attemptUsage(usage, setup.watch, result) }
     }
   } catch (error) {
-    return { error, partial, usage }
+    return { error, partial, usage: await attemptUsage(usage, setup.watch) }
   }
 }
 

@@ -1069,3 +1069,44 @@ test('a rota repassa fill: com preenchimento o ID recebe valor provisório e sem
   assert.equal(edited.data.mode, 'edit')
   assert.match(userText(calls[0]), /use só o que o pedido informar/)
 })
+
+test('a rota manda o uso de cada tentativa assim que ela termina, também quando a geração falha', async () => {
+  const ONE = { inputTokens: 11, outputTokens: 22, totalTokens: 33 }
+  responder = (call, index) => reply.openai(index === 0 ? 'não é json' : JSON.stringify(RI))
+  let lines = events((await run(payload('openai', { stream: true }))).data)
+  assert.equal(lines.at(-1).result.success, true)
+  assert.deepEqual(lines.filter((line) => line.type === 'usage').map((line) => line.usage), [ONE, ONE])
+  const first = lines.findIndex((line) => line.type === 'usage')
+  assert.ok(first >= 0 && first < lines.findIndex((line) => line.type === 'progress' && line.progress.round === 2))
+  calls.length = 0
+  responder = () => reply.openai('não é json')
+  lines = events((await run(payload('openai', { stream: true }))).data)
+  assert.equal(lines.at(-1).result.code, 'invalid_output')
+  assert.ok(calls.length >= 2)
+  assert.deepEqual(lines.filter((line) => line.type === 'usage').map((line) => line.usage), calls.map(() => ONE))
+})
+
+test('a rota manda o uso da rodada que terminou antes de a geração acabar', async () => {
+  responder = (call, index) => (index === 0 ? reply.openai('não é json') : new Promise((resolve, reject) => call.init.signal.addEventListener('abort', () => reject(call.init.signal.reason), { once: true })))
+  const response = await generate.POST(request('/api/generate-workflow', payload('openai', { stream: true })))
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  const reading = (async () => {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) return
+      text += decoder.decode(value, { stream: true })
+    }
+  })().catch(() => undefined)
+  try {
+    while (calls.length < 2) await new Promise((resolve) => setTimeout(resolve, 5))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const lines = events(text)
+    assert.deepEqual(lines.filter((event) => event.type === 'usage'), [{ type: 'usage', usage: { inputTokens: 11, outputTokens: 22, totalTokens: 33 } }])
+    assert.equal(lines.some((event) => event.type === 'result'), false)
+  } finally {
+    await reader.cancel()
+    await reading
+  }
+})

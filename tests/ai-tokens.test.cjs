@@ -67,3 +67,41 @@ test('sem acesso ao armazenamento o total continua somando nesta aba', () => {
   window.localStorage.getItem = getItem
   window.localStorage.setItem = setItem
 })
+
+test('com o armazenamento cheio o total desta aba continua somando, não volta ao valor guardado e grava tudo quando houver espaço', () => {
+  const { setItem } = window.localStorage
+  window.localStorage.setItem = () => {
+    throw Object.assign(new Error('The quota has been exceeded.'), { name: 'QuotaExceededError' })
+  }
+  const before = tokens.readTokens()
+  const saved = stored.get(STORAGE)
+  const expected = { inputTokens: before.inputTokens + 4, outputTokens: before.outputTokens + 5, totalTokens: before.totalTokens + 9 }
+  let stop = () => undefined
+  try {
+    tokens.addTokens({ inputTokens: 1, outputTokens: 1, totalTokens: 2 })
+    tokens.addTokens({ inputTokens: 3, outputTokens: 4, totalTokens: 7 })
+    assert.deepEqual(tokens.readTokens(), expected)
+    assert.equal(stored.get(STORAGE), saved)
+    stop = tokens.subscribeTokens(() => undefined)
+    assert.deepEqual(tokens.readTokens(), expected)
+    events.get('storage')({ key: STORAGE })
+    assert.deepEqual(tokens.readTokens(), expected)
+  } finally {
+    stop()
+    window.localStorage.setItem = setItem
+  }
+  tokens.addTokens({ inputTokens: 1, outputTokens: 0, totalTokens: 1 })
+  const after = { inputTokens: expected.inputTokens + 1, outputTokens: expected.outputTokens, totalTokens: expected.totalTokens + 1 }
+  assert.deepEqual(tokens.readTokens(), after)
+  assert.deepEqual(JSON.parse(stored.get(STORAGE)), after)
+})
+
+test('o total que outra aba guardou enquanto nada ouvia aparece quando o Copiloto abre', () => {
+  const file = require.resolve('../src/flow/ai/token-store.ts')
+  delete require.cache[file]
+  const fresh = require(file)
+  stored.set(STORAGE, JSON.stringify({ inputTokens: 400, outputTokens: 200, totalTokens: 600 }))
+  const stop = fresh.subscribeTokens(() => undefined)
+  assert.deepEqual(fresh.readTokens(), { inputTokens: 400, outputTokens: 200, totalTokens: 600 })
+  stop()
+})

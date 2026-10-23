@@ -1018,7 +1018,7 @@ export default function AICopilot({
 
       <Replies suggestions={suggestions} editNow={canEditNow} disabled={!canAnswer} onAnswer={answer} onEditNow={editNow} />
 
-      <form onSubmit={submit} className="shrink-0 space-y-2 border-t border-flow-border px-3 py-3">
+      <form onSubmit={submit} className={cn("shrink-0 space-y-2 border-t border-flow-border px-3 py-3", dialogBusy && "pb-36 sm:pb-3")}>
         <label className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-0.5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-flow-accent/30">
           <input
             id={idFor("fill")}

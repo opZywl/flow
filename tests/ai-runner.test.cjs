@@ -998,6 +998,7 @@ test('cada chamada ao modelo informa os tokens na hora, inclusive a rodada de co
   const pending = runGeneration(input('openai'), hooks((call, index) => (index === 0 ? reply.openai('não é json') : hanging('openai', call)), { signal: controller.signal, onUsage }))
   while (calls.length < 2) await new Promise((resolve) => setTimeout(resolve, 5))
   await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.deepEqual(spent, [ONE])
   controller.abort()
   result = await pending
   assert.equal(result.code, 'aborted')
@@ -1009,4 +1010,179 @@ test('cada chamada ao modelo informa os tokens na hora, inclusive a rodada de co
   assert.equal(result.success, true)
   assert.deepEqual(spent, calls.map(() => ONE))
   assert.equal(result.usage.totalTokens, 33 * calls.length)
+})
+
+const ONE_USAGE = { inputTokens: 11, outputTokens: 22, totalTokens: 33 }
+const CACHED_USAGE = { inputTokens: 161, outputTokens: 22, totalTokens: 183 }
+const CLAUDE_CACHE = { input_tokens: 11, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 }
+const CLAUDE_START = { input_tokens: 5000, cache_read_input_tokens: 20000, cache_creation_input_tokens: 0, output_tokens: 1 }
+const STARTED_USAGE = { inputTokens: 25000, outputTokens: 1, totalTokens: 25001 }
+
+function claudeEvents(text, usage = CLAUDE_CACHE) {
+  return [
+    { type: 'message_start', message: { id: 'msg_1', model: MODELS.anthropic, usage } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    ...pieces(text).map((part) => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: part } })),
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 22 } },
+    { type: 'message_stop' },
+  ]
+}
+
+function broken(events, call) {
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')))
+      if (!call) {
+        setTimeout(() => controller.error(new TypeError('terminated', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) })), 5)
+        return
+      }
+      const signal = call.init.signal
+      const stop = () => controller.error(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      if (signal?.aborted) stop()
+      else signal?.addEventListener('abort', stop, { once: true })
+    },
+  })
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+}
+
+function incomplete(part) {
+  return sse([
+    { type: 'response.created', response: { id: 'resp_1', created_at: 1760000000, model: MODELS.openai } },
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'msg_1' } },
+    ...pieces(part).map((delta) => ({ type: 'response.output_text.delta', item_id: 'msg_1', delta })),
+    { type: 'response.output_item.done', output_index: 0, item: { type: 'message', id: 'msg_1' } },
+    { type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' }, usage: { input_tokens: 11, output_tokens: 22 } } },
+  ])
+}
+
+test('a edição soma o uso de cada tentativa, inclusive a rodada de correção e a falha', async () => {
+  const spent = []
+  const onUsage = (usage) => spent.push(usage)
+  let result = await runGeneration(editInput('openai'), hooks((call, index) => reply.openai(index === 0 ? 'não é json' : JSON.stringify(FINANCE_EDIT)), { onUsage }))
+  assert.equal(result.success, true)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(spent, [ONE_USAGE, ONE_USAGE])
+  assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 44, totalTokens: 66 })
+
+  spent.length = 0
+  calls.length = 0
+  result = await runGeneration(editInput('openai'), hooks(() => reply.openai('não é json'), { onUsage }))
+  assert.equal(result.success, false)
+  assert.ok(calls.length >= 2)
+  assert.deepEqual(spent, calls.map(() => ONE_USAGE))
+})
+
+test('a resposta cortada por tamanho, a retomada e a rodada repetida depois de um 400 contam cada chamada uma vez', async () => {
+  const spent = []
+  const onUsage = (usage) => spent.push(usage)
+  const text = JSON.stringify(RI)
+  let result = await runGeneration(input('openai'), hooks((call, index) => (index === 0 ? incomplete(text.slice(0, Math.floor(text.length * 0.8))) : reply.openai(text)), { onUsage }))
+  assert.equal(result.success, true)
+  assert.match(result.transcript, /Retomada 1/)
+  assert.deepEqual(spent, [ONE_USAGE, ONE_USAGE])
+  assert.deepEqual(result.usage, { inputTokens: 22, outputTokens: 44, totalTokens: 66 })
+
+  spent.length = 0
+  calls.length = 0
+  const refused = () => new Response(JSON.stringify({ error: { message: 'max_output_tokens is too large for this model.', type: 'invalid_request_error' } }), { status: 400, headers: { 'content-type': 'application/json' } })
+  result = await runGeneration(input('openai'), hooks((call, index) => (index === 1 ? refused() : reply.openai(index === 0 ? 'não é json' : text)), { onUsage }))
+  assert.equal(result.success, true)
+  assert.equal(calls.length, 3)
+  assert.deepEqual(spent, [ONE_USAGE, ONE_USAGE])
+
+  spent.length = 0
+  calls.length = 0
+  const edit = JSON.stringify(FINANCE_EDIT)
+  result = await runGeneration(editInput('openai'), hooks((call, index) => (index === 0 ? incomplete(edit.slice(0, Math.floor(edit.length * 0.7))) : reply.openai(edit)), { onUsage }))
+  assert.equal(result.success, true)
+  assert.match(result.transcript, /Retomada 1/)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(spent, [ONE_USAGE, ONE_USAGE])
+  assert.equal(result.usage.totalTokens, 66)
+})
+
+test('o cache do Claude conta também na tentativa que falha no formato', async () => {
+  const spent = []
+  const result = await runGeneration(input('anthropic'), hooks((call, index) => sse(claudeEvents(index === 0 ? 'não é json' : JSON.stringify(RI))), { onUsage: (usage) => spent.push(usage) }))
+  assert.equal(result.success, true)
+  assert.deepEqual(spent, [CACHED_USAGE, CACHED_USAGE])
+  assert.deepEqual(result.usage, { inputTokens: 322, outputTokens: 44, totalTokens: 366 })
+})
+
+test('a queda do stream depois do cabeçalho do Claude conta a entrada e o cache que ele já informou, e a nova chamada conta de novo', async () => {
+  const spent = []
+  const text = JSON.stringify(RI)
+  const result = await runGeneration(input('anthropic'), hooks((call, index) => (index === 0 ? broken(claudeEvents(text, CLAUDE_START).slice(0, 4)) : sse(claudeEvents(text))), { onUsage: (usage) => spent.push(usage) }))
+  assert.equal(result.success, true)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(spent, [STARTED_USAGE, CACHED_USAGE])
+  assert.deepEqual(result.usage, { inputTokens: 25161, outputTokens: 23, totalTokens: 25184 })
+})
+
+test('a queda do stream do Gemini conta o último uso que ele informou', async () => {
+  const spent = []
+  const text = JSON.stringify(RI)
+  const usageMetadata = { promptTokenCount: 5000, candidatesTokenCount: 40, thoughtsTokenCount: 1200, totalTokenCount: 6240 }
+  const partial = pieces(text.slice(0, 200)).map((part) => ({ candidates: [{ content: { role: 'model', parts: [{ text: part }] } }], usageMetadata }))
+  const result = await runGeneration(input('google'), hooks((call, index) => (index === 0 ? broken(partial) : reply.google(text)), { onUsage: (usage) => spent.push(usage) }))
+  assert.equal(result.success, true)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(spent, [{ inputTokens: 5000, outputTokens: 1240, totalTokens: 6240 }, ONE_USAGE])
+})
+
+test('o prazo do servidor que corta a rodada no meio conta o que o Claude já informou', async () => {
+  const spent = []
+  const result = await runGeneration(input('anthropic'), hooks((call) => broken(claudeEvents(JSON.stringify(RI), CLAUDE_START).slice(0, 4), call), { transport: 'server', deadlineMs: 200, onUsage: (usage) => spent.push(usage) }))
+  assert.equal(result.success, false)
+  assert.equal(result.code, 'timeout')
+  assert.deepEqual(spent, [STARTED_USAGE])
+})
+
+test('o cancelamento depois do cabeçalho do Claude conta a entrada que ele já informou', async () => {
+  const spent = []
+  const controller = new AbortController()
+  const pending = runGeneration(input('anthropic'), hooks((call) => broken(claudeEvents(JSON.stringify(RI), CLAUDE_START).slice(0, 4), call), { signal: controller.signal, onUsage: (usage) => spent.push(usage) }))
+  while (calls.length === 0) await new Promise((resolve) => setTimeout(resolve, 5))
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  controller.abort()
+  const result = await pending
+  assert.equal(result.code, 'aborted')
+  assert.deepEqual(spent, [STARTED_USAGE])
+})
+
+test('a falha informada pelo próprio provedor no meio do stream não entra no total', async () => {
+  const spent = []
+  const onUsage = (usage) => spent.push(usage)
+  const text = JSON.stringify(RI)
+  const overloaded = sse([
+    { type: 'message_start', message: { id: 'msg_1', model: MODELS.anthropic, usage: CLAUDE_START } },
+    { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },
+  ])
+  let result = await runGeneration(input('anthropic'), hooks((call, index) => (index === 0 ? overloaded : sse(claudeEvents(text))), { onUsage }))
+  assert.equal(result.success, false)
+  assert.equal(result.code, 'provider_unavailable')
+  assert.equal(calls.length, 1)
+  assert.deepEqual(spent, [])
+
+  spent.length = 0
+  calls.length = 0
+  const failed = sse([
+    { type: 'response.created', response: { id: 'resp_1', created_at: 1760000000, model: MODELS.openai } },
+    { type: 'response.failed', response: { id: 'resp_1', created_at: 1760000000, model: MODELS.openai, object: 'response', status: 'failed', error: { code: 'server_error', message: 'The server had an error.' }, incomplete_details: null, output: [], usage: { input_tokens: 7300, output_tokens: 3, total_tokens: 7303 } } },
+  ])
+  result = await runGeneration(input('openai'), hooks((call, index) => (index === 0 ? failed : reply.openai(text)), { onUsage }))
+  assert.equal(result.success, false)
+  assert.equal(result.code, 'provider_unavailable')
+  assert.equal(calls.length, 1)
+  assert.deepEqual(spent, [])
+})
+
+test('o Claude que cai depois do fim da mensagem, antes de fechar a conexão, conta o cache', async () => {
+  const spent = []
+  const result = await runGeneration(input('anthropic'), hooks(() => broken(claudeEvents(JSON.stringify(RI))), { onUsage: (usage) => spent.push(usage) }))
+  assert.equal(result.success, true)
+  assert.equal(calls.length, 1)
+  assert.deepEqual(spent, [CACHED_USAGE])
+  assert.deepEqual(result.usage, CACHED_USAGE)
 })

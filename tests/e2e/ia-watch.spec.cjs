@@ -529,6 +529,31 @@ test('the creation preview follows the newest component at 100%, keeps following
   expect(Number((await doneZoom.textContent()).match(/(\d+)%/)[1])).toBe(viaMap)
 })
 
+test('on a 390 px phone the collapsed Gerar com IA card leaves the token total of the Copiloto in sight while the generation runs', async ({ page, ai }) => {
+  const hold = ai.hold()
+  ai.replies.push({ steps: [TEXT.slice(0, THIRD), hold, TEXT.slice(THIRD)] })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await openEditor(page)
+  const dialog = await openDialog(page)
+  await fillRequest(dialog)
+  await dialog.getByRole('button', { name: 'Gerar fluxo' }).click()
+  const card = page.getByRole('region', { name: 'Geração com IA' })
+  await expect(card).toBeVisible()
+  await hold.reached
+  await page.locator('[data-copilot-trigger]').click()
+  const panel = page.getByRole('region', { name: 'Copiloto', exact: true })
+  await expect(panel).toBeVisible()
+  const corner = panel.locator('p').filter({ hasText: 'gastos no total' })
+  await expect(corner).toBeInViewport({ ratio: 1 })
+  const spent = await corner.boundingBox()
+  const covering = await card.boundingBox()
+  const overlaps = spent.x < covering.x + covering.width && covering.x < spent.x + spent.width && spent.y < covering.y + covering.height && covering.y < spent.y + spent.height
+  expect(overlaps, 'o cartão do Gerar com IA cobre o total de tokens').toBe(false)
+  const hit = await page.evaluate(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('[aria-label="Copiloto"]')), [spent.x + 8, spent.y + spent.height / 2])
+  expect(hit, 'o ponto do total de tokens pertence ao Copiloto').toBe(true)
+  hold.open()
+})
+
 test('cancelling from the panel aborts the provider stream and leaves the open flow untouched', async ({ page, ai }) => {
   const hold = ai.hold()
   ai.replies.push({ steps: [TEXT.slice(0, THIRD), hold, TEXT.slice(THIRD)] })

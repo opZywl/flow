@@ -1110,6 +1110,7 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
   setup.watch.refusal = false
   setup.watch.failed = false
   setup.watch.reached = false
+  setup.watch.wire = undefined
   let usage: GenerationUsage | undefined
   try {
     const result = streamObject({
@@ -1138,12 +1139,12 @@ async function callTurn(setup: ModelSetup, messages: ModelMessage[], signal: Abo
     await follow().catch(() => undefined)
     try {
       const turn = await settleObject(result.object, setup.watch, signal)
-      return { turn, usage: usage ?? countUsage(await Promise.resolve(result.usage).catch(() => undefined)) }
+      return { turn, usage: await attemptUsage(usage, setup.watch, result) }
     } catch (error) {
-      return { error, usage: attemptUsage(usage, error) }
+      return { error, usage: await attemptUsage(usage, setup.watch, result) }
     }
   } catch (error) {
-    return { error, usage }
+    return { error, usage: await attemptUsage(usage, setup.watch) }
   }
 }
 

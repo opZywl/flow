@@ -972,6 +972,66 @@ test('o total de tokens soma cada chamada da geração direta, da rota de reserv
   assert.deepEqual(tokens.readTokens(), { inputTokens: start.inputTokens + 6, outputTokens: start.outputTokens + 7, totalTokens: start.totalTokens + 13 })
 })
 
+test('o total soma as chamadas de uma geração que falha, no navegador e pela rota, e segue os eventos de uso da rota', async () => {
+  const tokens = require('../src/flow/ai/token-store.ts')
+  const total = () => tokens.readTokens().totalTokens
+  let before = total()
+  model('não é json')
+  let seen = watchProvider()
+  let out = await client.generateFlow(BASE, signal(), () => {})
+  assert.equal(out.rejection.code, 'invalid_output')
+  assert.equal(calls.length, 0)
+  assert.equal(seen.length, 3)
+  assert.equal(total() - before, 99)
+
+  before = total()
+  model('não é json')
+  seen = watchProvider()
+  out = await client.requestGeneration(BASE, signal(), () => {})
+  assert.equal(out.ok, false)
+  assert.equal(calls.length, 1)
+  assert.equal(seen.length, 3)
+  assert.equal(total() - before, 99)
+
+  before = total()
+  calls.length = 0
+  let direct = 0
+  provider = () => {
+    if (direct++ === 0) throw new TypeError('Failed to fetch')
+    return openaiReply('não é json')
+  }
+  out = await client.generateFlow(BASE, signal(), () => {})
+  assert.equal(out.ok, false)
+  assert.equal(calls.length, 1)
+  assert.equal(total() - before, 33 * (direct - 1))
+
+  before = total()
+  serve(stream(bytesOf(ndjson([{ type: 'usage', usage: { inputTokens: 5, outputTokens: 6, totalTokens: 11 } }, { type: 'result', result: { ...SUCCESS, usage: { inputTokens: 50, outputTokens: 60, totalTokens: 110 } } }]), 7)), { status: 200, headers: { 'content-type': 'application/x-ndjson' } })
+  out = await client.requestGeneration(BASE, signal(), () => {})
+  assert.equal(out.ok, true)
+  assert.equal(total() - before, 11)
+})
+
+test('o total do canto sobe quando a tentativa termina, antes de a geração acabar', async () => {
+  const tokens = require('../src/flow/ai/token-store.ts')
+  const before = tokens.readTokens().totalTokens
+  const controller = new AbortController()
+  let index = 0
+  provider = (url, init) => (index++ === 0
+    ? openaiReply('não é json')
+    : new Response(new ReadableStream({
+      start(stream) {
+        init.signal.addEventListener('abort', () => stream.error(new DOMException('Aborted', 'AbortError')), { once: true })
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } }))
+  const pending = client.generateFlow(BASE, controller.signal, () => {})
+  while (index < 2) await sleep(5)
+  assert.equal(tokens.readTokens().totalTokens - before, 33)
+  controller.abort()
+  assert.equal((await pending).rejection.code, 'aborted')
+  assert.equal(tokens.readTokens().totalTokens - before, 33)
+})
+
 test('a chave recusada no turno volta com o código do campo da chave e sem a chave no texto', async () => {
   provider = () => new Response(JSON.stringify({ error: { message: 'Incorrect API key provided' } }), { status: 401, headers: { 'content-type': 'application/json' } })
   const out = await client.requestTurn(TURN_INPUT, signal())
