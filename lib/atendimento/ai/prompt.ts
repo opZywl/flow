@@ -166,7 +166,7 @@ const introLines = (fill: boolean): string[] => [
   "4. Nada se liga ao início, nenhum componente se liga a ele mesmo e Nota nunca é ligada.",
   `5. Menu de Opções: de 1 a ${RI_LIMITS.menuOptions} opções. buttons "true" só com até 3 opções.`,
   `6. ${fill ? RULES.platform.fill : RULES.platform.plain}`,
-  "7. Variáveis: nas mensagens, @@@variavel mostra valores capturados (Aguardando Mensagem, Entrada de Dados, response_map) e #NAME mostra o nome do contato. Em corpos de API e integrações, use {{variavel}}. Nomes de variável têm letras, números e _, sem espaços e sem {{ }}.",
+  "7. Variáveis: as variáveis da plataforma valem em qualquer mensagem: #NAME (nome do contato), @@@GREETING (Bom dia, Boa tarde ou Boa noite), #DATE_BRAZIL (data de hoje, dd/mm/aaaa), #TIME_PM (hora atual, 24h), #DATE_TIME_BRAZIL (data e hora) e #PROTOCOL (gera um número de protocolo). Onde entra o nome do contato, escreva #NAME, como em \"@@@GREETING, #NAME. Você está no atendimento da Clínica Exemplo.\". A saudação com @@@GREETING fica só na mensagem de boas-vindas, e as mensagens seguintes vão direto ao assunto. @@@variavel mostra valores capturados (Aguardando Mensagem, Entrada de Dados, response_map) e entra nas mensagens que vêm depois do componente que cria a variável. Em corpos de API e integrações, use {{variavel}}. Nomes de variável têm letras, números e _, sem espaços e sem {{ }}.",
   "8. Textos em português do Brasil, claros, profissionais e específicos do pedido. Sem emojis, a menos que o pedido peça.",
   "9. Use o componente mais adequado a cada etapa. Também existem componentes de agenda, chamados, CRM, IA, integrações, condições e coleta de dados.",
   "10. Para se despedir antes de encerrar, use Enviar Mensagem e depois Encerrar Conversa.",

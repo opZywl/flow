@@ -25,7 +25,7 @@
     "dev-alt": "next dev -p 3002",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node --require ./scripts/register-typescript.cjs --test tests/atendimento.test.cjs tests/simulator.test.cjs tests/ai.test.cjs tests/ai-routes.test.cjs tests/ai-runner.test.cjs tests/ai-edit.test.cjs tests/ai-client.test.cjs tests/ai-prompt.test.cjs tests/library.test.cjs tests/ai-interview.test.cjs tests/ai-interview-ui.test.cjs tests/ai-aguardando.test.cjs tests/ai-notas.test.cjs tests/ai-copilot.test.cjs tests/canvas-pick.test.cjs tests/ai-arrange.test.cjs tests/ai-settings.test.cjs tests/api-check.test.cjs",
+    "test": "node --require ./scripts/register-typescript.cjs --test tests/atendimento.test.cjs tests/simulator.test.cjs tests/ai.test.cjs tests/ai-routes.test.cjs tests/ai-runner.test.cjs tests/ai-edit.test.cjs tests/ai-client.test.cjs tests/ai-prompt.test.cjs tests/library.test.cjs tests/ai-interview.test.cjs tests/ai-interview-ui.test.cjs tests/ai-aguardando.test.cjs tests/ai-notas.test.cjs tests/ai-copilot.test.cjs tests/canvas-pick.test.cjs tests/ai-arrange.test.cjs tests/ai-settings.test.cjs tests/api-check.test.cjs tests/variables.test.cjs",
     "check:reference": "node scripts/check-reference.cjs",
     "test:e2e": "next build && playwright test",
     "verify": "node scripts/verify.cjs",

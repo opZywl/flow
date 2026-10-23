@@ -60,7 +60,9 @@ const INTEGRATION_SAMPLE = "[retorno da integração]"
 const FORM_SAMPLE = "[resposta do formulário]"
 const DELAY = /^[1-9]\d*$/
 const OUTPUT = /^output-(\d+)$/
-const TOKEN = /@@@([\w-]+(?::[\w-]+)*)|\{\{\s*([^{}\s]+)\s*\}\}|#NAME\b|\{protocol\}/g
+const TOKEN = /@@@([\w-]+(?::[\w-]+)*)|\{\{\s*([^{}\s]+)\s*\}\}|#(NAME|PROTOCOL|DATE_TIME_BRAZIL|DATE_BRAZIL|TIME_PM)\b|\{protocol\}/g
+const BRAZIL = "America/Sao_Paulo"
+let clock = new Date()
 const LANGUAGES = ["pt", "en", "es"]
 const INTAKE = [["askName", "nome"], ["askEmail", "e-mail"], ["askNotes", "observações"]] as const
 const TICKET_ACTIONS = [["enableComment", "Comentar"], ["enableReopen", "Reabrir"], ["enableClose", "Encerrar"], ["enableCsat", "Avaliar"]] as const
@@ -99,8 +101,32 @@ function textOf(value: JsonValue | undefined): string | undefined {
   return text || undefined
 }
 
-export function renderText(text: JsonValue | undefined, variables: Variables): string {
-  return plain(text).replace(TOKEN, (token: string, legacy: string | undefined, modern: string | undefined) => lookup(variables, legacy ?? modern ?? (token === "#NAME" ? "name" : "protocol")) ?? token)
+function clockPart(now: Date, options: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: BRAZIL, ...options }).format(now)
+}
+
+function clockText(name: string, now: Date): string {
+  const date = clockPart(now, { day: "2-digit", month: "2-digit", year: "numeric" })
+  const time = clockPart(now, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+  return name === "DATE_BRAZIL" ? date : name === "TIME_PM" ? time : `${date} ${time}`
+}
+
+function greetingOf(now: Date): string {
+  const hour = Number(clockPart(now, { hour: "2-digit", hourCycle: "h23" }))
+  return hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite"
+}
+
+export function renderText(text: JsonValue | undefined, variables: Variables, now: Date = clock): string {
+  return plain(text).replace(TOKEN, (token: string, legacy: string | undefined, modern: string | undefined, hash: string | undefined) => {
+    if (hash === "NAME") return lookup(variables, "name") ?? token
+    if (hash === "PROTOCOL" || token === "{protocol}") {
+      if (hash === "PROTOCOL" && !lookup(variables, "protocol")) variables.protocol = PROTOCOL_SAMPLE
+      return lookup(variables, "protocol") ?? token
+    }
+    if (hash) return clockText(hash, now)
+    const key = legacy ?? modern ?? ""
+    return lookup(variables, key) ?? (key.toLowerCase() === "greeting" ? greetingOf(now) : token)
+  })
 }
 
 const first = (data: JsonObject, ...keys: string[]) => keys.map((key) => textOf(data[key])).find((value) => value !== undefined)
@@ -503,10 +529,12 @@ export function advancePreview(flow: AtendimentoFlow, startId: string | undefine
 }
 
 export function startPreview(flow: AtendimentoFlow, now = new Date()): PreviewState {
+  clock = now
   return begin(graphOf(flow), now)
 }
 
 export function replyPreview(flow: AtendimentoFlow, current: PreviewState, reply: string, now = new Date()): PreviewState {
+  clock = now
   const graph = graphOf(flow)
   const node = current.nodeId === null ? undefined : graph.nodes.get(current.nodeId)
   if (!node || !current.waiting) return begin(graph, now)

@@ -2,6 +2,7 @@ import type { XYPosition } from "reactflow"
 import { MENU_TYPE, NOTE_TYPE, START_ID, START_TYPE, defaultMeasured, getComponentLabel, getDefinition, getNodeType, getTemplate, weekDayOptions } from "./catalog"
 import fieldTypes from "./field-types.json"
 import type { AtendimentoEdge, AtendimentoFlow, AtendimentoNode, FlowIssue, JsonObject, JsonValue } from "./types"
+import { variableWarnings } from "./variables"
 
 type OutputNode = Pick<AtendimentoNode, "id" | "data">
 type SourceEdge = { source: string; sourceHandle?: string | null }
@@ -861,6 +862,7 @@ export function validateFlow(flow: AtendimentoFlow): FlowIssue[] {
     checkReference(type, rules)
     CHECKS.get(type)?.(rules)
   }
+  for (const warning of variableWarnings(flow)) add(warning.message, warning.nodeId, "warning", warning.fields)
   return issues
 }
 

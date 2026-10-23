@@ -28,6 +28,8 @@ export const PLATFORM_PATTERNS: readonly RegExp[] = [
   /^Informe a planilha\./,
   /^Selecione o agente de IA\./,
   /^API não validada/,
+  /^Variável #\S+ desconhecida\./,
+  /^A variável @@@\S+ ainda não existe aqui/,
 ]
 
 export const NAME_PATTERN = /^Informe o nome (do|da) (departamento|tag|fluxo de destino|template|agente|agente de IA|lista|tabulação)\./

@@ -8,6 +8,8 @@ import { API_TYPES, MENU_TYPE, NOTE_TYPE, START_TYPE, expectedFieldTypes, getCom
 import { pairPattern, placeIssues, technicalKeys, type FieldProblem, type ProblemSpot } from "@/lib/atendimento/field-issues"
 import { isObject, nextOptionDigit, optionIndices } from "@/lib/atendimento/format"
 import { cleanNumberText, numberMessage, numberRule, parseNumber, type NumberRule } from "@/lib/atendimento/numbers"
+import { PLATFORM_VARIABLES, createdBefore, createdVariables, type PlatformVariable, type VariableGraph } from "@/lib/atendimento/variables"
+import { toast } from "@/hooks/use-toast"
 import type { AtendimentoNode, ComponentDefinition, FieldSeverity, FieldSpec, FlowIssue, ItemFieldSpec, JsonObject, JsonValue } from "@/lib/atendimento/types"
 import { cn } from "@/lib/utils"
 import { ApiValidation } from "./api-validation"
@@ -1079,6 +1081,64 @@ function TimeRulesEditor({ fieldKey, label, value, problems, onChange }: {
   )
 }
 
+function variableGraphOf(state: ReactFlowState): string {
+  return JSON.stringify({
+    nodes: state.getNodes().map((node) => {
+      const data: unknown = node.data
+      const type = isObject(data) && typeof data.type === "string" ? data.type : ""
+      return [node.id, type, isObject(data) && isObject(data.data) ? createdVariables(type, data.data as JsonObject) : []]
+    }),
+    edges: state.edges.map((edge) => [edge.source, edge.target]),
+  })
+}
+
+function VariableList({ title, items, onInsert }: { title: string; items: readonly (PlatformVariable & { nodeId?: string })[]; onInsert: (token: string) => void }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-flow-muted">{title}</p>
+      <ul className="space-y-1.5" aria-label={title}>
+        {items.map((item) => (
+          <li key={`${item.token}-${item.nodeId ?? "plataforma"}`}>
+            <button
+              type="button"
+              title={`Inserir ${item.token}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onInsert(item.token)}
+              className="nokey flex w-full items-baseline gap-2 rounded-md border border-flow-border bg-flow-surface px-2.5 py-1.5 text-left transition hover:border-flow-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent/30"
+            >
+              <code className="shrink-0 font-mono text-[11px] font-semibold text-flow-accent">{item.token}</code>
+              <span className="min-w-0 text-[11px] leading-4 text-flow-muted">{item.description}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function VariablesBox({ nodeId, onInsert }: { nodeId: string; onInsert: (token: string) => void }) {
+  const signature = useStore(variableGraphOf)
+  const created = useMemo(() => {
+    const parsed = JSON.parse(signature) as { nodes: Array<[string, string, string[]]>; edges: Array<[string, string]> }
+    const graph: VariableGraph = { nodes: parsed.nodes.map(([id, type, names]) => ({ id, type, created: names })), edges: parsed.edges }
+    return createdBefore(graph, nodeId)
+  }, [nodeId, signature])
+  return (
+    <details open className={collapsible}>
+      <summary className={summary}>
+        <ChevronRight className={chevron} aria-hidden />
+        <span>Disponíveis neste componente</span>
+        <span className="rounded-md bg-flow-strong px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-flow-muted-strong">{PLATFORM_VARIABLES.length + created.length}</span>
+      </summary>
+      <div className="mt-3 space-y-3">
+        <p className={cn(ui.hint, "mt-0")}>Clique para inserir no campo de texto onde está o cursor.</p>
+        <VariableList title="Sempre disponíveis" items={PLATFORM_VARIABLES} onInsert={onInsert} />
+        {created.length > 0 ? <VariableList title="Criadas antes deste componente" items={created} onInsert={onInsert} /> : <p className={cn(ui.hint, "mt-0")}>Nenhum componente antes deste cria variável.</p>}
+      </div>
+    </details>
+  )
+}
+
 export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, removeOption, removeOutput, insertOutput, onClose, onRemove, onDuplicate, onDraft }: {
   node: AtendimentoNode
   issues?: FlowIssue[]
@@ -1093,6 +1153,7 @@ export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, 
 }) {
   const uid = useId()
   const [pending, setPending] = useState<Record<string, boolean>>({})
+  const variableField = useRef<{ key: string; element: HTMLInputElement | HTMLTextAreaElement } | null>(null)
   const type = node.data.type
   const definition = getDefinition(type)
   const payload = node.data.data
@@ -1353,6 +1414,7 @@ export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, 
             className={cn(ui.textarea, "resize-y", mono && "font-mono text-xs leading-5", textTone && fieldTone[textTone])}
             placeholder={spec.placeholder}
             value={text}
+            onFocus={(event) => { variableField.current = { key: spec.key, element: event.currentTarget } }}
             onChange={(event) => setField(spec, event.target.value)}
           />
         ) : (
@@ -1366,6 +1428,7 @@ export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, 
             placeholder={spec.placeholder}
             value={text}
             list={suggestions.length ? `${id}-suggestions` : undefined}
+            onFocus={(event) => { variableField.current = { key: spec.key, element: event.currentTarget } }}
             onChange={(event) => setField(spec, event.target.value)}
           />
         )}
@@ -1373,6 +1436,33 @@ export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, 
         {suggestions.length > 0 && <datalist id={`${id}-suggestions`}>{suggestions.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist>}
       </Field>
     )
+  }
+
+  const acceptsVariables = !isStart && type !== NOTE_TYPE && fields.some((field) => field.kind === "textarea")
+
+  const insertVariable = (token: string) => {
+    const target = variableField.current
+    const spec = target && target.element.isConnected ? fields.find((field) => field.key === target.key) : undefined
+    if (!target || !spec) {
+      const copied = navigator.clipboard?.writeText(token)
+      const ask = () => toast({ title: "Clique num campo de texto", description: `Depois clique em ${token} para inserir.` })
+      if (!copied) {
+        ask()
+        return
+      }
+      void copied.then(() => toast({ title: "Variável copiada", description: `${token} foi copiada. Cole no campo da mensagem.` }), ask)
+      return
+    }
+    const { element } = target
+    const start = element.selectionStart ?? element.value.length
+    const end = element.selectionEnd ?? start
+    setField(spec, `${element.value.slice(0, start)}${token}${element.value.slice(end)}`)
+    const caret = start + token.length
+    requestAnimationFrame(() => {
+      if (!element.isConnected) return
+      element.focus()
+      element.setSelectionRange(caret, caret)
+    })
   }
 
   const renderTechnical = ([key, value]: [string, JsonValue], index: number) => {
@@ -1441,6 +1531,7 @@ export default function NodeConfigPanel({ node, issues = NO_ISSUES, updateData, 
         {isStart && <p className={note}>O início do fluxo não tem configurações. Conecte a saída dele ao primeiro componente do atendimento.</p>}
         {definition && !isStart && fields.length === 0 && <p className={note}>Nenhuma configuração necessária.</p>}
         {fields.length > 0 && <div className="space-y-4">{fields.map(renderField)}</div>}
+        {acceptsVariables && <VariablesBox nodeId={node.id} onInsert={insertVariable} />}
         {placement.loose.length > 0 && <div><Problems items={placement.loose} /></div>}
 
         {API_CHECK_TYPES.has(type) && <ApiValidation nodeId={node.id} type={type} data={payload} onPatch={(patch) => write({ ...payload, ...patch })} onLocate={locateField} />}
